@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  db:
+    build: .
+    container_name: "PostgresSQL API-2026.1"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:${POSTGRES_PORT}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d
+
+volumes:
+  postgres_data:
