@@ -1,1 +1,52 @@
+# Variáveis de ambiente
 .env
+.env.*
+!.env.example
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribuição / build
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Pytest / testes
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy / type checkers
+.mypy_cache/
+.dmypy.json
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# Logs
+*.log
+logs/
+
+# Docker volumes locais
+postgres_data/
+
+# OS
+.DS_Store
+Thumbs.db

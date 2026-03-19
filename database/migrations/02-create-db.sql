@@ -159,7 +159,7 @@ CREATE TABLE "camada_estadual_ambiental" (
   "subtipo" TEXT,
   "nome" TEXT,
   "municipio_id" INT,
-  "geom" "GEOMETRY(GEOMETRY,4326)",
+  "geom" "GEOMETRY(GEOMETRYCOLLECTION,4326)",
   "atributos_json" JSONB
 );
 
