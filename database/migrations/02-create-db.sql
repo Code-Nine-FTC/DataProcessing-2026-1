@@ -35,31 +35,31 @@ CREATE TABLE "processamento" (
 
 CREATE TABLE "estado" (
   "id" SERIAL PRIMARY KEY,
-  "sigla" "VARCHAR(2)",
+  "sigla" VARCHAR(2),
   "nome" TEXT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)"
+  "geom" GEOMETRY(MULTIPOLYGON,4326)
 );
 
 CREATE TABLE "municipio" (
   "id" SERIAL PRIMARY KEY,
-  "codigo_ibge" "VARCHAR(10)",
+  "codigo_ibge" VARCHAR(10),
   "nome" TEXT,
   "estado_id" INT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)"
+  "geom" GEOMETRY(MULTIPOLYGON,4326)
 );
 
 CREATE TABLE "grade_espacial" (
   "id" SERIAL PRIMARY KEY,
   "codigo" TEXT,
   "resolucao" TEXT,
-  "geom" "GEOMETRY(POLYGON,4326)"
+  "geom" GEOMETRY(POLYGON,4326)
 );
 
 CREATE TABLE "bacia_hidrografica" (
   "id" SERIAL PRIMARY KEY,
   "nome" TEXT,
   "codigo" TEXT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)"
+  "geom" GEOMETRY(MULTIPOLYGON,4326)
 );
 
 CREATE TABLE "imovel_rural" (
@@ -71,8 +71,8 @@ CREATE TABLE "imovel_rural" (
   "area_ha" NUMERIC,
   "municipio_id" INT,
   "situacao_cadastral" TEXT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)",
-  "centroid" "GEOMETRY(POINT,4326)",
+  "geom" GEOMETRY(MULTIPOLYGON,4326),
+  "centroid" GEOMETRY(POINT,4326),
   "atributos_json" JSONB
 );
 
@@ -84,7 +84,7 @@ CREATE TABLE "queimada_evento" (
   "fonte_sensor" TEXT,
   "intensidade" NUMERIC,
   "municipio_id" INT,
-  "geom" "GEOMETRY(POINT,4326)",
+  "geom" GEOMETRY(POINT,4326),
   "atributos_json" JSONB
 );
 
@@ -96,7 +96,7 @@ CREATE TABLE "desmatamento_alerta" (
   "tipo_alerta" TEXT,
   "area_ha" NUMERIC,
   "municipio_id" INT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)",
+  "geom" GEOMETRY(MULTIPOLYGON,4326),
   "atributos_json" JSONB
 );
 
@@ -110,7 +110,7 @@ CREATE TABLE "unidade_conservacao" (
   "grupo_snuc" TEXT,
   "area_ha" NUMERIC,
   "municipio_id" INT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)",
+  "geom" GEOMETRY(MULTIPOLYGON,4326),
   "atributos_json" JSONB
 );
 
@@ -122,7 +122,7 @@ CREATE TABLE "terra_indigena" (
   "fase" TEXT,
   "area_ha" NUMERIC,
   "municipio_id" INT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)",
+  "geom" GEOMETRY(MULTIPOLYGON,4326),
   "atributos_json" JSONB
 );
 
@@ -135,7 +135,7 @@ CREATE TABLE "assentamento_rural" (
   "familias" INT,
   "area_ha" NUMERIC,
   "municipio_id" INT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)",
+  "geom" GEOMETRY(MULTIPOLYGON,4326),
   "atributos_json" JSONB
 );
 
@@ -147,7 +147,7 @@ CREATE TABLE "territorio_quilombola" (
   "status_processo" TEXT,
   "area_ha" NUMERIC,
   "municipio_id" INT,
-  "geom" "GEOMETRY(MULTIPOLYGON,4326)",
+  "geom" GEOMETRY(MULTIPOLYGON,4326),
   "atributos_json" JSONB
 );
 
@@ -159,7 +159,7 @@ CREATE TABLE "camada_estadual_ambiental" (
   "subtipo" TEXT,
   "nome" TEXT,
   "municipio_id" INT,
-  "geom" "GEOMETRY(GEOMETRYCOLLECTION,4326)",
+  "geom" GEOMETRY(GEOMETRYCOLLECTION,4326),
   "atributos_json" JSONB
 );
 
@@ -250,7 +250,7 @@ CREATE TABLE "documento_trecho" (
   "documento_id" UUID,
   "ordem" INT,
   "texto" TEXT,
-  "embedding" "VECTOR(768)"
+  "embedding" VECTOR(768)
 );
 
 CREATE TABLE "chat" (
@@ -275,7 +275,7 @@ CREATE TABLE "resposta_sistema" (
   "texto_resposta" TEXT,
   "sql_executado" TEXT,
   "fontes_utilizadas_json" JSONB,
-  "bbox_resultado" "GEOMETRY(POLYGON,4326)",
+  "bbox_resultado" GEOMETRY(POLYGON,4326),
   "tempo_resposta_ms" INT
 );
 
