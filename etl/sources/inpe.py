@@ -18,7 +18,7 @@ from sqlalchemy import text
 sys.path.insert(0, ".")
 from etl.db_connector import get_engine
 from etl.loader import get_or_create_fonte_dado, get_or_create_dataset
-from etl.utils import safe_float, safe_int
+from etl.utils import safe_float, safe_int, pick
 
 CSV_GLOB = "database/docs/bdqueimadas_*.csv"
 
@@ -34,6 +34,17 @@ FONTE = {
 
 # RiscoFogo usa -999 como sentinel de valor nulo
 _RISCO_NULL = -999.0
+
+# Candidatos de nomes de colunas do CSV (varia entre versões do BDQueimadas)
+_LAT            = ("Latitude", "latitude", "LAT", "lat")
+_LON            = ("Longitude", "longitude", "LON", "lon")
+_DATAHORA       = ("DataHora", "data_hora", "DataHora_GMT", "Data")
+_SATELITE       = ("Satelite", "satelite", "Satélite", "SATELITE", "satellite")
+_FRP            = ("FRP", "frp", "Frp", "potencia")
+_BIOMA          = ("Bioma", "bioma", "BIOMA", "biome")
+_DIAS_SEM_CHUVA = ("DiaSemChuva", "dias_sem_chuva", "DiasSemChuva", "Dias_sem_chuva")
+_PRECIPITACAO   = ("Precipitacao", "precipitacao", "Precipitação", "precip")
+_RISCO_FOGO     = ("RiscoFogo", "risco_fogo", "Risco", "RiscoFogo_1km")
 
 
 def _find_csv() -> str | None:
@@ -52,9 +63,48 @@ def run():
     df = pd.read_csv(csv_path, encoding="latin-1")
     df.columns = df.columns.str.strip()
 
+    # Prepara rows antes de abrir transação
+    print(f"[inpe] {len(df)} linhas. Preparando inserção...")
+    rows = []
+    skipped = 0
+
+    for _, row in df.iterrows():
+        lat_raw = pick(row, _LAT)
+        lon_raw = pick(row, _LON)
+        try:
+            lat = float(lat_raw)
+            lon = float(lon_raw)
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
+
+        data_str = str(pick(row, _DATAHORA) or "").strip()
+        try:
+            data_ocorrencia = datetime.strptime(data_str, "%Y/%m/%d %H:%M:%S")
+        except ValueError:
+            data_ocorrencia = None
+
+        rows.append({
+            "id": str(uuid.uuid4()),
+            "id_origem": f"{lat}_{lon}_{data_str}",
+            "dataset_id": None,  # preenchido após criar dataset
+            "data_ocorrencia": data_ocorrencia,
+            "fonte_sensor": str(pick(row, _SATELITE) or "").strip() or None,
+            "intensidade": safe_float(pick(row, _FRP)),
+            "bioma": str(pick(row, _BIOMA) or "").strip() or None,
+            "dias_sem_chuva": safe_int(pick(row, _DIAS_SEM_CHUVA)),
+            "precipitacao_mm": safe_float(pick(row, _PRECIPITACAO), null_sentinel=_RISCO_NULL),
+            "risco_fogo": safe_float(pick(row, _RISCO_FOGO), null_sentinel=_RISCO_NULL),
+            "geom_wkt": f"POINT({lon} {lat})",
+        })
+
+    if skipped:
+        print(f"[inpe] {skipped} linhas ignoradas (sem coordenadas válidas).")
+
     dataset_nome = f"INPE_Queimadas_{os.path.basename(csv_path)}"
     engine = get_engine()
 
+    # Tudo numa única transação — se o INSERT falhar, dataset não é commitado
     with engine.begin() as conn:
         fonte_id = get_or_create_fonte_dado(conn, **FONTE)
         dataset_id, is_new = get_or_create_dataset(
@@ -66,45 +116,12 @@ def run():
             data_referencia=date.today(),
         )
 
-    if not is_new:
-        return
+        if not is_new:
+            return
 
-    print(f"[inpe] {len(df)} linhas. Preparando inserção...")
-    rows = []
-    skipped = 0
+        for r in rows:
+            r["dataset_id"] = dataset_id
 
-    for _, row in df.iterrows():
-        try:
-            lat = float(row["Latitude"])
-            lon = float(row["Longitude"])
-        except (KeyError, ValueError, TypeError):
-            skipped += 1
-            continue
-
-        data_str = str(row.get("DataHora", "")).strip()
-        try:
-            data_ocorrencia = datetime.strptime(data_str, "%Y/%m/%d %H:%M:%S")
-        except ValueError:
-            data_ocorrencia = None
-
-        rows.append({
-            "id": str(uuid.uuid4()),
-            "id_origem": f"{lat}_{lon}_{data_str}",
-            "dataset_id": dataset_id,
-            "data_ocorrencia": data_ocorrencia,
-            "fonte_sensor": str(row.get("Satelite", "")) or None,
-            "intensidade": safe_float(row.get("FRP")),
-            "bioma": str(row.get("Bioma", "")).strip() or None,
-            "dias_sem_chuva": safe_int(row.get("DiaSemChuva")),
-            "precipitacao_mm": safe_float(row.get("Precipitacao"), null_sentinel=_RISCO_NULL),
-            "risco_fogo": safe_float(row.get("RiscoFogo"), null_sentinel=_RISCO_NULL),
-            "geom_wkt": f"POINT({lon} {lat})",
-        })
-
-    if skipped:
-        print(f"[inpe] {skipped} linhas ignoradas (sem coordenadas válidas).")
-
-    with engine.begin() as conn:
         conn.execute(
             text("""
                 INSERT INTO queimada_evento

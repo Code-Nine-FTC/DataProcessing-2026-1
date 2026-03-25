@@ -22,7 +22,7 @@ from sqlalchemy import text
 sys.path.insert(0, ".")
 from etl.db_connector import get_engine
 from etl.loader import get_or_create_fonte_dado, get_or_create_dataset
-from etl.utils import ensure_multipolygon, row_to_json
+from etl.utils import ensure_multipolygon, row_to_json, pick, safe_float
 
 WFS_URL = "http://terrabrasilis.dpi.inpe.br/geoserver/wfs"
 
@@ -55,6 +55,13 @@ DATASET = {
 }
 
 
+_NOME      = ("nome", "NOME", "nm_uc", "NM_UC", "nome_uc", "name")
+_CATEGORIA = ("categoria", "CATEGORIA", "cat", "CAT_UC", "nome_cat")
+_ESFERA    = ("esfera", "ESFERA", "esfera_gov", "ESFERA_GOV")
+_GRUPO     = ("grupo", "GRUPO", "grupo_uc", "GRUPO_STATUS", "DS_GRUPO_STATUS")
+_ID_ORIG   = ("id", "ID", "gid", "FID", "objectid", "cod_uc")
+
+
 def _fetch_biome_layer(layer: str) -> gpd.GeoDataFrame:
     """Baixa uma camada UC do TerraBrasilis via WFS 1.1.0 (sem paginação)."""
     params = {
@@ -74,13 +81,7 @@ def run():
     print("[icmbio] Iniciando ETL...")
     engine = get_engine()
 
-    with engine.begin() as conn:
-        fonte_id = get_or_create_fonte_dado(conn, **FONTE)
-        dataset_id, is_new = get_or_create_dataset(conn, fonte_id, **DATASET)
-
-    if not is_new:
-        return
-
+    # 1. Baixar dados antes de abrir transação
     gdfs = []
     for layer in BIOME_LAYERS:
         print(f"[icmbio] Baixando camada: {layer}...")
@@ -92,29 +93,42 @@ def run():
     print(f"[icmbio] Total bruto (com sobreposição de biomas): {len(gdf)}")
 
     # Deduplica por id_origem (mesma UC pode aparecer em múltiplos biomas)
-    gdf = gdf.drop_duplicates(subset=["id"])
+    id_col = next((c for c in _ID_ORIG if c in gdf.columns), None)
+    if id_col:
+        gdf = gdf.drop_duplicates(subset=[id_col])
     print(f"[icmbio] Após deduplicação: {len(gdf)}")
 
     gdf = gdf.to_crs(epsg=4326)
     print("[icmbio] Preparando inserção...")
 
+    # 2. Preparar rows com nomes normalizados
     rows = []
     for _, row in gdf.iterrows():
         geom = ensure_multipolygon(row.geometry)
         rows.append({
             "id": str(uuid.uuid4()),
-            "id_origem": str(row.get("id", row.name)),
-            "dataset_id": dataset_id,
-            "nome": row.get("nome") or None,
-            "categoria": row.get("categoria") or None,
-            "esfera": row.get("esfera") or None,
-            "grupo_snuc": row.get("grupo") or None,
+            "id_origem": str(pick(row, _ID_ORIG, row.name)),
+            "dataset_id": None,  # preenchido após criar dataset
+            "nome": pick(row, _NOME),
+            "categoria": pick(row, _CATEGORIA),
+            "esfera": pick(row, _ESFERA),
+            "grupo_snuc": pick(row, _GRUPO),
             "area_ha": None,  # não disponível nesta fonte
             "geom_wkt": geom.wkt if geom else None,
             "atributos_json": row_to_json(row),
         })
 
+    # 3. Tudo numa única transação — se o INSERT falhar, dataset não é commitado
     with engine.begin() as conn:
+        fonte_id = get_or_create_fonte_dado(conn, **FONTE)
+        dataset_id, is_new = get_or_create_dataset(conn, fonte_id, **DATASET)
+
+        if not is_new:
+            return
+
+        for r in rows:
+            r["dataset_id"] = dataset_id
+
         conn.execute(
             text("""
                 INSERT INTO unidade_conservacao
