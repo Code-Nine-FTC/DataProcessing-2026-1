@@ -19,18 +19,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("queimada_evento", sa.Column("bioma", sa.Text(), nullable=True))
-    op.add_column("queimada_evento", sa.Column("dias_sem_chuva", sa.Integer(), nullable=True))
-    op.add_column("queimada_evento", sa.Column("precipitacao_mm", sa.Numeric(), nullable=True))
-    op.add_column("queimada_evento", sa.Column("risco_fogo", sa.Numeric(), nullable=True))
-    op.create_index("idx_queimada_bioma", "queimada_evento", ["bioma"])
-    op.create_index("idx_queimada_risco", "queimada_evento", ["risco_fogo"])
+    """ALTER TABLE queimada_evento
+    ADD COLUMN bioma           TEXT,
+    ADD COLUMN dias_sem_chuva  INT,
+    ADD COLUMN precipitacao_mm NUMERIC,
+    ADD COLUMN risco_fogo      NUMERIC;
+
+    -- Índice para filtragem por bioma (muito comum em queries ambientais)
+    CREATE INDEX idx_queimada_bioma ON queimada_evento (bioma);
+
+    -- Índice para análises de risco
+    CREATE INDEX idx_queimada_risco ON queimada_evento (risco_fogo);"""
+    pass
 
 
 def downgrade() -> None:
-    op.drop_index("idx_queimada_risco", table_name="queimada_evento")
-    op.drop_index("idx_queimada_bioma", table_name="queimada_evento")
-    op.drop_column("queimada_evento", "risco_fogo")
-    op.drop_column("queimada_evento", "precipitacao_mm")
-    op.drop_column("queimada_evento", "dias_sem_chuva")
-    op.drop_column("queimada_evento", "bioma")
+    """ALTER TABLE queimada_evento
+    DROP COLUMN bioma,
+    DROP COLUMN dias_sem_chuva,
+    DROP COLUMN precipitacao_mm,
+    DROP COLUMN risco_fogo;
+
+    -- Remove índices
+    DROP INDEX idx_queimada_bioma;
+    DROP INDEX idx_queimada_risco;"""
+    pass
