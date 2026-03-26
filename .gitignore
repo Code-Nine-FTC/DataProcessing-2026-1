@@ -53,3 +53,4 @@ Thumbs.db
 
 alembic/
 .vscode
+alembic.ini
