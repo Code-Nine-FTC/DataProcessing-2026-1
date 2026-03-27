@@ -5,11 +5,11 @@ services:
     build: .
     container_name: "visiona-dev"
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-visiona}
-      POSTGRES_USER: ${POSTGRES_USER:-visiona}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-visiona}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5432:${POSTGRES_PORT:-5432}"
+      - "5432:${POSTGRES_PORT}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
