@@ -8,8 +8,9 @@ import geopandas as gpd
 import requests
 from shapely.geometry import MultiPolygon, Polygon
 
-
-def fetch_wfs(base_url: str, layer: str, batch_size: int = 500) -> gpd.GeoDataFrame:
+# Palmares e INCRA usam WFS 1.1.0 que não suporta startIndex,
+# então eu adicionei um parâmetro para forçar o uso do método antigo de paginação.
+def fetch_wfs(base_url: str, layer: str, batch_size: int = 500, wfs_version: str = "2.0.0") -> gpd.GeoDataFrame:
     """Baixa todas as features de um WFS com paginação automática (WFS 2.0 startIndex)."""
     gdfs, start = [], 0
     params = {

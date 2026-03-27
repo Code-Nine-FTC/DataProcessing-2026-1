@@ -2,7 +2,9 @@
 
 from typing import AsyncGenerator
 
-from sqlalchemy import text
+from sqlalchemy import text, create_engine
+from sqlalchemy.engine import Engine
+
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -50,3 +52,14 @@ class SessionConnection:
     async def session() -> AsyncGenerator[AsyncSession, None]:
         async with Database().session as session:
             yield session
+
+# --IMPORTANTE!!!--
+# Criação de engine síncrona para uso em scripts de ETL e migrações pois 
+# não é necessário o overhead de conexões assíncronas nesses casos. 
+# Para operações normais da API, deve-se usar a classe Database e suas sessões assíncronas.
+# --IMPORTANTE!!!--
+def get_engine() -> Engine:
+    sync_url = settings.DATABASE_URL.replace(
+        "postgresql+asyncpg://", "postgresql+psycopg2://"
+    )
+    return create_engine(sync_url)
