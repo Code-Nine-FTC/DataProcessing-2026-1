@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 sys.path.insert(0, ".")
 sys.path.insert(0, "data-ingestion")
-from models.config.connection import get_engine
+from models.database import get_engine
 from loader import get_or_create_fonte_dado, get_or_create_dataset
 from utils import fetch_wfs, ensure_multipolygon, safe_float, safe_int, row_to_json, pick
 
@@ -55,7 +55,7 @@ def run():
         return
 
     print("[incra] Baixando dados do WFS...")
-    gdf = fetch_wfs(WFS_URL, LAYER)
+    gdf = fetch_wfs(WFS_URL, LAYER, wfs_version="1.1.0")
     if gdf.empty:
         print("[incra] Nenhum dado retornado pelo WFS.")
         return

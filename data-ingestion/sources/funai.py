@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 sys.path.insert(0, ".")
 sys.path.insert(0, "data-ingestion")
-from models.config.connection import get_engine
+from models.database import get_engine
 from loader import get_or_create_fonte_dado, get_or_create_dataset
 from utils import fetch_wfs, ensure_multipolygon, safe_float, row_to_json, pick
 
