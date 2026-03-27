@@ -16,7 +16,7 @@ from sqlalchemy import text
 sys.path.insert(0, ".")
 sys.path.insert(0, "data-ingestion")
 
-from models.config.connection import get_engine  # noqa: E402
+from models.database import get_engine
 from loader import get_or_create_dataset, get_or_create_fonte_dado  # noqa: E402
 from utils import ensure_multipolygon, fetch_wfs, pick, row_to_json  # noqa: E402
 
