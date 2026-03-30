@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str
     POSTGRES_PORT: int
     POSTGRES_DB: str
+    PROJECT_NAME: str = "DataProcessing"
+    LOG_LEVEL: str = "INFO"
 
     @property
     def DATABASE_URL(self) -> str:
