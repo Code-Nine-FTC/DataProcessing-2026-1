@@ -31,7 +31,11 @@ pip install -r requirements.txt
 ### 2. Configuração de Variáveis de Ambiente
 Crie um arquivo `.env` na raiz do projeto:
 ```env
-DATABASE_URL=postgresql+asyncpg://usuario:senha@localhost:5432/nome_do_banco
+POSTGRES_USER = user
+POSTGRES_PASSWORD = password
+POSTGRES_DB = nome_do_banco_de_dados
+POSTGRES_HOST = localhost
+POSTGRES_PORT = 5432
 ```
 
 ### 3. Subir o Banco de Dados
