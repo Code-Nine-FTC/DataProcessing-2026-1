@@ -24,6 +24,7 @@ sys.path.insert(0, "data-ingestion")
 from models.database import get_engine
 from loader import get_or_create_fonte_dado, get_or_create_dataset
 from utils import ensure_multipolygon, row_to_json
+from api.utils.crs_handler import standardize_geodataframe
 
 WFS_URL = "http://terrabrasilis.dpi.inpe.br/geoserver/wfs"
 
@@ -96,7 +97,7 @@ def run():
     gdf = gdf.drop_duplicates(subset=["id"])
     print(f"[icmbio] Após deduplicação: {len(gdf)}")
 
-    gdf = gdf.to_crs(epsg=4326)
+    gdf = standardize_geodataframe(gdf)
     print("[icmbio] Preparando inserção...")
 
     rows = []

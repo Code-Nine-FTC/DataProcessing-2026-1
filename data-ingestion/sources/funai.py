@@ -14,6 +14,7 @@ sys.path.insert(0, "data-ingestion")
 from models.database import get_engine
 from loader import get_or_create_fonte_dado, get_or_create_dataset
 from utils import fetch_wfs, ensure_multipolygon, safe_float, row_to_json, pick
+from api.utils.crs_handler import standardize_geodataframe
 
 WFS_URL = "https://geoserver.funai.gov.br/geoserver/Funai/ows"
 LAYER = "Funai:tis_poligonais"
@@ -58,7 +59,7 @@ def run():
         print("[funai] Nenhum dado retornado pelo WFS.")
         return
 
-    gdf = gdf.to_crs(epsg=4326)
+    gdf = standardize_geodataframe(gdf)
     print(f"[funai] {len(gdf)} registros recebidos. Preparando inserção...")
 
     rows = []
