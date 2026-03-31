@@ -17,9 +17,6 @@ venv/
 env/
 ENV/
 
-# Alembic
-/alembic
-
 # Distribuição / build
 dist/
 build/
