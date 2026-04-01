@@ -7,12 +7,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_HOST: str
     POSTGRES_PORT: int
     POSTGRES_DB: str
+    PROJECT_NAME: str = "DataProcessing"
+    LOG_LEVEL: str = "INFO"
 
     @property
     def DATABASE_URL(self) -> str:
