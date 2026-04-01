@@ -10,6 +10,8 @@ import logging
 from typing import Optional
 from uuid import UUID
 
+from geoalchemy2.elements import WKTElement
+
 from sqlalchemy import cast, func, select, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +34,16 @@ HISTORICO_MAX_TURNOS = 10
 
 def _features_to_geojson(features: list[dict]) -> dict:
     return {"type": "FeatureCollection", "features": features}
+
+
+def _bbox_to_wkt(bbox: list[float]) -> WKTElement:
+    """Converte [minx, miny, maxx, maxy] em WKTElement POLYGON (srid=4326)."""
+    minx, miny, maxx, maxy = bbox
+    wkt = (
+        f"POLYGON(({minx} {miny}, {maxx} {miny}, "
+        f"{maxx} {maxy}, {minx} {maxy}, {minx} {miny}))"
+    )
+    return WKTElement(wkt, srid=4326)
 
 
 def _compute_bbox(features: list[dict]) -> Optional[list[float]]:
@@ -185,6 +197,7 @@ class NLPProcessor:
             consulta_usuario_id=consulta.id,
             texto_resposta=texto,
             fontes_utilizadas_json={"fontes": fontes},
+            bbox_resultado=_bbox_to_wkt(bbox) if bbox else None,
             status=status,
         )
         session.add(resposta)

@@ -32,7 +32,7 @@ DATASET = {
     "nome": f"TI_FUNAI_{date.today().isoformat()}",
     "descricao": "Terras Indígenas do Brasil - GeoServer FUNAI",
     "versao": str(date.today().year),
-    "data_referencia": date.today(),
+    "data_referencia": date(date.today().year - 1, 12, 31),
 }
 
 _NOME = ("terranome", "TERRANOME", "nome_ti", "nome")

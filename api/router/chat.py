@@ -21,7 +21,7 @@ _service = ChatService()
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    async with SessionConnection.session() as session:
+    async for session in SessionConnection.session():
         yield session
 
 
