@@ -19,6 +19,7 @@ sys.path.insert(0, "data-ingestion")
 from models.database import get_engine
 from loader import get_or_create_dataset, get_or_create_fonte_dado  # noqa: E402
 from utils import ensure_multipolygon, fetch_wfs, pick, row_to_json  # noqa: E402
+from api.utils.crs_handler import standardize_geodataframe  # noqa: E402
 
 WFS_URL = "https://datageo.ambiente.sp.gov.br/geoserver/datageo/ows"
 
@@ -73,10 +74,7 @@ def _prepare_rows(gdf, dataset_id: str, layer_cfg: dict):
     if gdf.empty:
         return []
 
-    if gdf.crs and gdf.crs.to_epsg() != 4326:
-        gdf = gdf.to_crs(epsg=4326)
-    elif gdf.crs is None:
-        gdf.set_crs(epsg=4326, inplace=True)
+    gdf = standardize_geodataframe(gdf)
 
     rows = []
     for _, row in gdf.iterrows():
