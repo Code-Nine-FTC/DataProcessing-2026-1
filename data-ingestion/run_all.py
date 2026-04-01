@@ -20,6 +20,7 @@ SOURCES = {
     "inpe": ("sources.inpe", "INPE - Queimadas"),
     "incra": ("sources.incra", "INCRA - Assentamentos Rurais"),
     "palmares": ("sources.palmares", "Palmares - Territórios Quilombolas"),
+    "datageo_sp": ("sources.datageo_sp", "DataGeo SP - Camadas Estaduais"),
 }
 
 

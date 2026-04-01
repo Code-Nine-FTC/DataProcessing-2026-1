@@ -3,8 +3,8 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config.lifespan import lifespan
-from .router.define_routes import define_routes
+from api.config.lifespan import lifespan
+from api.router.define_routes import define_routes
 
 
 def get_application() -> FastAPI:
