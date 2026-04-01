@@ -113,7 +113,7 @@ async def buscar_queimadas(
     )
 
     if municipio:
-        stmt = stmt.where(func.unaccent(func.lower(Municipio.nome)) == func.unaccent(func.lower(municipio)))
+        stmt = stmt.where(func.lower(Municipio.nome) == func.lower(municipio))
     if data_inicio:
         stmt = stmt.where(QueimadaEvento.data_ocorrencia >= datetime.fromisoformat(data_inicio))
     if data_fim:
@@ -190,7 +190,7 @@ async def buscar_desmatamentos(
     )
 
     if municipio:
-        stmt = stmt.where(func.unaccent(func.lower(Municipio.nome)) == func.unaccent(func.lower(municipio)))
+        stmt = stmt.where(func.lower(Municipio.nome) == func.lower(municipio))
     if data_inicio:
         stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
     if data_fim:
@@ -264,12 +264,21 @@ async def buscar_unidades_conservacao(
         .join(Dataset, UnidadeConservacao.dataset_id == Dataset.id, isouter=True)
         .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
         .join(Municipio, UnidadeConservacao.municipio_id == Municipio.id, isouter=True)
-        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
-        .where(Estado.sigla == "SP")
+        .where(
+            func.ST_Intersects(
+                UnidadeConservacao.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
     )
 
     if municipio:
-        stmt = stmt.where(func.unaccent(func.lower(Municipio.nome)) == func.unaccent(func.lower(municipio)))
+        _mun_geom = (
+            select(Municipio.geom)
+            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .scalar_subquery()
+        )
+        stmt = stmt.where(func.ST_Intersects(UnidadeConservacao.geom, _mun_geom))
     if categoria:
         stmt = stmt.where(func.lower(UnidadeConservacao.categoria).contains(categoria.lower()))
     if grupo_snuc:
@@ -338,12 +347,21 @@ async def buscar_terras_indigenas(
         .join(Dataset, TerraIndigena.dataset_id == Dataset.id, isouter=True)
         .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
         .join(Municipio, TerraIndigena.municipio_id == Municipio.id, isouter=True)
-        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
-        .where(Estado.sigla == "SP")
+        .where(
+            func.ST_Intersects(
+                TerraIndigena.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
     )
 
     if municipio:
-        stmt = stmt.where(func.unaccent(func.lower(Municipio.nome)) == func.unaccent(func.lower(municipio)))
+        _mun_geom = (
+            select(Municipio.geom)
+            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .scalar_subquery()
+        )
+        stmt = stmt.where(func.ST_Intersects(TerraIndigena.geom, _mun_geom))
     if fase:
         stmt = stmt.where(func.lower(TerraIndigena.fase).contains(fase.lower()))
 
@@ -409,12 +427,21 @@ async def buscar_assentamentos(
         .join(Dataset, AssentamentoRural.dataset_id == Dataset.id, isouter=True)
         .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
         .join(Municipio, AssentamentoRural.municipio_id == Municipio.id, isouter=True)
-        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
-        .where(Estado.sigla == "SP")
+        .where(
+            func.ST_Intersects(
+                AssentamentoRural.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
     )
 
     if municipio:
-        stmt = stmt.where(func.unaccent(func.lower(Municipio.nome)) == func.unaccent(func.lower(municipio)))
+        _mun_geom = (
+            select(Municipio.geom)
+            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .scalar_subquery()
+        )
+        stmt = stmt.where(func.ST_Intersects(AssentamentoRural.geom, _mun_geom))
     if modalidade:
         stmt = stmt.where(func.lower(AssentamentoRural.modalidade).contains(modalidade.lower()))
 
@@ -478,12 +505,21 @@ async def buscar_territorios_quilombolas(
         .join(Dataset, TerritorioQuilombola.dataset_id == Dataset.id, isouter=True)
         .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
         .join(Municipio, TerritorioQuilombola.municipio_id == Municipio.id, isouter=True)
-        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
-        .where(Estado.sigla == "SP")
+        .where(
+            func.ST_Intersects(
+                TerritorioQuilombola.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
     )
 
     if municipio:
-        stmt = stmt.where(func.unaccent(func.lower(Municipio.nome)) == func.unaccent(func.lower(municipio)))
+        _mun_geom = (
+            select(Municipio.geom)
+            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .scalar_subquery()
+        )
+        stmt = stmt.where(func.ST_Intersects(TerritorioQuilombola.geom, _mun_geom))
 
     rows = (await session.execute(stmt)).all()
 
@@ -547,14 +583,23 @@ async def buscar_imoveis_rurais(
         .join(Dataset, ImovelRural.dataset_id == Dataset.id, isouter=True)
         .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
         .join(Municipio, ImovelRural.municipio_id == Municipio.id, isouter=True)
-        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
-        .where(Estado.sigla == "SP")
+        .where(
+            func.ST_Intersects(
+                ImovelRural.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
     )
 
     if codigo_car:
         stmt = stmt.where(ImovelRural.codigo_car == codigo_car)
     if municipio:
-        stmt = stmt.where(func.unaccent(func.lower(Municipio.nome)) == func.unaccent(func.lower(municipio)))
+        _mun_geom = (
+            select(Municipio.geom)
+            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .scalar_subquery()
+        )
+        stmt = stmt.where(func.ST_Intersects(ImovelRural.geom, _mun_geom))
 
     stmt = stmt.limit(limite)
     rows = (await session.execute(stmt)).all()
@@ -608,7 +653,7 @@ async def buscar_documentos_rag(
 
     # Cosine distance search usando pgvector
     distance_expr = DocumentoTrecho.embedding.op("<->")(
-        cast(query_embedding, Vector(1536))
+        cast(query_embedding, Vector(768))
     )
 
     stmt = (

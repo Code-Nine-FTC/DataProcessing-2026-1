@@ -436,7 +436,7 @@ class RespostaSistema(Base):
     texto_resposta: Mapped[Optional[str]] = mapped_column(TEXT)
     sql_executado: Mapped[Optional[str]] = mapped_column(TEXT)
     fontes_utilizadas_json: Mapped[Optional[dict]] = mapped_column(JSONB)
-    bbox_resultado: Mapped[Any] = mapped_column(Geometry("POLYGON", srid=4326))
+    bbox_resultado: Mapped[Optional[Any]] = mapped_column(Geometry("POLYGON", srid=4326), nullable=True)
     tempo_resposta_ms: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(
         String, 
