@@ -390,7 +390,7 @@ class DocumentoTrecho(Base):
     documento_id: Mapped[UUID] = mapped_column(ForeignKey("documento.id"))
     texto: Mapped[Optional[str]] = mapped_column(TEXT)
     ordem: Mapped[Optional[int]] = mapped_column(Integer)
-    embedding: Mapped[Vector] = mapped_column(Vector(1536))
+    embedding: Mapped[Vector] = mapped_column(Vector(768))  # paraphrase-multilingual-mpnet-base-v2
     tokens_count: Mapped[Optional[int]] = mapped_column(Integer)
     __table_args__ = (
         Index(
