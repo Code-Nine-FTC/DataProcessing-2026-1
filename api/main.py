@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config.lifespan import lifespan
 from api.router.define_routes import define_routes
+from api.utils.log import Log
+
 
 
 def get_application() -> FastAPI:
@@ -26,6 +28,7 @@ def get_application() -> FastAPI:
 app = get_application()
 
 define_routes(app)
+Log()
 
 if __name__ == "__main__":
     uvicorn.run(

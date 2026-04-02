@@ -91,45 +91,69 @@ class Municipio(Base):
         query = text("""
             WITH cte_imoveis AS (
                 SELECT municipio_id, jsonb_agg(jsonb_build_object(
-                    'id', id::text, 'nome', nome_imovel, 'area_ha', area_ha,
-                    'geom', ST_AsText(geom), 'atributos_json', atributos_json
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome_imovel, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
                 )) AS dados FROM imovel_rural 
-                WHERE (:mun_id IS NULL OR municipio_id = :mun_id) GROUP BY municipio_id
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
             ),
             cte_ucs AS (
                 SELECT municipio_id, jsonb_agg(jsonb_build_object(
-                    'id', id::text, 'nome', nome, 'area_ha', area_ha,
-                    'geom', ST_AsText(geom), 'atributos_json', atributos_json
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
                 )) AS dados FROM unidade_conservacao 
-                WHERE (:mun_id IS NULL OR municipio_id = :mun_id) GROUP BY municipio_id
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
             ),
             cte_tis AS (
                 SELECT municipio_id, jsonb_agg(jsonb_build_object(
-                    'id', id::text, 'nome', nome, 'area_ha', area_ha,
-                    'geom', ST_AsText(geom), 'atributos_json', atributos_json
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
                 )) AS dados FROM terra_indigena 
-                WHERE (:mun_id IS NULL OR municipio_id = :mun_id) GROUP BY municipio_id
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
             ),
             cte_assentamentos AS (
                 SELECT municipio_id, jsonb_agg(jsonb_build_object(
-                    'id', id::text, 'nome', nome, 'area_ha', area_ha,
-                    'geom', ST_AsText(geom), 'atributos_json', atributos_json
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
                 )) AS dados FROM assentamento_rural 
-                WHERE (:mun_id IS NULL OR municipio_id = :mun_id) GROUP BY municipio_id
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
             ),
             cte_quilombolas AS (
                 SELECT municipio_id, jsonb_agg(jsonb_build_object(
-                    'id', id::text, 'nome', nome, 'area_ha', area_ha,
-                    'geom', ST_AsText(geom), 'atributos_json', atributos_json
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
                 )) AS dados FROM territorio_quilombola 
-                WHERE (:mun_id IS NULL OR municipio_id = :mun_id) GROUP BY municipio_id
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
             ),
             cte_alertas AS (
                 SELECT municipio_id, jsonb_agg(jsonb_build_object(
-                    'id', id::text, 'nome', tipo_alerta, 'area_ha', area_ha,
-                    'geom', ST_AsText(geom), 'atributos_json', atributos_json
+                    'id', CAST(id AS TEXT), 
+                    'nome', tipo_alerta, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
                 )) AS dados FROM desmatamento_alerta 
-                WHERE (:mun_id IS NULL OR municipio_id = :mun_id) GROUP BY municipio_id
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
             )
 
             SELECT 
@@ -138,7 +162,8 @@ class Municipio(Base):
                 m.codigo_ibge, 
                 e.sigla AS estado_sigla,
                 ST_AsText(m.geom) AS geom,
-                COALESCE(i.dados, '[]'::jsonb) AS imoveis_rurais,
+                -- ATENÇÃO: Verifique se no seu Schema Pydantic é 'imovel_rural' ou 'imoveis_rurais'
+                COALESCE(i.dados, '[]'::jsonb) AS imovel_rural, 
                 COALESCE(u.dados, '[]'::jsonb) AS unidades_conservacao,
                 COALESCE(t.dados, '[]'::jsonb) AS terras_indigenas,
                 COALESCE(s.dados, '[]'::jsonb) AS assentamentos,
@@ -152,7 +177,7 @@ class Municipio(Base):
             LEFT JOIN cte_assentamentos s ON m.id = s.municipio_id
             LEFT JOIN cte_quilombolas q  ON m.id = q.municipio_id
             LEFT JOIN cte_alertas a      ON m.id = a.municipio_id
-            WHERE (:mun_id IS NULL OR m.id = :mun_id)
+            WHERE (CAST(:mun_id AS INTEGER) IS NULL OR m.id = CAST(:mun_id AS INTEGER))
         """)
 
         result = await session.execute(query, {"mun_id": municipio_id})

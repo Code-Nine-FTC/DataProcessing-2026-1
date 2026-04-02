@@ -12,12 +12,13 @@ class MunicipalHandler:
         self._session = session
         self._municipio_id = municipio_id
         self._data: list[ResponseMunicipal] = []
+        self._log = Log()
 
     async def execute(self) -> BasicResponse[list[ResponseMunicipal]]:
         try:
-            return await self._fetch_data()
+            return BasicResponse(data=self._data)
         except Exception as e:
-            Log.error(f"Erro ao buscar dados: {e}")
+            self._log.error(msg=f"Erro ao buscar dados: {e}")
             raise HTTPException(
                 status_code=e.status_code,
                 detail=f"Erro: {e.detail}",

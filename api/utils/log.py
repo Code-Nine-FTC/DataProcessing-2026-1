@@ -2,7 +2,7 @@
 import logging
 import sys
 from .common import Singleton
-from config import settings
+from api.config.settings import settings
 import sys as _sys
 
 
