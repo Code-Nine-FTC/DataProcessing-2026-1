@@ -17,6 +17,7 @@ from etl.transformers import GeometricTransformer
 from etl.loaders import GeometricLoader
 from etl.pipeline import BasePipeline
 from infrastructure.wfs_client import WFSClient, WFSRequest
+from infrastructure.repositories import MunicipioRepository
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ _FAMILIAS = ("QTDE_FAMIL", "num_familias", "familias", "QT_FAMILIA")
 _MODALIDADE = ("MODALI", "modalidade", "MODALIDADE", "mod")
 _AREA = ("AREA_HECTA", "area_ha", "AREA_HA", "area")
 _ID_ORIG = ("CD_SIPRA", "cod_sipra", "gid", "FID", "id")
+_MUNICIPIO = ("MUNICIPIO", "municipio", "NOM_MUNICI", "mun_nome")
+_UF_SIGLA = ("UF", "uf", "SIGLA_UF", "sigla_uf", "SIG_UF")
 
 
 class INCRAExtractor(WFSExtractor):
@@ -83,12 +86,17 @@ class INCRAExtractor(WFSExtractor):
 class INCRATransformer(GeometricTransformer):
     """Transformador para dados de Assentamentos."""
 
-    def __init__(self):
+    def __init__(self, municipio_repo: MunicipioRepository):
         super().__init__(table_name="assentamento_rural")
+        self.municipio_repo = municipio_repo
 
     def transform_feature(self, feature: dict) -> TransformedRecord:
-        """Transforma feature de assentamento."""
+        """Transforma feature de assentamento. Filtra apenas SP."""
         props = feature.get("properties", feature)
+
+        uf = self.pick(props, _UF_SIGLA)
+        if uf and str(uf).upper() != "SP":
+            return None
 
         geometry = feature.get("geometry")
         geom_wkt = None
@@ -98,6 +106,16 @@ class INCRATransformer(GeometricTransformer):
             geom = self.ensure_multipolygon(geom)
             if geom:
                 geom_wkt = geom.wkt
+
+        municipio_nome = self.pick(props, _MUNICIPIO)
+        municipio_id = None
+        if municipio_nome and uf:
+            try:
+                municipio_id = self.municipio_repo.find_by_name_and_state(
+                    municipio_nome, uf
+                )
+            except Exception as e:
+                logger.warning(f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}")
 
         return TransformedRecord(
             id=str(uuid4()),
@@ -109,6 +127,7 @@ class INCRATransformer(GeometricTransformer):
                 "modalidade": self.pick(props, _MODALIDADE),
                 "familias": self.safe_int(self.pick(props, _FAMILIAS)),
                 "area_ha": self.safe_float(self.pick(props, _AREA)),
+                "municipio_id": municipio_id,
                 "atributos_json": self.row_to_json(props),
             },
         )
@@ -125,10 +144,10 @@ class INCRALoader(GeometricLoader):
         return """
             INSERT INTO assentamento_rural
                 (id, id_origem, dataset_id, nome, modalidade, familias,
-                 area_ha, geom, atributos_json)
+                 area_ha, municipio_id, geom, atributos_json)
             VALUES
                 (:id, :id_origem, :dataset_id, :nome, :modalidade, :familias,
-                 :area_ha,
+                 :area_ha, :municipio_id,
                  ST_GeomFromText(:geom_wkt, 4326),
                  CAST(:atributos_json AS JSONB))
         """
@@ -146,8 +165,9 @@ class INCRAPipeline(BasePipeline):
 
 def create_pipeline(engine, wfs_client: WFSClient):
     """Factory para criar pipeline de INCRA."""
+    municipio_repo = MunicipioRepository(engine)
     extractor = INCRAExtractor(wfs_client)
-    transformer = INCRATransformer()
+    transformer = INCRATransformer(municipio_repo)
     loader = INCRALoader(engine)
 
     return INCRAPipeline(

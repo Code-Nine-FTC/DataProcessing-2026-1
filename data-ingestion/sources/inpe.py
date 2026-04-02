@@ -8,6 +8,7 @@ Tipo: Pontos (geometria POINT, não MULTIPOLYGON)
 """
 import logging
 from datetime import datetime, date
+from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
@@ -108,9 +109,10 @@ class INPEExtractor(CSVExtractor):
     """Extrator para dados de queimadas do INPE."""
 
     def __init__(self):
+        _csv_dir = Path(__file__).parents[2] / "models" / "docs"
         super().__init__(
             INPE_SOURCE,
-            csv_pattern="/home/joyce/Documents/fatec/api/DataProcessing-2026-1/models/docs/bdqueimadas_*.csv",
+            csv_pattern=str(_csv_dir / "bdqueimadas_*.csv"),
         )
 
 

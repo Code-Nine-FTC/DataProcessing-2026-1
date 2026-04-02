@@ -21,6 +21,7 @@ from etl.transformers import GeometricTransformer
 from etl.loaders import GeometricLoader
 from etl.pipeline import BasePipeline
 from infrastructure.wfs_client import WFSClient
+from infrastructure.repositories import MunicipioRepository
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,8 @@ _CATEGORIA = ("categoria", "CATEGORIA", "cat", "CAT_UC", "nome_cat")
 _ESFERA = ("esfera", "ESFERA", "esfera_gov", "ESFERA_GOV")
 _GRUPO = ("grupo", "GRUPO", "grupo_uc", "GRUPO_STATUS", "DS_GRUPO_STATUS")
 _ID_ORIG = ("id", "ID", "gid", "FID", "objectid", "cod_uc")
+_MUNICIPIO = ("municipio", "MUNICIPIO", "mun_nome", "nm_municipio")
+_UF_SIGLA = ("uf", "UF", "sigla_uf", "SIGLA_UF", "estado")
 
 
 def _pick(record: dict, candidates: tuple, default=None):
@@ -129,13 +132,18 @@ class ICMBioExtractor(WFSExtractor):
 class ICMBioTransformer(GeometricTransformer):
     """Transformador para dados de ICMBio."""
 
-    def __init__(self):
+    def __init__(self, municipio_repo: MunicipioRepository):
         super().__init__(table_name="unidade_conservacao")
+        self.municipio_repo = municipio_repo
 
     def transform_feature(self, feature: dict) -> TransformedRecord:
-        """Transforma uma feature de UC."""
+        """Transforma uma feature de UC. Filtra apenas SP quando possível."""
         # GeoJSON pode vir como properties ou como fields diretos
         props = feature.get("properties", feature)
+
+        uf = self.pick(props, _UF_SIGLA)
+        if uf and str(uf).upper() != "SP":
+            return None
 
         geometry = feature.get("geometry")
         geom_wkt = None
@@ -145,6 +153,16 @@ class ICMBioTransformer(GeometricTransformer):
             geom = self.ensure_multipolygon(geom)
             if geom:
                 geom_wkt = geom.wkt
+
+        municipio_nome = self.pick(props, _MUNICIPIO)
+        municipio_id = None
+        if municipio_nome and uf:
+            try:
+                municipio_id = self.municipio_repo.find_by_name_and_state(
+                    municipio_nome, uf
+                )
+            except Exception as e:
+                logger.warning(f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}")
 
         return TransformedRecord(
             id=str(uuid4()),
@@ -157,6 +175,7 @@ class ICMBioTransformer(GeometricTransformer):
                 "esfera": self.pick(props, _ESFERA),
                 "grupo_snuc": self.pick(props, _GRUPO),
                 "area_ha": None,  # Não disponível nesta fonte
+                "municipio_id": municipio_id,
                 "atributos_json": self.row_to_json(props),
             },
         )
@@ -173,10 +192,10 @@ class ICMBioLoader(GeometricLoader):
         return """
             INSERT INTO unidade_conservacao
                 (id, id_origem, dataset_id, nome, categoria, esfera,
-                 grupo_snuc, area_ha, geom, atributos_json)
+                 grupo_snuc, area_ha, municipio_id, geom, atributos_json)
             VALUES
                 (:id, :id_origem, :dataset_id, :nome, :categoria, :esfera,
-                 :grupo_snuc, :area_ha,
+                 :grupo_snuc, :area_ha, :municipio_id,
                  ST_GeomFromText(:geom_wkt, 4326),
                  CAST(:atributos_json AS JSONB))
         """
@@ -194,8 +213,9 @@ class ICMBioPipeline(BasePipeline):
 
 def create_pipeline(engine, wfs_client: WFSClient):
     """Factory para criar pipeline de ICMBio."""
+    municipio_repo = MunicipioRepository(engine)
     extractor = ICMBioExtractor(wfs_client)
-    transformer = ICMBioTransformer()
+    transformer = ICMBioTransformer(municipio_repo)
     loader = ICMBioLoader(engine)
 
     return ICMBioPipeline(

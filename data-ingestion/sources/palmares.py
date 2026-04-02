@@ -16,6 +16,7 @@ from etl.transformers import GeometricTransformer
 from etl.loaders import GeometricLoader
 from etl.pipeline import BasePipeline
 from infrastructure.wfs_client import WFSClient, WFSRequest
+from infrastructure.repositories import MunicipioRepository
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ _NOME = ("NOME_COMU", "nome_comunidade", "NOME", "nome", "NM_COMUNI")
 _STATUS = ("STATUS", "status_processo", "FASE", "fase", "SIT_FUNDO")
 _AREA = ("AREA_HA", "area_ha", "AREA_HECTA", "area")
 _ID_ORIG = ("NR_PROCES", "nr_processo", "gid", "FID", "id")
+_MUNICIPIO = ("MUNICIPIO", "municipio", "NOM_MUNICI", "mun_nome")
+_UF_SIGLA = ("UF", "uf", "SIGLA_UF", "sigla_uf", "SIG_UF")
 
 
 class PalmaresExtractor(WFSExtractor):
@@ -80,12 +83,17 @@ class PalmaresExtractor(WFSExtractor):
 class PalmaresTransformer(GeometricTransformer):
     """Transformador para dados de Territórios Quilombolas."""
 
-    def __init__(self):
+    def __init__(self, municipio_repo: MunicipioRepository):
         super().__init__(table_name="territorio_quilombola")
+        self.municipio_repo = municipio_repo
 
     def transform_feature(self, feature: dict) -> TransformedRecord:
-        """Transforma feature de território quilombola."""
+        """Transforma feature de território quilombola. Filtra apenas SP."""
         props = feature.get("properties", feature)
+
+        uf = self.pick(props, _UF_SIGLA)
+        if uf and str(uf).upper() != "SP":
+            return None
 
         geometry = feature.get("geometry")
         geom_wkt = None
@@ -96,6 +104,16 @@ class PalmaresTransformer(GeometricTransformer):
             if geom:
                 geom_wkt = geom.wkt
 
+        municipio_nome = self.pick(props, _MUNICIPIO)
+        municipio_id = None
+        if municipio_nome and uf:
+            try:
+                municipio_id = self.municipio_repo.find_by_name_and_state(
+                    municipio_nome, uf
+                )
+            except Exception as e:
+                logger.warning(f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}")
+
         return TransformedRecord(
             id=str(uuid4()),
             id_origem=str(self.pick(props, _ID_ORIG)),
@@ -104,6 +122,7 @@ class PalmaresTransformer(GeometricTransformer):
             attributes={
                 "nome": self.pick(props, _NOME),
                 "area_ha": self.safe_float(self.pick(props, _AREA)),
+                "municipio_id": municipio_id,
                 "atributos_json": self.row_to_json(props),
             },
         )
@@ -120,9 +139,10 @@ class PalmaresLoader(GeometricLoader):
         return """
             INSERT INTO territorio_quilombola
                 (id, id_origem, dataset_id, nome, area_ha,
-                 geom, atributos_json)
+                 municipio_id, geom, atributos_json)
             VALUES
                 (:id, :id_origem, :dataset_id, :nome, :area_ha,
+                 :municipio_id,
                  ST_GeomFromText(:geom_wkt, 4326),
                  CAST(:atributos_json AS JSONB))
         """
@@ -140,8 +160,9 @@ class PalmaresPipeline(BasePipeline):
 
 def create_pipeline(engine, wfs_client: WFSClient):
     """Factory para criar pipeline de Palmares."""
+    municipio_repo = MunicipioRepository(engine)
     extractor = PalmaresExtractor(wfs_client)
-    transformer = PalmaresTransformer()
+    transformer = PalmaresTransformer(municipio_repo)
     loader = PalmaresLoader(engine)
 
     return PalmaresPipeline(

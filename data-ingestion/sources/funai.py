@@ -17,6 +17,7 @@ from etl.transformers import GeometricTransformer
 from etl.loaders import GeometricLoader
 from etl.pipeline import BasePipeline
 from infrastructure.wfs_client import WFSClient, WFSRequest
+from infrastructure.repositories import MunicipioRepository
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +31,12 @@ FUNAI_SOURCE = DataSource(
     license="Dados Abertos Gov",
 )
 
-_NOME = ("terranome", "TERRANOME", "nome_ti", "nome")
+_NOME = ("terrai_nome", "terranome", "TERRANOME", "nome_ti", "nome")
 _FASE = ("fase_ti", "FASE_TI", "fase", "situacao")
-_AREA = ("areaoficia", "AREAOFICIA", "area_ha", "area")
-_ID_ORIG = ("gid", "FID", "cod_ti", "id")
+_AREA = ("superficie_perimetro_ha", "areaoficia", "AREAOFICIA", "area_ha", "area")
+_ID_ORIG = ("gid", "terrai_codigo", "FID", "cod_ti", "id")
+_MUNICIPIO = ("municipio_nome", "municipio", "MUNICIPIO", "mun_nome")
+_UF_SIGLA = ("uf_sigla", "UF", "uf", "sigla_uf")
 
 
 class FUNAIExtractor(WFSExtractor):
@@ -46,12 +49,17 @@ class FUNAIExtractor(WFSExtractor):
 class FUNAITransformer(GeometricTransformer):
     """Transformador para dados de Terras Indígenas."""
 
-    def __init__(self):
+    def __init__(self, municipio_repo: MunicipioRepository):
         super().__init__(table_name="terra_indigena")
+        self.municipio_repo = municipio_repo
 
     def transform_feature(self, feature: dict) -> TransformedRecord:
-        """Transforma feature de terra indígena."""
+        """Transforma feature de terra indígena. Filtra apenas SP."""
         props = feature.get("properties", feature)
+
+        uf = self.pick(props, _UF_SIGLA)
+        if uf and str(uf).upper() != "SP":
+            return None
 
         geometry = feature.get("geometry")
         geom_wkt = None
@@ -62,6 +70,16 @@ class FUNAITransformer(GeometricTransformer):
             if geom:
                 geom_wkt = geom.wkt
 
+        municipio_nome = self.pick(props, _MUNICIPIO)
+        municipio_id = None
+        if municipio_nome and uf:
+            try:
+                municipio_id = self.municipio_repo.find_by_name_and_state(
+                    municipio_nome, uf
+                )
+            except Exception as e:
+                logger.warning(f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}")
+
         return TransformedRecord(
             id=str(uuid4()),
             id_origem=str(self.pick(props, _ID_ORIG)),
@@ -71,6 +89,7 @@ class FUNAITransformer(GeometricTransformer):
                 "nome": self.pick(props, _NOME),
                 "fase": self.pick(props, _FASE),
                 "area_ha": self.safe_float(self.pick(props, _AREA)),
+                "municipio_id": municipio_id,
                 "atributos_json": self.row_to_json(props),
             },
         )
@@ -87,9 +106,10 @@ class FUNAILoader(GeometricLoader):
         return """
             INSERT INTO terra_indigena
                 (id, id_origem, dataset_id, nome, fase, area_ha,
-                 geom, atributos_json)
+                 municipio_id, geom, atributos_json)
             VALUES
                 (:id, :id_origem, :dataset_id, :nome, :fase, :area_ha,
+                 :municipio_id,
                  ST_GeomFromText(:geom_wkt, 4326),
                  CAST(:atributos_json AS JSONB))
         """
@@ -107,8 +127,9 @@ class FUNAIPipeline(BasePipeline):
 
 def create_pipeline(engine, wfs_client: WFSClient):
     """Factory para criar pipeline de FUNAI."""
+    municipio_repo = MunicipioRepository(engine)
     extractor = FUNAIExtractor(wfs_client)
-    transformer = FUNAITransformer()
+    transformer = FUNAITransformer(municipio_repo)
     loader = FUNAILoader(engine)
 
     return FUNAIPipeline(

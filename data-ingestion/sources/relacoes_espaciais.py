@@ -256,7 +256,6 @@ class SpatialRelationshipPostProcessor:
 
         try:
             from sources.inpe import link_queimadas_to_municipios
-
             link_queimadas_to_municipios(self.engine)
         except Exception as e:
             logger.warning(
