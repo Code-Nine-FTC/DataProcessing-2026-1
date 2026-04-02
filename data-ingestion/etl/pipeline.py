@@ -70,13 +70,22 @@ class BasePipeline(IPipeline, ABC):
                 data_referencia=date.today(),
             )
 
-            # If dataset already exists, skip (avoid duplicates)
-            if not is_new:
-                logger.warning("Dataset already imported - skipping")
+            already_loaded = self.loader.count_rows_for_dataset(dataset_id)
+            if not is_new and already_loaded > 0:
+                logger.warning(
+                    "Dataset already imported (%s rows in %s) — skipping duplicate load",
+                    already_loaded,
+                    self.loader.table_name,
+                )
                 return LoadResult(
                     total_records=0,
                     inserted_records=0,
                     failed_records=0,
+                )
+            if not is_new and already_loaded == 0:
+                logger.info(
+                    "Dataset existe em catálogo mas %s está vazio — executando carga",
+                    self.loader.table_name,
                 )
 
             # 4. Transform

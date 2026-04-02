@@ -8,18 +8,83 @@ Tipo: Pontos (geometria POINT, não MULTIPOLYGON)
 """
 import logging
 from datetime import datetime, date
+from typing import Optional
 from uuid import uuid4
 
-from core.models import ExtractedData, TransformedRecord, DataSource
+from sqlalchemy import text
+
+from core.models import ExtractedData, TransformedRecord, DataSource, LoadResult
 from etl.extractors import CSVExtractor
 from etl.transformers import BaseTransformer
-from etl.loaders import BaseLoader
+from etl.loaders import GeometricLoader
 from etl.pipeline import BasePipeline
 
 logger = logging.getLogger(__name__)
 
-# Sentinel para valores nulos em RiscoFogo
-_RISCO_NULL = -999.0
+
+def link_queimadas_to_municipios(engine, dataset_id: Optional[str] = None) -> None:
+    """
+    Preenche queimada_evento.municipio_id:
+    1) ST_Contains(municipio.geom, ponto) quando geometrias de município existem;
+    2) fallback por nome (atributos_json Municipio + Estado, como no CSV INPE).
+    """
+    ds_clause = ""
+    params: dict = {}
+    if dataset_id:
+        ds_clause = " AND qe.dataset_id = CAST(:ds AS uuid)"
+        params["ds"] = dataset_id
+
+    with engine.begin() as conn:
+        r1 = conn.execute(
+            text(
+                f"""
+            WITH matched AS (
+              SELECT DISTINCT ON (qe.id) qe.id AS qe_id, m.id AS mun_id
+              FROM queimada_evento qe
+              INNER JOIN municipio m ON ST_Contains(m.geom, qe.geom)
+              WHERE qe.municipio_id IS NULL
+              {ds_clause}
+              ORDER BY qe.id, m.id
+            )
+            UPDATE queimada_evento qe
+            SET municipio_id = matched.mun_id
+            FROM matched
+            WHERE qe.id = matched.qe_id
+            """
+            ),
+            params,
+        )
+        r2 = conn.execute(
+            text(
+                f"""
+            UPDATE queimada_evento qe
+            SET municipio_id = m.id
+            FROM municipio m
+            INNER JOIN estado e ON e.id = m.estado_id
+            WHERE qe.municipio_id IS NULL
+            {ds_clause}
+            AND LENGTH(TRIM(COALESCE(qe.atributos_json->>'Municipio', ''))) > 0
+            AND UPPER(TRIM(m.nome)) = UPPER(TRIM(qe.atributos_json->>'Municipio'))
+            AND (
+              UPPER(TRIM(COALESCE(e.nome, '')))
+                = UPPER(TRIM(COALESCE(qe.atributos_json->>'Estado', '')))
+              OR (
+                LENGTH(TRIM(COALESCE(qe.atributos_json->>'Estado', ''))) = 2
+                AND UPPER(TRIM(COALESCE(e.sigla, '')))
+                  = UPPER(TRIM(COALESCE(qe.atributos_json->>'Estado', '')))
+              )
+            )
+            """
+            ),
+            params,
+        )
+
+    logger.info(
+        "queimada_evento: municipio_id atualizados — por geometria: %s, por nome (CSV): %s",
+        getattr(r1, "rowcount", -1),
+        getattr(r2, "rowcount", -1),
+    )
+
 
 INPE_SOURCE = DataSource(
     name="INPE - BDQueimadas",
@@ -37,11 +102,6 @@ _LON = ("Longitude", "longitude", "LON", "lon")
 _DATAHORA = ("DataHora", "data_hora", "DataHora_GMT", "Data")
 _SATELITE = ("Satelite", "satelite", "Satélite", "SATELITE", "satellite")
 _FRP = ("FRP", "frp", "Frp", "potencia")
-_BIOMA = ("Bioma", "bioma", "BIOMA", "biome")
-_DIAS_SEM_CHUVA = ("DiaSemChuva", "dias_sem_chuva", "DiasSemChuva", "Dias_sem_chuva")
-_PRECIPITACAO = ("Precipitacao", "precipitacao", "Precipitação", "precip")
-_RISCO_FOGO = ("RiscoFogo", "risco_fogo", "Risco", "RiscoFogo_1km")
-_ID_ORIG = ("Latitude", "latitude", "LAT", "lat")  # (lat_lon_data para ID)
 
 
 class INPEExtractor(CSVExtractor):
@@ -101,18 +161,8 @@ class INPETransformer(BaseTransformer):
                             self.pick(row_dict, _SATELITE) or ""
                         ).strip() or None,
                         "intensidade": self.safe_float(self.pick(row_dict, _FRP)),
-                        "bioma": str(self.pick(row_dict, _BIOMA) or "").strip() or None,
-                        "dias_sem_chuva": self.safe_int(
-                            self.pick(row_dict, _DIAS_SEM_CHUVA)
-                        ),
-                        "precipitacao_mm": self.safe_float(
-                            self.pick(row_dict, _PRECIPITACAO),
-                            null_sentinel=_RISCO_NULL,
-                        ),
-                        "risco_fogo": self.safe_float(
-                            self.pick(row_dict, _RISCO_FOGO),
-                            null_sentinel=_RISCO_NULL,
-                        ),
+                        # Demais colunas do CSV ficam em atributos_json (schema atual
+                        # só expõe data_ocorrencia, fonte_sensor, intensidade além de geom).
                         "atributos_json": self.row_to_json(row_dict),
                     },
                 )
@@ -128,23 +178,32 @@ class INPETransformer(BaseTransformer):
         return records
 
 
-class INPELoader(BaseLoader):
-    """Carregador para eventos de queimada."""
+class INPELoader(GeometricLoader):
+    """Carregador para eventos de queimada (usa merge de atributos + WKT como GeometricLoader)."""
 
     def __init__(self, engine):
         super().__init__(engine, table_name="queimada_evento")
+
+    def load(self, records, dataset_id: str) -> LoadResult:
+        result = super().load(records, dataset_id)
+        if result.inserted_records > 0:
+            try:
+                link_queimadas_to_municipios(self.engine, dataset_id)
+            except Exception as e:
+                logger.warning(
+                    "Falha ao vincular queimadas a municípios após carga: %s", e
+                )
+        return result
 
     def get_insert_query(self) -> str:
         """Query de inserção para queimada_evento."""
         return """
             INSERT INTO queimada_evento
                 (id, id_origem, dataset_id, data_ocorrencia, fonte_sensor,
-                 intensidade, bioma, dias_sem_chuva, precipitacao_mm,
-                 risco_fogo, geom, atributos_json)
+                 intensidade, geom, atributos_json)
             VALUES
                 (:id, :id_origem, :dataset_id, :data_ocorrencia, :fonte_sensor,
-                 :intensidade, :bioma, :dias_sem_chuva, :precipitacao_mm,
-                 :risco_fogo,
+                 :intensidade,
                  ST_GeomFromText(:geom_wkt, 4326),
                  CAST(:atributos_json AS JSONB))
         """

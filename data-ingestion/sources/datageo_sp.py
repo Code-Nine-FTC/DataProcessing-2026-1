@@ -82,12 +82,15 @@ class DataGeoSPExtractor(BaseExtractor):
             try:
                 gdf = self.wfs_client.fetch_all(request)
                 if not gdf.empty:
-                    # Adicionar informações de camada
+                    # Escalares ok em colunas; tuplas (_id_fields/_nome_fields) quebram o
+                    # alinhamento do pandas (Length of values does not match index).
                     gdf["_tema"] = layer_cfg["tema"]
                     gdf["_subtipo"] = layer_cfg["subtipo"]
-                    gdf["_id_fields"] = layer_cfg["id_fields"]
-                    gdf["_nome_fields"] = layer_cfg["nome_fields"]
-                    all_features.extend(gdf.to_dict("records"))
+                    records = gdf.to_dict("records")
+                    for rec in records:
+                        rec["_id_fields"] = layer_cfg["id_fields"]
+                        rec["_nome_fields"] = layer_cfg["nome_fields"]
+                    all_features.extend(records)
             except Exception as e:
                 logger.warning(f"Failed to fetch {layer_cfg['layer']}: {str(e)}")
 

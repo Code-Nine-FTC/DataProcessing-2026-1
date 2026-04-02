@@ -44,15 +44,21 @@ class WFSConfig:
     batch_size: int = 500
     max_retries: int = 3
     retry_delay: int = 5
+    # BBOX opcional (ex.: minx,miny,maxx,maxy,EPSG:4326). Vazio = não enviar bbox.
+    # DataGeo/GeoServer com camadas encadeadas ao ArcGIS retorna 400 se o bbox for repassado
+    # ao WFSServer upstream; o padrão é omitir e paginar só com count/startIndex.
+    bbox: Optional[str] = None
 
     @staticmethod
     def from_env() -> "WFSConfig":
         """Cria configuração a partir de variáveis de ambiente."""
+        raw_bbox = os.getenv("WFS_BBOX", "").strip()
         return WFSConfig(
             timeout=int(os.getenv("WFS_TIMEOUT", 120)),
             batch_size=int(os.getenv("WFS_BATCH_SIZE", 500)),
             max_retries=int(os.getenv("WFS_MAX_RETRIES", 3)),
             retry_delay=int(os.getenv("WFS_RETRY_DELAY", 5)),
+            bbox=raw_bbox if raw_bbox else None,
         )
 
 

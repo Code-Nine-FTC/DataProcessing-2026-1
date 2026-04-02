@@ -3,6 +3,7 @@ Carregadores - Camada L do ETL
 Responsável por inserir dados normalizados no banco.
 """
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Optional
 
@@ -15,6 +16,8 @@ from infrastructure.repositories import FonteDadoRepository, DatasetRepository
 from domain.entities import FonteDado
 
 logger = logging.getLogger(__name__)
+
+_SAFE_TABLE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class BaseLoader(ABC):
@@ -30,6 +33,22 @@ class BaseLoader(ABC):
     def get_insert_query(self) -> str:
         """Retorna query SQL de inserção. Implementar em subclasses."""
         pass
+
+    def count_rows_for_dataset(self, dataset_id: str) -> int:
+        """Quantidade de linhas já carregadas para este dataset na tabela fato."""
+        if not _SAFE_TABLE_NAME.match(self.table_name):
+            raise LoadException(f"Invalid table name for count: {self.table_name!r}")
+        try:
+            with self.engine.begin() as conn:
+                q = text(
+                    f"SELECT COUNT(*) FROM {self.table_name} WHERE dataset_id = :ds"
+                )
+                row = conn.execute(q, {"ds": dataset_id}).scalar()
+                return int(row or 0)
+        except Exception as e:
+            raise LoadException(
+                f"Failed to count rows in {self.table_name}: {str(e)}"
+            ) from e
 
     def load(self, records: list[TransformedRecord], dataset_id: str) -> LoadResult:
         """Carrega registros no banco."""

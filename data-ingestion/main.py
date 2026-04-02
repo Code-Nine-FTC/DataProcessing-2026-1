@@ -21,6 +21,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Todas as pipelines ETL em sources/ (exceto relacoes_espaciais, só pós-processamento).
+# Ordem: federais (WFS) → estadual SP → CAR → focos INPE.
+DEFAULT_PIPELINE_ORDER = [
+    "icmbio",
+    "funai",
+    "incra",
+    "palmares",
+    "datageo_sp",
+    "car",
+    "inpe",
+]
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -85,6 +97,22 @@ def main():
         logger.error(f"Failed to import pipeline: {str(e)}")
         sys.exit(1)
 
+    registered = set(orchestrator.pipelines.keys())
+    missing_default = [n for n in DEFAULT_PIPELINE_ORDER if n not in registered]
+    if missing_default:
+        logger.error(
+            "DEFAULT_PIPELINE_ORDER referencia pipelines não registradas: %s",
+            missing_default,
+        )
+        sys.exit(1)
+    extra_registered = sorted(registered - set(DEFAULT_PIPELINE_ORDER))
+    if extra_registered:
+        logger.warning(
+            "Há pipelines registradas fora de DEFAULT_PIPELINE_ORDER: %s — "
+            "não entram no `python main.py` sem argumentos; inclua-as na lista ou passe por CLI.",
+            extra_registered,
+        )
+
     # Handle CLI commands
     if args.list:
         print("\nAvailable pipelines:")
@@ -93,20 +121,13 @@ def main():
         return
 
     if args.order:
-        order = [
-            "datageo_sp",
-            "inpe",
-        ]
-        print("\nDefault execution order (São Paulo focus):")
-        for i, name in enumerate(order, 1):
+        print("\nDefault execution order (todas as fontes em sources/):")
+        for i, name in enumerate(DEFAULT_PIPELINE_ORDER, 1):
             print(f"  {i}. {name}")
-        print("\nAvailable but optional (national data - may require internet/config):")
-        print("  • car (Cadastro Ambiental Rural - requer URL alternativa)")
-        print("  • icmbio (UCs nacional)")
-        print("  • funai (TIs nacional)")
-        print("  • incra (Assentamentos nacional)")
-        print("  • palmares (Quilombolas nacional)")
-        print("\nNote: Spatial relationships computed after all data is loaded")
+        print(
+            "\nApós essas pipelines, roda o pós-processamento espacial (rel_imovel_*), "
+            "se definiu DATABASE_URL e a execução teve sucesso."
+        )
         return
 
     # Run pipelines
@@ -124,13 +145,11 @@ def main():
         print(f"\nResult: {successful} successful, {failed} failed")
         sys.exit(0 if failed == 0 else 1)
     else:
-        # Run all in default order (São Paulo focus)
-        logger.info("Running all pipelines in default order (São Paulo focus)")
-        order = [
-            "datageo_sp",
-            "inpe",
-        ]
-        successful, failed = orchestrator.run_all(order)
+        logger.info(
+            "Running all pipelines in default order: %s",
+            " → ".join(DEFAULT_PIPELINE_ORDER),
+        )
+        successful, failed = orchestrator.run_all(list(DEFAULT_PIPELINE_ORDER))
         orchestrator.print_summary()
 
         # Run post-processing (spatial relationships)

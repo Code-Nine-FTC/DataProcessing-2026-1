@@ -17,7 +17,6 @@ Tabelas afetadas:
 Executar APÓS todas as outras pipelines.
 """
 import logging
-from uuid import uuid4
 from datetime import datetime
 
 from sqlalchemy import text
@@ -75,7 +74,7 @@ class SpatialRelationshipPostProcessor:
                 INSERT INTO {relation_table}
                     ({', '.join(cols)})
                 SELECT
-                    :new_id,
+                    gen_random_uuid(),
                     source.id,
                     target.id,
                     ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0
@@ -95,7 +94,7 @@ class SpatialRelationshipPostProcessor:
                 )
             """
 
-            result = conn.execute(text(query), {"new_id": str(uuid4())})
+            result = conn.execute(text(query))
             count = result.rowcount
             logger.info(f"  → {count} relationships created")
             return count
@@ -113,7 +112,7 @@ class SpatialRelationshipPostProcessor:
                         (id, imovel_rural_id, queimada_evento_id, distancia_m,
                          dentro_imovel, data_calculo)
                     SELECT
-                        :new_id,
+                        gen_random_uuid(),
                         ir.id,
                         qe.id,
                         ST_Distance(ir.geom::geography, qe.geom::geography) as distancia_m,
@@ -129,7 +128,7 @@ class SpatialRelationshipPostProcessor:
                       )
                 """)
 
-                conn.execute(query, {"new_id": str(uuid4()), "agora": datetime.now()})
+                conn.execute(query, {"agora": datetime.now()})
                 result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_queimada"))
                 count = result.scalar()
                 logger.info(f"  → {count} relationships created")
@@ -221,7 +220,7 @@ class SpatialRelationshipPostProcessor:
                         (id, imovel_rural_id, bacia_hidrografica_id,
                          area_intersecao_ha, percentual_sobreposicao)
                     SELECT
-                        :new_id,
+                        gen_random_uuid(),
                         ir.id,
                         bh.id,
                         ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0 as area_intersecao_ha,
@@ -240,7 +239,7 @@ class SpatialRelationshipPostProcessor:
                     )
                 """)
 
-                conn.execute(query, {"new_id": str(uuid4())})
+                conn.execute(query)
                 result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_bacia"))
                 count = result.scalar()
                 logger.info(f"  → {count} relationships created")
@@ -254,6 +253,25 @@ class SpatialRelationshipPostProcessor:
         logger.info("\n" + "="*70)
         logger.info("SPATIAL RELATIONSHIP POST-PROCESSING")
         logger.info("="*70 + "\n")
+
+        try:
+            from sources.inpe import link_queimadas_to_municipios
+
+            link_queimadas_to_municipios(self.engine)
+        except Exception as e:
+            logger.warning(
+                "Não foi possível atualizar municipio_id em queimada_evento: %s", e
+            )
+
+        with self.engine.connect() as conn:
+            n_im = conn.execute(
+                text("SELECT COUNT(*) FROM imovel_rural")
+            ).scalar()
+        if not n_im:
+            logger.warning(
+                "Tabela imovel_rural está vazia: as tabelas rel_imovel_* dependem de "
+                "imóveis carregados (ex.: pipeline car). Ordem sugerida: car → demais fontes → main.py (padrão + car)."
+            )
 
         results = {
             "queimada": self.calculate_imovel_queimada(),

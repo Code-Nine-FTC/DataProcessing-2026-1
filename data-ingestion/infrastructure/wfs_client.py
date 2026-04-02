@@ -25,6 +25,8 @@ class WFSRequest:
     wfs_version: str = "2.0.0"
     output_format: str = "application/json"
     crs: str = "EPSG:4326"
+    # Se não for None, substitui WFSConfig.bbox; se ambos forem omitidos, não há filtro bbox.
+    bbox: Optional[str] = None
 
 
 class WFSClient:
@@ -60,8 +62,15 @@ class WFSClient:
                     "outputFormat": request.output_format,
                     "srsName": request.crs,
                     "count": request.batch_size,
-                    "bbox": "-53.0,-26.0,-38.0,-19.0",
                 }
+
+                effective_bbox = (
+                    request.bbox
+                    if request.bbox is not None
+                    else self.config.bbox
+                )
+                if effective_bbox:
+                    params["bbox"] = effective_bbox
 
                 # WFS 2.0 usa startIndex; versões antigas usam startPosition
                 if request.wfs_version == "2.0.0":
