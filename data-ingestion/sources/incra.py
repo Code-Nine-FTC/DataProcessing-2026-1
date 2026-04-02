@@ -30,7 +30,7 @@ FONTE = {
 }
 
 DATASET = {
-    "nome": f"ASSENTAMENTOS_INCRA_{date.today().isoformat()}",
+    "nome": "ASSENTAMENTOS_INCRA",
     "descricao": "Assentamentos Rurais do Brasil - Acervo Fundiário INCRA",
     "versao": str(date.today().year),
     "data_referencia": date.today(),

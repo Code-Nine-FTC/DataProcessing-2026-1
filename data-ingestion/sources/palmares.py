@@ -30,7 +30,7 @@ FONTE = {
 }
 
 DATASET = {
-    "nome": f"QUILOMBOLA_PALMARES_{date.today().isoformat()}",
+    "nome": "QUILOMBOLA_PALMARES",
     "descricao": "Territórios Quilombolas do Brasil - Acervo Fundiário INCRA/FCP",
     "versao": str(date.today().year),
     "data_referencia": date.today(),

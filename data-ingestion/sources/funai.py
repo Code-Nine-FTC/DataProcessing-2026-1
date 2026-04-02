@@ -29,7 +29,7 @@ FONTE = {
 }
 
 DATASET = {
-    "nome": f"TI_FUNAI_{date.today().isoformat()}",
+    "nome": "TI_FUNAI",
     "descricao": "Terras Indígenas do Brasil - GeoServer FUNAI",
     "versao": str(date.today().year),
     "data_referencia": date.today(),
