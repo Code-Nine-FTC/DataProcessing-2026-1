@@ -19,8 +19,12 @@ class DatabaseConfig:
         """Cria configuração a partir de variáveis de ambiente."""
         url = os.getenv(
             "DATABASE_URL",
-            "postgresql+asyncpg://localhost/data_processing"
+            "postgresql+psycopg2://localhost/data_processing"
         )
+        # Ensure synchronous driver (not async)
+        if "asyncpg" in url:
+            url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+
         return DatabaseConfig(
             url=url,
             pool_size=int(os.getenv("DB_POOL_SIZE", 10)),

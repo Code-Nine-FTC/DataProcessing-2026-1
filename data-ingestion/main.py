@@ -94,17 +94,18 @@ def main():
 
     if args.order:
         order = [
-            "icmbio",
-            "funai",
-            "incra",
-            "palmares",
             "datageo_sp",
             "car",
             "inpe",
         ]
-        print("\nDefault execution order:")
+        print("\nDefault execution order (São Paulo focus):")
         for i, name in enumerate(order, 1):
             print(f"  {i}. {name}")
+        print("\nAvailable but optional (national data - may require internet/config):")
+        print("  • icmbio (UCs nacional)")
+        print("  • funai (TIs nacional)")
+        print("  • incra (Assentamentos nacional)")
+        print("  • palmares (Quilombolas nacional)")
         print("\nNote: Spatial relationships computed after all data is loaded")
         return
 
@@ -123,13 +124,9 @@ def main():
         print(f"\nResult: {successful} successful, {failed} failed")
         sys.exit(0 if failed == 0 else 1)
     else:
-        # Run all in default order
-        logger.info("Running all pipelines in default order")
+        # Run all in default order (São Paulo focus)
+        logger.info("Running all pipelines in default order (São Paulo focus)")
         order = [
-            "icmbio",
-            "funai",
-            "incra",
-            "palmares",
             "datageo_sp",
             "car",
             "inpe",
@@ -143,7 +140,7 @@ def main():
             logger.info("STARTING SPATIAL RELATIONSHIP POST-PROCESSING")
             logger.info("="*70)
             try:
-                from sources.relacoes_espaciais_refactored import run_post_processing
+                from sources.relacoes_espaciais import run_post_processing
                 run_post_processing(orchestrator.engine)
                 logger.info("✓ Post-processing completed successfully")
             except Exception as e:

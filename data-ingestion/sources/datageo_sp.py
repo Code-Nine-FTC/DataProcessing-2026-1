@@ -92,7 +92,13 @@ class DataGeoSPExtractor(BaseExtractor):
                 logger.warning(f"Failed to fetch {layer_cfg['layer']}: {str(e)}")
 
         if not all_features:
-            raise Exception("No features fetched from any DataGeo layer")
+            logger.warning("No features fetched from any DataGeo layer - returning empty dataset")
+            # Graceful degradation: return empty dataset instead of failing
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0, "layers": len(self._selected_layers)},
+            )
 
         return ExtractedData(
             source=self.data_source,

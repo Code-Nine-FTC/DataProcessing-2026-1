@@ -52,7 +52,13 @@ class PalmaresExtractor(WFSExtractor):
         gdf = self.wfs_client.fetch_all(request)
 
         if gdf.empty:
-            raise Exception("No quilombola territories fetched from Palmares")
+            logger.warning("No quilombola territories fetched from Palmares - returning empty dataset")
+            # Graceful degradation: return empty dataset instead of failing
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0},
+            )
 
         return ExtractedData(
             source=self.data_source,

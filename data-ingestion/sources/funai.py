@@ -53,7 +53,13 @@ class FUNAIExtractor(WFSExtractor):
         gdf = self.wfs_client.fetch_all(request)
 
         if gdf.empty:
-            raise Exception("No terras indígenas fetched from FUNAI")
+            logger.warning("No terras indígenas fetched from FUNAI - returning empty dataset")
+            # Graceful degradation: return empty dataset instead of failing
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0},
+            )
 
         return ExtractedData(
             source=self.data_source,

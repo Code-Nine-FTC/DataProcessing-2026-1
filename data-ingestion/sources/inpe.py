@@ -11,7 +11,7 @@ from datetime import datetime, date
 from uuid import uuid4
 
 from core.models import ExtractedData, TransformedRecord, DataSource
-from etl.extractors.csv_extractor import CSVExtractor
+from etl.extractors import CSVExtractor
 from etl.transformers import BaseTransformer
 from etl.loaders import BaseLoader
 from etl.pipeline import BasePipeline

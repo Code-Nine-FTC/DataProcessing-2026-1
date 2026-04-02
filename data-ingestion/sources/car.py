@@ -60,7 +60,13 @@ class CARExtractor(WFSExtractor):
         gdf = self.wfs_client.fetch_all(request)
 
         if gdf.empty:
-            raise Exception("No CAR properties fetched")
+            logger.warning("No CAR properties fetched - returning empty dataset")
+            # Graceful degradation: return empty dataset instead of failing
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0},
+            )
 
         return ExtractedData(
             source=self.data_source,

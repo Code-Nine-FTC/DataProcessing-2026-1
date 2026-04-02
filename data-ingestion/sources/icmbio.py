@@ -88,7 +88,13 @@ class ICMBioExtractor(WFSExtractor):
                 logger.warning(f"Failed to fetch {layer}: {str(e)}")
 
         if not all_features:
-            raise Exception("No features fetched from any biome layer")
+            logger.warning("No features fetched from any biome layer - returning empty dataset")
+            # Graceful degradation: return empty dataset instead of failing
+            return ExtractedData(
+                source=ICMBIO_SOURCE,
+                rows=[],
+                metadata={"feature_count": 0, "biome_layers": len(BIOME_LAYERS)},
+            )
 
         # Deduplicar por ID origem (mesma UC pode estar em múltiplos biomas)
         seen_ids = set()
