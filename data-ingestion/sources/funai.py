@@ -42,31 +42,6 @@ class FUNAIExtractor(WFSExtractor):
     def __init__(self, wfs_client: WFSClient):
         super().__init__(FUNAI_SOURCE, wfs_client, "Funai:tis_poligonais")
 
-    def extract(self) -> ExtractedData:
-        """Extrai dados de Terras Indígenas do WFS."""
-        request = WFSRequest(
-            url=self.data_source.url,
-            layer=self.wfs_layer,
-            wfs_version="2.0.0",
-        )
-
-        gdf = self.wfs_client.fetch_all(request)
-
-        if gdf.empty:
-            logger.warning("No terras indígenas fetched from FUNAI - returning empty dataset")
-            # Graceful degradation: return empty dataset instead of failing
-            return ExtractedData(
-                source=self.data_source,
-                rows=[],
-                metadata={"feature_count": 0},
-            )
-
-        return ExtractedData(
-            source=self.data_source,
-            rows=gdf.to_dict("records"),
-            metadata={"feature_count": len(gdf), "crs": str(gdf.crs)},
-        )
-
 
 class FUNAITransformer(GeometricTransformer):
     """Transformador para dados de Terras Indígenas."""

@@ -59,17 +59,6 @@ class SpatialRelationshipPostProcessor:
         )
 
         with self.engine.begin() as conn:
-            # Determinar tipo de relação se aplicável
-            relation_sql = ""
-            if relation_type:
-                relation_sql = f"""
-                    CASE
-                        WHEN ST_Contains(target.geom, source.geom) THEN 'dentro'
-                        WHEN ST_Contains(source.geom, target.geom) THEN 'contém'
-                        ELSE 'sobrepõe'
-                    END as tipo_relacao
-                """
-
             # Limpar relacionamentos antigos
             conn.execute(text(f"DELETE FROM {relation_table} WHERE TRUE"))
 
@@ -81,8 +70,6 @@ class SpatialRelationshipPostProcessor:
                 "area_intersecao_ha",
                 "percentual_sobreposicao",
             ]
-            if relation_type:
-                cols.append("tipo_relacao")
 
             query = f"""
                 INSERT INTO {relation_table}
@@ -99,7 +86,6 @@ class SpatialRelationshipPostProcessor:
                             / source.area_ha * 100
                         ELSE 0
                     END as percentual_sobreposicao
-                    {', ' + relation_sql if relation_type else ''}
                 FROM {source_table} source
                 JOIN {target_table} target ON ST_Intersects(source.geom, target.geom)
                 WHERE NOT EXISTS (
@@ -118,132 +104,150 @@ class SpatialRelationshipPostProcessor:
         """Calcula distância e continência: Imóvel ↔ Queimada (pontos)."""
         logger.info("Computing imovel_rural ↔ queimada_evento (points)...")
 
-        with self.engine.begin() as conn:
-            conn.execute(text("DELETE FROM rel_imovel_queimada WHERE TRUE"))
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(text("DELETE FROM rel_imovel_queimada WHERE TRUE"))
 
-            query = text("""
-                INSERT INTO rel_imovel_queimada
-                    (id, imovel_rural_id, queimada_evento_id, distancia_m,
-                     dentro_imovel, data_calculo)
-                SELECT
-                    :new_id,
-                    ir.id,
-                    qe.id,
-                    ST_Distance(ir.geom::geography, qe.geom::geography) as distancia_m,
-                    ST_Contains(ir.geom, qe.geom) as dentro_imovel,
-                    :agora
-                FROM imovel_rural ir
-                CROSS JOIN queimada_evento qe
-                WHERE ST_DWithin(ir.geom::geography, qe.geom::geography, 5000)
-                  AND NOT EXISTS (
-                    SELECT 1 FROM rel_imovel_queimada
-                    WHERE imovel_rural_id = ir.id
-                      AND queimada_evento_id = qe.id
-                  )
-            """)
+                query = text("""
+                    INSERT INTO rel_imovel_queimada
+                        (id, imovel_rural_id, queimada_evento_id, distancia_m,
+                         dentro_imovel, data_calculo)
+                    SELECT
+                        :new_id,
+                        ir.id,
+                        qe.id,
+                        ST_Distance(ir.geom::geography, qe.geom::geography) as distancia_m,
+                        ST_Contains(ir.geom, qe.geom) as dentro_imovel,
+                        :agora
+                    FROM imovel_rural ir
+                    CROSS JOIN queimada_evento qe
+                    WHERE ST_DWithin(ir.geom::geography, qe.geom::geography, 5000)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM rel_imovel_queimada
+                        WHERE imovel_rural_id = ir.id
+                          AND queimada_evento_id = qe.id
+                      )
+                """)
 
-            conn.execute(query, {"new_id": str(uuid4()), "agora": datetime.now()})
-            result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_queimada"))
-            count = result.scalar()
-            logger.info(f"  → {count} relationships created")
-            return count
+                conn.execute(query, {"new_id": str(uuid4()), "agora": datetime.now()})
+                result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_queimada"))
+                count = result.scalar()
+                logger.info(f"  → {count} relationships created")
+                return count
+        except Exception as e:
+            logger.warning(f"Failed to calculate imovel_queimada relationships: {str(e)}")
+            return 0
 
     def calculate_imovel_desmatamento(self) -> int:
         """Calcula: Imóvel ↔ Desmatamento (polígonos)."""
-        return self._calculate_relation(
-            "rel_imovel_desmatamento",
-            "imovel_rural",
-            "id",
-            "desmatamento_alerta",
-            "id",
-            relation_type=True,
-        )
+        try:
+            return self._calculate_relation(
+                "rel_imovel_desmatamento",
+                "imovel_rural",
+                "id",
+                "desmatamento_alerta",
+                "id",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to calculate imovel_desmatamento relationships: {str(e)}")
+            return 0
 
     def calculate_imovel_uc(self) -> int:
         """Calcula: Imóvel ↔ Unidade de Conservação."""
-        return self._calculate_relation(
-            "rel_imovel_uc",
-            "imovel_rural",
-            "id",
-            "unidade_conservacao",
-            "id",
-            relation_type=True,
-        )
+        try:
+            return self._calculate_relation(
+                "rel_imovel_uc",
+                "imovel_rural",
+                "id",
+                "unidade_conservacao",
+                "id",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to calculate imovel_uc relationships: {str(e)}")
+            return 0
 
     def calculate_imovel_ti(self) -> int:
         """Calcula: Imóvel ↔ Terra Indígena."""
-        return self._calculate_relation(
-            "rel_imovel_ti",
-            "imovel_rural",
-            "id",
-            "terra_indigena",
-            "id",
-            relation_type=True,
-        )
+        try:
+            return self._calculate_relation(
+                "rel_imovel_ti",
+                "imovel_rural",
+                "id",
+                "terra_indigena",
+                "id",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to calculate imovel_ti relationships: {str(e)}")
+            return 0
 
     def calculate_imovel_assentamento(self) -> int:
         """Calcula: Imóvel ↔ Assentamento Rural."""
-        return self._calculate_relation(
-            "rel_imovel_assentamento",
-            "imovel_rural",
-            "id",
-            "assentamento_rural",
-            "id",
-            relation_type=True,
-        )
+        try:
+            return self._calculate_relation(
+                "rel_imovel_assentamento",
+                "imovel_rural",
+                "id",
+                "assentamento_rural",
+                "id",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to calculate imovel_assentamento relationships: {str(e)}")
+            return 0
 
     def calculate_imovel_quilombo(self) -> int:
         """Calcula: Imóvel ↔ Território Quilombola."""
-        return self._calculate_relation(
-            "rel_imovel_quilombo",
-            "imovel_rural",
-            "id",
-            "territorio_quilombola",
-            "id",
-            relation_type=True,
-        )
+        try:
+            return self._calculate_relation(
+                "rel_imovel_quilombo",
+                "imovel_rural",
+                "id",
+                "territorio_quilombola",
+                "id",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to calculate imovel_quilombo relationships: {str(e)}")
+            return 0
 
     def calculate_imovel_bacia(self) -> int:
         """Calcula: Imóvel ↔ Bacia Hidrográfica."""
         logger.info("Computing imovel_rural ↔ bacia_hidrografica relationships...")
 
-        with self.engine.begin() as conn:
-            conn.execute(text("DELETE FROM rel_imovel_bacia WHERE TRUE"))
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(text("DELETE FROM rel_imovel_bacia WHERE TRUE"))
 
-            query = text("""
-                INSERT INTO rel_imovel_bacia
-                    (id, imovel_rural_id, bacia_hidrografica_id,
-                     area_intersecao_ha, percentual_sobreposicao, tipo_relacao)
-                SELECT
-                    :new_id,
-                    ir.id,
-                    bh.id,
-                    ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0 as area_intersecao_ha,
-                    CASE
-                        WHEN ir.area_ha > 0 THEN
-                            (ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0)
-                            / ir.area_ha * 100
-                        ELSE 0
-                    END as percentual_sobreposicao,
-                    CASE
-                        WHEN ST_Contains(bh.geom, ir.geom) THEN 'dentro'
-                        WHEN ST_Contains(ir.geom, bh.geom) THEN 'contém'
-                        ELSE 'sobrepõe'
-                    END as tipo_relacao
-                FROM imovel_rural ir
-                JOIN bacia_hidrografica bh ON ST_Intersects(ir.geom, bh.geom)
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM rel_imovel_bacia
-                    WHERE imovel_rural_id = ir.id
-                      AND bacia_hidrografica_id = bh.id
-                )
-            """)
+                query = text("""
+                    INSERT INTO rel_imovel_bacia
+                        (id, imovel_rural_id, bacia_hidrografica_id,
+                         area_intersecao_ha, percentual_sobreposicao)
+                    SELECT
+                        :new_id,
+                        ir.id,
+                        bh.id,
+                        ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0 as area_intersecao_ha,
+                        CASE
+                            WHEN ir.area_ha > 0 THEN
+                                (ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0)
+                                / ir.area_ha * 100
+                            ELSE 0
+                        END as percentual_sobreposicao
+                    FROM imovel_rural ir
+                    JOIN bacia_hidrografica bh ON ST_Intersects(ir.geom, bh.geom)
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM rel_imovel_bacia
+                        WHERE imovel_rural_id = ir.id
+                          AND bacia_hidrografica_id = bh.id
+                    )
+                """)
 
-            conn.execute(query, {"new_id": str(uuid4())})
-            result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_bacia"))
-            count = result.scalar()
-            logger.info(f"  → {count} relationships created")
-            return count
+                conn.execute(query, {"new_id": str(uuid4())})
+                result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_bacia"))
+                count = result.scalar()
+                logger.info(f"  → {count} relationships created")
+                return count
+        except Exception as e:
+            logger.warning(f"Failed to calculate imovel_bacia relationships: {str(e)}")
+            return 0
 
     def run_all(self):
         """Executa todos os cálculos de relacionamentos."""

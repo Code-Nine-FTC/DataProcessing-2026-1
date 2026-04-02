@@ -45,17 +45,28 @@ class INCRAExtractor(WFSExtractor):
 
     def extract(self) -> ExtractedData:
         """Extrai dados de Assentamentos do WFS (versão 1.1.0)."""
+        from infrastructure.wfs_client import WFSRequest
+
         request = WFSRequest(
             url=self.data_source.url,
             layer=self.wfs_layer,
             wfs_version="1.1.0",  # INCRA usa WFS 1.1.0, não 2.0.0
         )
 
-        gdf = self.wfs_client.fetch_all(request)
+        try:
+            from core.exceptions import ExtractionException
+            gdf = self.wfs_client.fetch_all(request)
+        except ExtractionException as e:
+            logger.warning(f"Failed to fetch {self.wfs_layer}: {str(e)} - returning empty dataset")
+            # Graceful degradation
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0},
+            )
 
         if gdf.empty:
             logger.warning("No assentamentos fetched from INCRA - returning empty dataset")
-            # Graceful degradation: return empty dataset instead of failing
             return ExtractedData(
                 source=self.data_source,
                 rows=[],

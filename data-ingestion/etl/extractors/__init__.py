@@ -58,10 +58,25 @@ class WFSExtractor(BaseExtractor):
             layer=self.wfs_layer,
         )
 
-        gdf = self.wfs_client.fetch_all(request)
+        try:
+            gdf = self.wfs_client.fetch_all(request)
+        except ExtractionException as e:
+            logger.warning(f"Failed to fetch {self.wfs_layer}: {str(e)} - returning empty dataset")
+            # Graceful degradation: return empty dataset instead of failing
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0},
+            )
 
+        # Graceful degradation: return empty dataset if no data
         if gdf.empty:
-            raise ExtractionException(f"No data fetched from {self.wfs_layer}")
+            logger.warning(f"No data fetched for {self.wfs_layer} - returning empty dataset")
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0},
+            )
 
         return ExtractedData(
             source=self.data_source,

@@ -5,6 +5,10 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 
 @dataclass
 class DatabaseConfig:
@@ -19,7 +23,7 @@ class DatabaseConfig:
         """Cria configuração a partir de variáveis de ambiente."""
         url = os.getenv(
             "DATABASE_URL",
-            "postgresql+psycopg2://localhost/data_processing"
+            "postgresql+psycopg2://visiona:visiona@localhost:5432/visiona"
         )
         # Ensure synchronous driver (not async)
         if "asyncpg" in url:

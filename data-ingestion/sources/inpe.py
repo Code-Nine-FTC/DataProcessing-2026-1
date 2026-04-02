@@ -50,7 +50,7 @@ class INPEExtractor(CSVExtractor):
     def __init__(self):
         super().__init__(
             INPE_SOURCE,
-            csv_pattern="database/docs/bdqueimadas_*.csv",
+            csv_pattern="/home/joyce/Documents/fatec/api/DataProcessing-2026-1/models/docs/bdqueimadas_*.csv",
         )
 
 
@@ -84,7 +84,8 @@ class INPETransformer(BaseTransformer):
                 try:
                     data_ocorrencia = datetime.strptime(data_str, "%Y/%m/%d %H:%M:%S")
                 except ValueError:
-                    pass
+                    # Use current date if parsing fails
+                    data_ocorrencia = datetime.now()
 
                 # Criar geometria POINT (não MULTIPOLYGON!)
                 geom_wkt = f"POINT({lon} {lat})"

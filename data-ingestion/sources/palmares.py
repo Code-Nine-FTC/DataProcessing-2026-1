@@ -43,17 +43,27 @@ class PalmaresExtractor(WFSExtractor):
 
     def extract(self) -> ExtractedData:
         """Extrai dados de Territórios Quilombolas do WFS."""
+        from core.exceptions import ExtractionException
+
         request = WFSRequest(
             url=self.data_source.url,
             layer=self.wfs_layer,
             wfs_version="1.1.0",  # INCRA usa WFS 1.1.0
         )
 
-        gdf = self.wfs_client.fetch_all(request)
+        try:
+            gdf = self.wfs_client.fetch_all(request)
+        except ExtractionException as e:
+            logger.warning(f"Failed to fetch {self.wfs_layer}: {str(e)} - returning empty dataset")
+            # Graceful degradation
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0},
+            )
 
         if gdf.empty:
             logger.warning("No quilombola territories fetched from Palmares - returning empty dataset")
-            # Graceful degradation: return empty dataset instead of failing
             return ExtractedData(
                 source=self.data_source,
                 rows=[],

@@ -95,13 +95,13 @@ def main():
     if args.order:
         order = [
             "datageo_sp",
-            "car",
             "inpe",
         ]
         print("\nDefault execution order (São Paulo focus):")
         for i, name in enumerate(order, 1):
             print(f"  {i}. {name}")
         print("\nAvailable but optional (national data - may require internet/config):")
+        print("  • car (Cadastro Ambiental Rural - requer URL alternativa)")
         print("  • icmbio (UCs nacional)")
         print("  • funai (TIs nacional)")
         print("  • incra (Assentamentos nacional)")
@@ -128,7 +128,6 @@ def main():
         logger.info("Running all pipelines in default order (São Paulo focus)")
         order = [
             "datageo_sp",
-            "car",
             "inpe",
         ]
         successful, failed = orchestrator.run_all(order)
