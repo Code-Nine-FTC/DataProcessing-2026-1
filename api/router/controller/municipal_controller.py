@@ -16,6 +16,7 @@ class MunicipalHandler:
 
     async def execute(self) -> BasicResponse[list[ResponseMunicipal]]:
         try:
+            await self._fetch_data()
             return BasicResponse(data=self._data)
         except Exception as e:
             self._log.error(msg=f"Erro ao buscar dados: {e}")

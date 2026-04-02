@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 from datetime import datetime, date
 from typing import Any, List, Optional
 from uuid import UUID, uuid4
@@ -77,6 +78,24 @@ class Estado(Base):
     sigla: Mapped[Optional[str]] = mapped_column(VARCHAR(2))
     nome: Mapped[Optional[str]] = mapped_column(TEXT)
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
+
+    @staticmethod
+    async def get_all(session: AsyncSession) -> list[Row]:
+        result = await session.execute(
+            text("SELECT id, sigla, nome FROM estado ORDER BY nome")
+        )
+        return result.all()
+
+    @staticmethod
+    async def get_municipios(session: AsyncSession, estado_id: int) -> list[Row]:
+        result = await session.execute(
+            text(
+                "SELECT id, nome, codigo_ibge FROM municipio "
+                "WHERE estado_id = :estado_id ORDER BY nome"
+            ),
+            {"estado_id": estado_id},
+        )
+        return result.all()
 
 class Municipio(Base):
     __tablename__ = "municipio"
@@ -163,7 +182,7 @@ class Municipio(Base):
                 e.sigla AS estado_sigla,
                 ST_AsText(m.geom) AS geom,
                 -- ATENÇÃO: Verifique se no seu Schema Pydantic é 'imovel_rural' ou 'imoveis_rurais'
-                COALESCE(i.dados, '[]'::jsonb) AS imovel_rural, 
+                COALESCE(i.dados, '[]'::jsonb) AS imoveis_rurais, 
                 COALESCE(u.dados, '[]'::jsonb) AS unidades_conservacao,
                 COALESCE(t.dados, '[]'::jsonb) AS terras_indigenas,
                 COALESCE(s.dados, '[]'::jsonb) AS assentamentos,
@@ -182,6 +201,167 @@ class Municipio(Base):
 
         result = await session.execute(query, {"mun_id": municipio_id})
         return result.all()
+
+    @staticmethod
+    async def get_estatisticas(session: AsyncSession, municipio_id: int) -> dict:
+        result = await session.execute(
+            text("""
+                SELECT
+                    m.id, m.nome, m.codigo_ibge, e.sigla AS estado_sigla,
+                    (SELECT COUNT(*) FROM imovel_rural          WHERE municipio_id = m.id) AS total_imoveis,
+                    (SELECT COUNT(*) FROM terra_indigena         WHERE municipio_id = m.id) AS total_tis,
+                    (SELECT COUNT(*) FROM unidade_conservacao    WHERE municipio_id = m.id) AS total_ucs,
+                    (SELECT COUNT(*) FROM assentamento_rural     WHERE municipio_id = m.id) AS total_assentamentos,
+                    (SELECT COUNT(*) FROM territorio_quilombola  WHERE municipio_id = m.id) AS total_quilombolas,
+                    (SELECT COUNT(*) FROM desmatamento_alerta    WHERE municipio_id = m.id) AS total_alertas,
+                    (SELECT COUNT(*) FROM queimada_evento        WHERE municipio_id = m.id) AS total_queimadas,
+                    (SELECT CAST(COALESCE(SUM(area_ha), 0) AS float) FROM imovel_rural       WHERE municipio_id = m.id) AS area_imoveis_ha,
+                    (SELECT CAST(COALESCE(SUM(area_ha), 0) AS float) FROM desmatamento_alerta WHERE municipio_id = m.id) AS area_desmatamento_ha
+                FROM municipio m
+                JOIN estado e ON m.estado_id = e.id
+                WHERE m.id = :mun_id
+            """),
+            {"mun_id": municipio_id},
+        )
+        row = result.first()
+        if row is None:
+            return {}
+        return dict(row._mapping)
+
+    GEOJSON_LAYERS = [
+        "municipios",
+        "estados",
+        "bacias",
+        "imoveis_rurais",
+        "terras_indigenas",
+        "unidades_conservacao",
+        "assentamentos",
+        "quilombolas",
+        "alertas_desmatamento",
+        "queimadas",
+        "camadas_estaduais",
+    ]
+
+    @staticmethod
+    async def get_geojson_layer(
+        session: AsyncSession,
+        layer: str,
+        municipio_id: int | None = None,
+    ) -> dict:
+        _QUERIES: dict[str, str] = {
+            "municipios": """
+                SELECT id, nome, codigo_ibge,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM municipio
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR id = CAST(:mun_id AS INTEGER))
+            """,
+            "estados": """
+                SELECT id, sigla, nome,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM estado
+                WHERE geom IS NOT NULL
+            """,
+            "bacias": """
+                SELECT id, nome, codigo,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM bacia_hidrografica
+                WHERE geom IS NOT NULL
+            """,
+            "imoveis_rurais": """
+                SELECT CAST(id AS TEXT) AS id, nome_imovel AS nome, codigo_car,
+                       CAST(area_ha AS float) AS area_ha, situacao_cadastral, municipio_id,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM imovel_rural
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER))
+            """,
+            "terras_indigenas": """
+                SELECT CAST(id AS TEXT) AS id, nome, fase,
+                       CAST(area_ha AS float) AS area_ha, municipio_id,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM terra_indigena
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER))
+            """,
+            "unidades_conservacao": """
+                SELECT CAST(id AS TEXT) AS id, nome, categoria, esfera, grupo_snuc,
+                       CAST(area_ha AS float) AS area_ha, municipio_id,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM unidade_conservacao
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER))
+            """,
+            "assentamentos": """
+                SELECT CAST(id AS TEXT) AS id, nome,
+                       CAST(area_ha AS float) AS area_ha, modalidade, familias, municipio_id,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM assentamento_rural
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER))
+            """,
+            "quilombolas": """
+                SELECT CAST(id AS TEXT) AS id, nome,
+                       CAST(area_ha AS float) AS area_ha, municipio_id,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM territorio_quilombola
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER))
+            """,
+            "alertas_desmatamento": """
+                SELECT CAST(id AS TEXT) AS id, tipo_alerta AS nome,
+                       CAST(area_ha AS float) AS area_ha,
+                       CAST(data_ocorrencia AS TEXT) AS data_ocorrencia,
+                       municipio_id,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM desmatamento_alerta
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER))
+            """,
+            "queimadas": """
+                SELECT CAST(id AS TEXT) AS id, fonte_sensor,
+                       CAST(intensidade AS float) AS intensidade,
+                       CAST(data_ocorrencia AS TEXT) AS data_ocorrencia,
+                       municipio_id,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM queimada_evento
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER))
+            """,
+            "camadas_estaduais": """
+                SELECT CAST(id AS TEXT) AS id, nome, subtipo, tema, municipio_id,
+                       ST_AsGeoJSON(geom) AS geometry
+                FROM camada_estadual_ambiental
+                WHERE geom IS NOT NULL
+                  AND (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER))
+            """,
+        }
+
+        if layer not in _QUERIES:
+            return {"type": "FeatureCollection", "name": layer, "features": []}
+
+        result = await session.execute(text(_QUERIES[layer]), {"mun_id": municipio_id})
+        rows = result.mappings().all()
+
+        features = [
+            {
+                "type": "Feature",
+                "geometry": json.loads(row["geometry"]),
+                "properties": {k: v for k, v in row.items() if k != "geometry"},
+            }
+            for row in rows
+            if row["geometry"] is not None
+        ]
+
+        return {
+            "type": "FeatureCollection",
+            "name": layer,
+            "crs": {
+                "type": "name",
+                "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"},
+            },
+            "features": features,
+        }
 
 
 class GradeEspacial(Base):
@@ -213,6 +393,53 @@ class ImovelRural(Base):
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
     centroid: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+
+    @staticmethod
+    async def get_by_id(session: AsyncSession, imovel_id: str) -> Row | None:
+        result = await session.execute(
+            text("""
+                SELECT CAST(id AS TEXT) AS id, nome_imovel, codigo_car,
+                       CAST(area_ha AS float) AS area_ha, situacao_cadastral,
+                       municipio_id, ST_AsText(geom) AS geom
+                FROM imovel_rural WHERE CAST(id AS TEXT) = :iid
+            """),
+            {"iid": imovel_id},
+        )
+        return result.first()
+
+    @staticmethod
+    async def get_queimadas(session: AsyncSession, imovel_id: str) -> list[Row]:
+        result = await session.execute(
+            text("""
+                SELECT CAST(q.id AS TEXT) AS id, q.data_ocorrencia, q.fonte_sensor,
+                       CAST(q.intensidade AS float) AS intensidade,
+                       r.distancia_m, r.dentro_imovel
+                FROM rel_imovel_queimada r
+                JOIN queimada_evento q ON q.id = r.queimada_evento_id
+                WHERE CAST(r.imovel_rural_id AS TEXT) = :iid
+                ORDER BY q.data_ocorrencia DESC
+            """),
+            {"iid": imovel_id},
+        )
+        return result.all()
+
+    @staticmethod
+    async def get_desmatamentos(session: AsyncSession, imovel_id: str) -> list[Row]:
+        result = await session.execute(
+            text("""
+                SELECT CAST(d.id AS TEXT) AS id, d.tipo_alerta,
+                       CAST(d.area_ha AS float) AS area_ha,
+                       CAST(d.data_ocorrencia AS TEXT) AS data_ocorrencia,
+                       CAST(r.area_intersecao_ha AS float) AS area_intersecao_ha,
+                       CAST(r.percentual_sobreposicao AS float) AS percentual_sobreposicao
+                FROM rel_imovel_desmatamento r
+                JOIN desmatamento_alerta d ON d.id = r.desmatamento_alerta_id
+                WHERE CAST(r.imovel_rural_id AS TEXT) = :iid
+                ORDER BY d.data_ocorrencia DESC
+            """),
+            {"iid": imovel_id},
+        )
+        return result.all()
 
 class QueimadaEvento(Base):
     __tablename__ = "queimada_evento"
