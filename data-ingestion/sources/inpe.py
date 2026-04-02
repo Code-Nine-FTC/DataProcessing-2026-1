@@ -1,145 +1,174 @@
 """
-ETL: Queimadas — INPE / BDQueimadas
-Fonte:  CSV local em database/docs/bdqueimadas_*.csv
+Pipeline INPE - Queimadas (Eventos de Fogo)
+
+Fonte: INPE BDQueimadas
+Path: database/docs/bdqueimadas_*.csv
 Tabela: queimada_evento
-
-Pré-requisito: rodar 'alembic upgrade head' para adicionar as colunas
-bioma, dias_sem_chuva, precipitacao_mm e risco_fogo à tabela.
+Tipo: Pontos (geometria POINT, não MULTIPOLYGON)
 """
-import glob
-import os
-import sys
-import uuid
-from datetime import date, datetime
+import logging
+from datetime import datetime, date
+from uuid import uuid4
 
-import pandas as pd
-from sqlalchemy import text
+from core.models import ExtractedData, TransformedRecord, DataSource
+from etl.extractors.csv_extractor import CSVExtractor
+from etl.transformers import BaseTransformer
+from etl.loaders import BaseLoader
+from etl.pipeline import BasePipeline
 
-sys.path.insert(0, ".")
-sys.path.insert(0, "data-ingestion")
-from models.database import get_engine
-from loader import get_or_create_fonte_dado, get_or_create_dataset
-from utils import safe_float, safe_int
+logger = logging.getLogger(__name__)
 
-CSV_GLOB = "database/docs/bdqueimadas_*.csv"
-
-FONTE = {
-    "nome": "INPE - BDQueimadas",
-    "orgao_responsavel": "Instituto Nacional de Pesquisas Espaciais",
-    "url_origem": "https://queimadas.dgi.inpe.br/queimadas/bdqueimadas",
-    "formato": "CSV",
-    "periodicidade": "diária",
-    "escopo_geografico": "nacional",
-    "licenca": "Dados Abertos Gov",
-}
-
-# RiscoFogo usa -999 como sentinel de valor nulo
+# Sentinel para valores nulos em RiscoFogo
 _RISCO_NULL = -999.0
 
-# Candidatos de nomes de colunas do CSV (varia entre versões do BDQueimadas)
-_LAT            = ("Latitude", "latitude", "LAT", "lat")
-_LON            = ("Longitude", "longitude", "LON", "lon")
-_DATAHORA       = ("DataHora", "data_hora", "DataHora_GMT", "Data")
-_SATELITE       = ("Satelite", "satelite", "Satélite", "SATELITE", "satellite")
-_FRP            = ("FRP", "frp", "Frp", "potencia")
-_BIOMA          = ("Bioma", "bioma", "BIOMA", "biome")
+INPE_SOURCE = DataSource(
+    name="INPE - BDQueimadas",
+    url="https://queimadas.dgi.inpe.br/queimadas/bdqueimadas",
+    format="CSV",
+    agency="Instituto Nacional de Pesquisas Espaciais",
+    scope="nacional",
+    frequency="diária",
+    license="Dados Abertos Gov",
+)
+
+# Candidatos de nomes de colunas (variam entre versões)
+_LAT = ("Latitude", "latitude", "LAT", "lat")
+_LON = ("Longitude", "longitude", "LON", "lon")
+_DATAHORA = ("DataHora", "data_hora", "DataHora_GMT", "Data")
+_SATELITE = ("Satelite", "satelite", "Satélite", "SATELITE", "satellite")
+_FRP = ("FRP", "frp", "Frp", "potencia")
+_BIOMA = ("Bioma", "bioma", "BIOMA", "biome")
 _DIAS_SEM_CHUVA = ("DiaSemChuva", "dias_sem_chuva", "DiasSemChuva", "Dias_sem_chuva")
-_PRECIPITACAO   = ("Precipitacao", "precipitacao", "Precipitação", "precip")
-_RISCO_FOGO     = ("RiscoFogo", "risco_fogo", "Risco", "RiscoFogo_1km")
+_PRECIPITACAO = ("Precipitacao", "precipitacao", "Precipitação", "precip")
+_RISCO_FOGO = ("RiscoFogo", "risco_fogo", "Risco", "RiscoFogo_1km")
+_ID_ORIG = ("Latitude", "latitude", "LAT", "lat")  # (lat_lon_data para ID)
 
 
-def _find_csv() -> str | None:
-    files = sorted(glob.glob(CSV_GLOB))
-    return files[-1] if files else None
+class INPEExtractor(CSVExtractor):
+    """Extrator para dados de queimadas do INPE."""
 
-
-def run():
-    print("[inpe] Iniciando ETL...")
-    csv_path = _find_csv()
-    if not csv_path:
-        print(f"[inpe] Nenhum CSV encontrado em '{CSV_GLOB}'. Coloque o arquivo em database/docs/.")
-        return
-
-    print(f"[inpe] Lendo: {csv_path}")
-    df = pd.read_csv(csv_path, encoding="latin-1")
-    df.columns = df.columns.str.strip()
-
-    # Prepara rows antes de abrir transação
-    print(f"[inpe] {len(df)} linhas. Preparando inserção...")
-    rows = []
-    skipped = 0
-
-    for _, row in df.iterrows():
-        lat_raw = pick(row, _LAT)
-        lon_raw = pick(row, _LON)
-        try:
-            lat = float(lat_raw)
-            lon = float(lon_raw)
-        except (TypeError, ValueError):
-            skipped += 1
-            continue
-
-        data_str = str(pick(row, _DATAHORA) or "").strip()
-        try:
-            data_ocorrencia = datetime.strptime(data_str, "%Y/%m/%d %H:%M:%S")
-        except ValueError:
-            data_ocorrencia = None
-
-        rows.append({
-            "id": str(uuid.uuid4()),
-            "id_origem": f"{lat}_{lon}_{data_str}",
-            "dataset_id": None,  # preenchido após criar dataset
-            "data_ocorrencia": data_ocorrencia,
-            "fonte_sensor": str(pick(row, _SATELITE) or "").strip() or None,
-            "intensidade": safe_float(pick(row, _FRP)),
-            "bioma": str(pick(row, _BIOMA) or "").strip() or None,
-            "dias_sem_chuva": safe_int(pick(row, _DIAS_SEM_CHUVA)),
-            "precipitacao_mm": safe_float(pick(row, _PRECIPITACAO), null_sentinel=_RISCO_NULL),
-            "risco_fogo": safe_float(pick(row, _RISCO_FOGO), null_sentinel=_RISCO_NULL),
-            "geom_wkt": f"POINT({lon} {lat})",
-        })
-
-    if skipped:
-        print(f"[inpe] {skipped} linhas ignoradas (sem coordenadas válidas).")
-
-    dataset_nome = f"INPE_Queimadas_{os.path.basename(csv_path)}"
-    engine = get_engine()
-
-    # Tudo numa única transação — se o INSERT falhar, dataset não é commitado
-    with engine.begin() as conn:
-        fonte_id = get_or_create_fonte_dado(conn, **FONTE)
-        dataset_id, is_new = get_or_create_dataset(
-            conn,
-            fonte_id,
-            nome=dataset_nome,
-            descricao=f"Focos de queimada importados de {os.path.basename(csv_path)}",
-            versao=str(date.today().year),
-            data_referencia=date.today(),
+    def __init__(self):
+        super().__init__(
+            INPE_SOURCE,
+            csv_pattern="database/docs/bdqueimadas_*.csv",
         )
 
-        if not is_new:
-            return
 
-        for r in rows:
-            r["dataset_id"] = dataset_id
+class INPETransformer(BaseTransformer):
+    """Transformador para eventos de queimada (pontos)."""
 
-        conn.execute(
-            text("""
-                INSERT INTO queimada_evento
-                    (id, id_origem, dataset_id, data_ocorrencia, fonte_sensor,
-                     intensidade, bioma, dias_sem_chuva, precipitacao_mm,
-                     risco_fogo, geom)
-                VALUES
-                    (:id, :id_origem, :dataset_id, :data_ocorrencia, :fonte_sensor,
-                     :intensidade, :bioma, :dias_sem_chuva, :precipitacao_mm,
-                     :risco_fogo,
-                     ST_GeomFromText(:geom_wkt, 4326))
-            """),
-            rows,
-        )
+    def __init__(self):
+        super().__init__("queimada_evento")
 
-    print(f"[inpe] {len(rows)} registros inseridos.")
+    def transform(self, data: ExtractedData):
+        """Transforma registros CSV de queimadas."""
+        records = []
+        skipped = 0
+
+        for row_dict in data.rows:
+            try:
+                # Extrair e validar coordenadas
+                lat_raw = self.pick(row_dict, _LAT)
+                lon_raw = self.pick(row_dict, _LON)
+
+                try:
+                    lat = float(lat_raw)
+                    lon = float(lon_raw)
+                except (TypeError, ValueError):
+                    skipped += 1
+                    continue
+
+                # Extrair data e hora
+                data_str = str(self.pick(row_dict, _DATAHORA) or "").strip()
+                data_ocorrencia = None
+                try:
+                    data_ocorrencia = datetime.strptime(data_str, "%Y/%m/%d %H:%M:%S")
+                except ValueError:
+                    pass
+
+                # Criar geometria POINT (não MULTIPOLYGON!)
+                geom_wkt = f"POINT({lon} {lat})"
+
+                record = TransformedRecord(
+                    id=str(uuid4()),
+                    id_origem=f"{lat}_{lon}_{data_str}",
+                    table_name=self.table_name,
+                    geometry=geom_wkt,
+                    attributes={
+                        "data_ocorrencia": data_ocorrencia,
+                        "fonte_sensor": str(
+                            self.pick(row_dict, _SATELITE) or ""
+                        ).strip() or None,
+                        "intensidade": self.safe_float(self.pick(row_dict, _FRP)),
+                        "bioma": str(self.pick(row_dict, _BIOMA) or "").strip() or None,
+                        "dias_sem_chuva": self.safe_int(
+                            self.pick(row_dict, _DIAS_SEM_CHUVA)
+                        ),
+                        "precipitacao_mm": self.safe_float(
+                            self.pick(row_dict, _PRECIPITACAO),
+                            null_sentinel=_RISCO_NULL,
+                        ),
+                        "risco_fogo": self.safe_float(
+                            self.pick(row_dict, _RISCO_FOGO),
+                            null_sentinel=_RISCO_NULL,
+                        ),
+                        "atributos_json": self.row_to_json(row_dict),
+                    },
+                )
+                records.append(record)
+
+            except Exception as e:
+                logger.warning(f"Failed to transform row: {str(e)}")
+                skipped += 1
+
+        if skipped > 0:
+            logger.info(f"Skipped {skipped} invalid rows")
+
+        return records
 
 
-if __name__ == "__main__":
-    run()
+class INPELoader(BaseLoader):
+    """Carregador para eventos de queimada."""
+
+    def __init__(self, engine):
+        super().__init__(engine, table_name="queimada_evento")
+
+    def get_insert_query(self) -> str:
+        """Query de inserção para queimada_evento."""
+        return """
+            INSERT INTO queimada_evento
+                (id, id_origem, dataset_id, data_ocorrencia, fonte_sensor,
+                 intensidade, bioma, dias_sem_chuva, precipitacao_mm,
+                 risco_fogo, geom, atributos_json)
+            VALUES
+                (:id, :id_origem, :dataset_id, :data_ocorrencia, :fonte_sensor,
+                 :intensidade, :bioma, :dias_sem_chuva, :precipitacao_mm,
+                 :risco_fogo,
+                 ST_GeomFromText(:geom_wkt, 4326),
+                 CAST(:atributos_json AS JSONB))
+        """
+
+
+class INPEPipeline(BasePipeline):
+    """Pipeline completa para INPE."""
+
+    def _get_dataset_name(self) -> str:
+        return f"INPE_Queimadas_{date.today().year}"
+
+    def _get_dataset_description(self) -> str:
+        return "Focos de queimada detectados - INPE BDQueimadas"
+
+
+def create_pipeline(engine, wfs_client=None):
+    """Factory para criar pipeline de INPE."""
+    # INPE não usa WFS, mas assinatura é mantida para consistency
+    extractor = INPEExtractor()
+    transformer = INPETransformer()
+    loader = INPELoader(engine)
+
+    return INPEPipeline(
+        extractor=extractor,
+        transformer=transformer,
+        loader=loader,
+        fonte_dado=INPE_SOURCE,
+    )

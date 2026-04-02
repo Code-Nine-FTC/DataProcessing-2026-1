@@ -1,39 +1,34 @@
 """
-ETL: Terras Indígenas — FUNAI
-Fonte:  GeoServer da FUNAI (https://geoserver.funai.gov.br/geoserver/Funai/ows)
+Pipeline FUNAI - Terras Indígenas
+
+Fonte: FUNAI GeoServer
+URL: https://geoserver.funai.gov.br/geoserver/Funai/ows
 Tabela: terra_indigena
+Layer: Funai:tis_poligonais
 """
-import sys
-import uuid
+import logging
 from datetime import date
+from uuid import uuid4
 
-from sqlalchemy import text
+from core.models import ExtractedData, TransformedRecord, DataSource
+from core.config import WFSConfig
+from etl.extractors import WFSExtractor
+from etl.transformers import GeometricTransformer
+from etl.loaders import GeometricLoader
+from etl.pipeline import BasePipeline
+from infrastructure.wfs_client import WFSClient, WFSRequest
 
-sys.path.insert(0, ".")
-sys.path.insert(0, "data-ingestion")
-from models.database import get_engine
-from loader import get_or_create_fonte_dado, get_or_create_dataset
-from utils import fetch_wfs, ensure_multipolygon, safe_float, row_to_json, pick
+logger = logging.getLogger(__name__)
 
-WFS_URL = "https://geoserver.funai.gov.br/geoserver/Funai/ows"
-LAYER = "Funai:tis_poligonais"
-
-FONTE = {
-    "nome": "FUNAI - Terras Indígenas",
-    "orgao_responsavel": "Fundação Nacional dos Povos Indígenas",
-    "url_origem": WFS_URL,
-    "formato": "WFS/GeoJSON",
-    "periodicidade": "irregular",
-    "escopo_geografico": "nacional",
-    "licenca": "Dados Abertos Gov",
-}
-
-DATASET = {
-    "nome": "TI_FUNAI",
-    "descricao": "Terras Indígenas do Brasil - GeoServer FUNAI",
-    "versao": str(date.today().year),
-    "data_referencia": date.today(),
-}
+FUNAI_SOURCE = DataSource(
+    name="FUNAI - Terras Indígenas",
+    url="https://geoserver.funai.gov.br/geoserver/Funai/ows",
+    format="WFS/GeoJSON",
+    agency="Fundação Nacional dos Povos Indígenas",
+    scope="nacional",
+    frequency="irregular",
+    license="Dados Abertos Gov",
+)
 
 _NOME = ("terranome", "TERRANOME", "nome_ti", "nome")
 _FASE = ("fase_ti", "FASE_TI", "fase", "situacao")
@@ -41,58 +36,103 @@ _AREA = ("areaoficia", "AREAOFICIA", "area_ha", "area")
 _ID_ORIG = ("gid", "FID", "cod_ti", "id")
 
 
-def run():
-    print("[funai] Iniciando ETL...")
-    engine = get_engine()
+class FUNAIExtractor(WFSExtractor):
+    """Extrator para Terras Indígenas da FUNAI."""
 
-    print("[funai] Baixando dados do WFS...")
-    gdf = fetch_wfs(WFS_URL, LAYER)
-    if gdf.empty:
-        print("[funai] Nenhum dado retornado pelo WFS.")
-        return
+    def __init__(self, wfs_client: WFSClient):
+        super().__init__(FUNAI_SOURCE, wfs_client, "Funai:tis_poligonais")
 
-    gdf = gdf.to_crs(epsg=4326)
-    print(f"[funai] {len(gdf)} registros recebidos. Preparando inserção...")
-
-    rows = []
-    for _, row in gdf.iterrows():
-        geom = ensure_multipolygon(row.geometry)
-        rows.append({
-            "id": str(uuid.uuid4()),
-            "id_origem": str(pick(row, _ID_ORIG, row.name)),
-            "dataset_id": None,  # preenchido após criar dataset
-            "nome": pick(row, _NOME),
-            "fase": pick(row, _FASE),
-            "area_ha": safe_float(pick(row, _AREA)),
-            "geom_wkt": geom.wkt if geom else None,
-            "atributos_json": row_to_json(row),
-        })
-
-    # Tudo numa única transação — se o INSERT falhar, dataset não é commitado
-    with engine.begin() as conn:
-        fonte_id = get_or_create_fonte_dado(conn, **FONTE)
-        dataset_id, is_new = get_or_create_dataset(conn, fonte_id, **DATASET)
-
-        if not is_new:
-            return
-
-        for r in rows:
-            r["dataset_id"] = dataset_id
-
-        conn.execute(
-            text("""
-                INSERT INTO terra_indigena
-                    (id, id_origem, dataset_id, nome, fase, area_ha, geom, atributos_json)
-                VALUES
-                    (:id, :id_origem, :dataset_id, :nome, :fase, :area_ha,
-                     ST_GeomFromText(:geom_wkt, 4326),
-                     CAST(:atributos_json AS JSONB))
-            """),
-            rows,
+    def extract(self) -> ExtractedData:
+        """Extrai dados de Terras Indígenas do WFS."""
+        request = WFSRequest(
+            url=self.data_source.url,
+            layer=self.wfs_layer,
+            wfs_version="2.0.0",
         )
 
-    print(f"[funai] {len(rows)} registros inseridos.")
+        gdf = self.wfs_client.fetch_all(request)
+
+        if gdf.empty:
+            raise Exception("No terras indígenas fetched from FUNAI")
+
+        return ExtractedData(
+            source=self.data_source,
+            rows=gdf.to_dict("records"),
+            metadata={"feature_count": len(gdf), "crs": str(gdf.crs)},
+        )
 
 
-if __name__ == "__main__":
-    run()
+class FUNAITransformer(GeometricTransformer):
+    """Transformador para dados de Terras Indígenas."""
+
+    def __init__(self):
+        super().__init__(table_name="terra_indigena")
+
+    def transform_feature(self, feature: dict) -> TransformedRecord:
+        """Transforma feature de terra indígena."""
+        props = feature.get("properties", feature)
+
+        geometry = feature.get("geometry")
+        geom_wkt = None
+        if geometry:
+            from shapely.geometry import shape
+            geom = shape(geometry)
+            geom = self.ensure_multipolygon(geom)
+            if geom:
+                geom_wkt = geom.wkt
+
+        return TransformedRecord(
+            id=str(uuid4()),
+            id_origem=str(self.pick(props, _ID_ORIG)),
+            table_name=self.table_name,
+            geometry=geom_wkt,
+            attributes={
+                "nome": self.pick(props, _NOME),
+                "fase": self.pick(props, _FASE),
+                "area_ha": self.safe_float(self.pick(props, _AREA)),
+                "atributos_json": self.row_to_json(props),
+            },
+        )
+
+
+class FUNAILoader(GeometricLoader):
+    """Carregador para Terras Indígenas."""
+
+    def __init__(self, engine):
+        super().__init__(engine, table_name="terra_indigena")
+
+    def get_insert_query(self) -> str:
+        """Query de inserção para terra_indigena."""
+        return """
+            INSERT INTO terra_indigena
+                (id, id_origem, dataset_id, nome, fase, area_ha,
+                 geom, atributos_json)
+            VALUES
+                (:id, :id_origem, :dataset_id, :nome, :fase, :area_ha,
+                 ST_GeomFromText(:geom_wkt, 4326),
+                 CAST(:atributos_json AS JSONB))
+        """
+
+
+class FUNAIPipeline(BasePipeline):
+    """Pipeline completa para FUNAI."""
+
+    def _get_dataset_name(self) -> str:
+        return "TI_FUNAI"
+
+    def _get_dataset_description(self) -> str:
+        return "Terras Indígenas do Brasil - GeoServer FUNAI"
+
+
+def create_pipeline(engine, wfs_client: WFSClient):
+    """Factory para criar pipeline de FUNAI."""
+    extractor = FUNAIExtractor(wfs_client)
+    transformer = FUNAITransformer()
+    loader = FUNAILoader(engine)
+
+    return FUNAIPipeline(
+        extractor=extractor,
+        transformer=transformer,
+        loader=loader,
+        fonte_dado=FUNAI_SOURCE,
+    )
