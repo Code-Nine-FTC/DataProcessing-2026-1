@@ -59,6 +59,59 @@ alembic revision --autogenerate -m "initial_migration"
 alembic upgrade head
 ```
 
+5. **Configurar o VSCode**:
+    - Crie uma pasta `.vscode` na raiz do projeto.
+    - Dentro da pasta `.vscode`, crie o arquivo `settings.json` e adicione:
+    ```json
+    {
+        "terminal.integrated.env.windows": {
+            "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.pycache_global"
+        },
+        "terminal.integrated.env.linux": {
+            "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.pycache_global"
+        },
+        "terminal.integrated.env.osx": {
+            "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.pycache_global"
+        }
+    }
+    ```
+    - Dentro da pasta `.vscode`, crie o arquivo `launch.json` e adicione:
+    ```json
+    {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "FastAPI Debug",
+                "type": "debugpy",
+                "request": "launch",
+                "module": "uvicorn",
+                "args": [
+                    "api.main:app",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "5050",
+                ],
+                "env": {
+                    "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.pycache_global"
+                },
+                "console": "integratedTerminal"
+            }
+        ]
+    }
+    ```
+
+9. **Rodar a aplicação**:
+    - Para rodar a aplicação:
+    ```bash
+    python -m api/main.py
+    ```
+    ou
+    ```bash
+    uvicorn api.main:app --reload --port 5000
+    ```
+    - Para rodar com o modo debugger, basta apertar `F5` no VSCode.
+
 ## 📂 Estrutura de Pastas
 
 - `api/`: Configurações globais e rotas.

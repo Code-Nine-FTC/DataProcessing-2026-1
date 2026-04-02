@@ -31,7 +31,7 @@ FONTE = {
 }
 
 DATASET = {
-    "nome": f"QUILOMBOLA_PALMARES_{date.today().isoformat()}",
+    "nome": "QUILOMBOLA_PALMARES",
     "descricao": "Territórios Quilombolas do Brasil - Acervo Fundiário INCRA/FCP",
     "versao": str(date.today().year),
     "data_referencia": date.today(),
@@ -46,13 +46,6 @@ _ID_ORIG = ("NR_PROCES", "nr_processo", "gid", "FID", "id")
 def run():
     print("[palmares] Iniciando ETL...")
     engine = get_engine()
-
-    with engine.begin() as conn:
-        fonte_id = get_or_create_fonte_dado(conn, **FONTE)
-        dataset_id, is_new = get_or_create_dataset(conn, fonte_id, **DATASET)
-
-    if not is_new:
-        return
 
     print("[palmares] Baixando dados do WFS...")
     gdf = fetch_wfs(WFS_URL, LAYER, wfs_version="1.1.0")
@@ -69,7 +62,7 @@ def run():
         rows.append({
             "id": str(uuid.uuid4()),
             "id_origem": str(pick(row, _ID_ORIG, row.name)),
-            "dataset_id": dataset_id,
+            "dataset_id": None,  # preenchido após criar dataset
             "nome": pick(row, _NOME),
             "status_processo": pick(row, _STATUS),
             "area_ha": safe_float(pick(row, _AREA)),
@@ -77,7 +70,17 @@ def run():
             "atributos_json": row_to_json(row),
         })
 
+    # Tudo numa única transação — se o INSERT falhar, dataset não é commitado
     with engine.begin() as conn:
+        fonte_id = get_or_create_fonte_dado(conn, **FONTE)
+        dataset_id, is_new = get_or_create_dataset(conn, fonte_id, **DATASET)
+
+        if not is_new:
+            return
+
+        for r in rows:
+            r["dataset_id"] = dataset_id
+
         conn.execute(
             text("""
                 INSERT INTO territorio_quilombola

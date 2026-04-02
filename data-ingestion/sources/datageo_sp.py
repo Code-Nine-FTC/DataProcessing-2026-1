@@ -63,7 +63,7 @@ def _dataset_payload(layer_cfg: dict) -> dict:
     slug = layer_cfg["layer"].split(":")[-1].upper()
     today = date.today()
     return {
-        "nome": f"DATAGEO_SP_{slug}_{today.isoformat()}",
+        "nome": f"DATAGEO_SP_{slug}",
         "descricao": f"{layer_cfg['tema']} - {layer_cfg['subtipo']} (camada {layer_cfg['layer']})",
         "versao": str(today.year),
         "data_referencia": today,
