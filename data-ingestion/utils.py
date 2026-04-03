@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import requests
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import MultiPolygon, Polygon, GeometryCollection
+from shapely.validation import make_valid
 
 # Palmares e INCRA usam WFS 1.1.0 que não suporta startIndex,
 # então eu adicionei um parâmetro para forçar o uso do método antigo de paginação.
@@ -41,12 +42,38 @@ def fetch_wfs(base_url: str, layer: str, batch_size: int = 500, wfs_version: str
 
 
 def ensure_multipolygon(geom):
-    """Garante que a geometria é um MultiPolygon (converte Polygon se necessário)."""
+    """Garante que a geometria é um MultiPolygon (converte Polygon se necessário) e corrige geometrias inválidas."""
     if geom is None or geom.is_empty:
         return None
+        
+    if not geom.is_valid:
+        geom = make_valid(geom)
+        
+    if geom.is_empty:
+        return None
+        
+    if geom.geom_type == "GeometryCollection":
+        polygons = []
+        for g in geom.geoms:
+            if g.geom_type in ("Polygon", "MultiPolygon"):
+                polygons.append(g)
+        if not polygons:
+            return None
+        # Convert to a single MultiPolygon containing all extracted polygon parts
+        multi_parts = []
+        for p in polygons:
+            if p.geom_type == "Polygon":
+                multi_parts.append(p)
+            else:
+                multi_parts.extend(p.geoms)
+        return MultiPolygon(multi_parts) if multi_parts else None
+        
     if geom.geom_type == "Polygon":
         return MultiPolygon([geom])
-    return geom
+    elif geom.geom_type == "MultiPolygon":
+        return geom
+        
+    return None
 
 
 def safe_float(val, null_sentinel: float = None) -> float | None:
