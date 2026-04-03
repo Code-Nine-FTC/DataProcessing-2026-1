@@ -10,18 +10,23 @@ from shapely.geometry import MultiPolygon, Polygon
 
 # Palmares e INCRA usam WFS 1.1.0 que não suporta startIndex,
 # então eu adicionei um parâmetro para forçar o uso do método antigo de paginação.
-def fetch_wfs(base_url: str, layer: str, batch_size: int = 500, wfs_version: str = "2.0.0") -> gpd.GeoDataFrame:
-    """Baixa todas as features de um WFS com paginação automática (WFS 2.0 startIndex)."""
+def fetch_wfs(base_url: str, layer: str, batch_size: int = 500, wfs_version: str = "2.0.0", sort_by: str | None = None) -> gpd.GeoDataFrame:
+    """Baixa todas as features de um WFS com paginação automática."""
     gdfs, start = [], 0
     params = {
         "service": "WFS",
-        "version": "2.0.0",
+        "version": wfs_version,
         "request": "GetFeature",
         "typeName": layer,
         "outputFormat": "application/json",
         "srsName": "EPSG:4326",
-        "count": batch_size,
     }
+    if wfs_version.startswith("1."):
+        params["maxFeatures"] = batch_size
+    else:
+        params["count"] = batch_size
+    if sort_by:
+        params["sortBy"] = sort_by
     while True:
         params["startIndex"] = start
         print(f"  → features {start}–{start + batch_size}...")

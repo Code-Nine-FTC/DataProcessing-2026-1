@@ -46,7 +46,7 @@ def run():
     engine = get_engine()
 
     print("[funai] Baixando dados do WFS...")
-    gdf = fetch_wfs(WFS_URL, LAYER)
+    gdf = fetch_wfs(WFS_URL, LAYER, sort_by="gid")
     if gdf.empty:
         print("[funai] Nenhum dado retornado pelo WFS.")
         return

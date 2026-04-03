@@ -19,9 +19,9 @@ sys.path.insert(0, ".")
 sys.path.insert(0, "data-ingestion")
 from models.database import get_engine
 from loader import get_or_create_fonte_dado, get_or_create_dataset
-from utils import safe_float, safe_int
+from utils import safe_float, safe_int, pick
 
-CSV_GLOB = "database/docs/bdqueimadas_*.csv"
+CSV_GLOB = "models/docs/bdqueimadas_*.csv"
 
 FONTE = {
     "nome": "INPE - BDQueimadas",
@@ -57,7 +57,7 @@ def run():
     print("[inpe] Iniciando ETL...")
     csv_path = _find_csv()
     if not csv_path:
-        print(f"[inpe] Nenhum CSV encontrado em '{CSV_GLOB}'. Coloque o arquivo em database/docs/.")
+        print(f"[inpe] Nenhum CSV encontrado em '{CSV_GLOB}'. Coloque o arquivo em models/docs/.")
         return
 
     print(f"[inpe] Lendo: {csv_path}")

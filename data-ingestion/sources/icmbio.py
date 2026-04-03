@@ -23,7 +23,7 @@ sys.path.insert(0, ".")
 sys.path.insert(0, "data-ingestion")
 from models.database import get_engine
 from loader import get_or_create_fonte_dado, get_or_create_dataset
-from utils import ensure_multipolygon, row_to_json
+from utils import ensure_multipolygon, row_to_json, pick
 
 WFS_URL = "http://terrabrasilis.dpi.inpe.br/geoserver/wfs"
 
