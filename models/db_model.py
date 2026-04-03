@@ -2,21 +2,20 @@
 from datetime import datetime, date
 from typing import Any, List, Optional
 from uuid import UUID, uuid4
+import uuid
 
 from sqlalchemy import (
-    TEXT, VARCHAR, UUID as SQLAlchemyUUID, ForeignKey, 
-    Integer, Numeric, Boolean, DateTime, Date, func, 
-    CheckConstraint, text, SMALLINT, String, CheckConstraint, Index, UniqueConstraint
+    TEXT, VARCHAR, UUID as SQLAlchemyUUID, ForeignKey,
+    Integer, Numeric, Boolean, DateTime, Date, func,
+    CheckConstraint, text, SMALLINT, SmallInteger, String, Index, UniqueConstraint, select
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.asyncio import AsyncAttrs
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, selectinload
+from sqlalchemy.engine import Row
 from geoalchemy2 import Geometry
 from pgvector.sqlalchemy import Vector
-from typing import Optional
-from uuid import UUID
-import uuid
-from sqlalchemy import ForeignKey, Numeric, Integer, String, SmallInteger, DateTime, func, CheckConstraint, Index, UniqueConstraint
+
 
 
 
@@ -77,6 +76,104 @@ class Municipio(Base):
     estado_id: Mapped[Optional[int]] = mapped_column(ForeignKey("estado.id"))
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
 
+    @staticmethod
+    async def get_dados_municipais(session: AsyncSession, municipio_id: int | None = None) -> list[Row]:
+        query = text("""
+            WITH cte_imoveis AS (
+                SELECT municipio_id, jsonb_agg(jsonb_build_object(
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome_imovel, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
+                )) AS dados FROM imovel_rural 
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
+            ),
+            cte_ucs AS (
+                SELECT municipio_id, jsonb_agg(jsonb_build_object(
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
+                )) AS dados FROM unidade_conservacao 
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
+            ),
+            cte_tis AS (
+                SELECT municipio_id, jsonb_agg(jsonb_build_object(
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
+                )) AS dados FROM terra_indigena 
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
+            ),
+            cte_assentamentos AS (
+                SELECT municipio_id, jsonb_agg(jsonb_build_object(
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
+                )) AS dados FROM assentamento_rural 
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
+            ),
+            cte_quilombolas AS (
+                SELECT municipio_id, jsonb_agg(jsonb_build_object(
+                    'id', CAST(id AS TEXT), 
+                    'nome', nome, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
+                )) AS dados FROM territorio_quilombola 
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
+            ),
+            cte_alertas AS (
+                SELECT municipio_id, jsonb_agg(jsonb_build_object(
+                    'id', CAST(id AS TEXT), 
+                    'nome', tipo_alerta, 
+                    'area_ha', area_ha,
+                    'geom', ST_AsText(geom), 
+                    'atributos_json', atributos_json
+                )) AS dados FROM desmatamento_alerta 
+                WHERE (CAST(:mun_id AS INTEGER) IS NULL OR municipio_id = CAST(:mun_id AS INTEGER)) 
+                GROUP BY municipio_id
+            )
+
+            SELECT 
+                m.id, 
+                m.nome, 
+                m.codigo_ibge, 
+                e.sigla AS estado_sigla,
+                ST_AsText(m.geom) AS geom,
+                -- ATENÇÃO: Verifique se no seu Schema Pydantic é 'imovel_rural' ou 'imoveis_rurais'
+                COALESCE(i.dados, '[]'::jsonb) AS imovel_rural, 
+                COALESCE(u.dados, '[]'::jsonb) AS unidades_conservacao,
+                COALESCE(t.dados, '[]'::jsonb) AS terras_indigenas,
+                COALESCE(s.dados, '[]'::jsonb) AS assentamentos,
+                COALESCE(q.dados, '[]'::jsonb) AS quilombolas,
+                COALESCE(a.dados, '[]'::jsonb) AS alertas_desmatamento
+            FROM municipio m
+            JOIN estado e ON m.estado_id = e.id
+            LEFT JOIN cte_imoveis i      ON m.id = i.municipio_id
+            LEFT JOIN cte_ucs u          ON m.id = u.municipio_id
+            LEFT JOIN cte_tis t          ON m.id = t.municipio_id
+            LEFT JOIN cte_assentamentos s ON m.id = s.municipio_id
+            LEFT JOIN cte_quilombolas q  ON m.id = q.municipio_id
+            LEFT JOIN cte_alertas a      ON m.id = a.municipio_id
+            WHERE (CAST(:mun_id AS INTEGER) IS NULL OR m.id = CAST(:mun_id AS INTEGER))
+        """)
+
+        result = await session.execute(query, {"mun_id": municipio_id})
+        return result.all()
+
+
 class GradeEspacial(Base):
     __tablename__ = "grade_espacial"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -115,6 +212,10 @@ class QueimadaEvento(Base):
     data_ocorrencia: Mapped[Optional[datetime]] = mapped_column(DateTime)
     fonte_sensor: Mapped[Optional[str]] = mapped_column(TEXT)
     intensidade: Mapped[Optional[float]] = mapped_column(Numeric)
+    bioma: Mapped[Optional[str]] = mapped_column(TEXT)
+    dias_sem_chuva: Mapped[Optional[int]] = mapped_column(Integer)
+    precipitacao_mm: Mapped[Optional[float]] = mapped_column(Numeric)
+    risco_fogo: Mapped[Optional[float]] = mapped_column(Numeric)
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
@@ -262,7 +363,7 @@ class Conceito(Base):
 class ConceitoAlias(Base):
     __tablename__ = "conceito_alias"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
-    coceito_id: Mapped[UUID] = mapped_column(ForeignKey("conceito.id"))
+    conceito_id: Mapped[UUID] = mapped_column(ForeignKey("conceito.id"))
     alias: Mapped[Optional[str]] = mapped_column(TEXT)
 
 class Documento(Base):
@@ -283,7 +384,7 @@ class DocumentoTrecho(Base):
     documento_id: Mapped[UUID] = mapped_column(ForeignKey("documento.id"))
     texto: Mapped[Optional[str]] = mapped_column(TEXT)
     ordem: Mapped[Optional[int]] = mapped_column(Integer)
-    embedding: Mapped[Vector] = mapped_column(Vector(1536))
+    embedding: Mapped[Vector] = mapped_column(Vector(768))  # paraphrase-multilingual-mpnet-base-v2
     tokens_count: Mapped[Optional[int]] = mapped_column(Integer)
     __table_args__ = (
         Index(
@@ -329,7 +430,7 @@ class RespostaSistema(Base):
     texto_resposta: Mapped[Optional[str]] = mapped_column(TEXT)
     sql_executado: Mapped[Optional[str]] = mapped_column(TEXT)
     fontes_utilizadas_json: Mapped[Optional[dict]] = mapped_column(JSONB)
-    bbox_resultado: Mapped[Any] = mapped_column(Geometry("POLYGON", srid=4326))
+    bbox_resultado: Mapped[Optional[Any]] = mapped_column(Geometry("POLYGON", srid=4326), nullable=True)
     tempo_resposta_ms: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(
         String, 

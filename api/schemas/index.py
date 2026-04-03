@@ -3,8 +3,6 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
-# --- Blocos genéricos reutilizáveis ---
-
 class GrupoItem(BaseModel):
     label: str
     valor: float
@@ -25,7 +23,15 @@ class RespostaTemporalQueimada(BaseModel):
     total: int
 
 
-# --- RF-07 #9: Data do último incêndio por estado ---
+class SerieTemporalAreaItem(BaseModel):
+    periodo: str
+    area_ha: float
+
+
+class RespostaTemporalDesmatamento(BaseModel):
+    series: List[SerieTemporalAreaItem]
+    total_ha: float
+
 
 class UltimoIncendioItem(BaseModel):
     estado: str
@@ -36,11 +42,19 @@ class RespostaUltimoIncendio(BaseModel):
     estados: List[UltimoIncendioItem]
 
 
-# --- RF-07 #13, #14, #15, #18: Sobreposições com áreas especiais ---
-
 class ResumoSobreposicoes(BaseModel):
     imoveis_com_sobreposicao_uc: int
     imoveis_com_sobreposicao_ti: int
     imoveis_com_sobreposicao_quilombola: int
     imoveis_com_sobreposicao_assentamento: int
     total_imoveis: int
+
+
+class QueimadaDentroForaItem(BaseModel):
+    dentro_imovel: bool
+    total: int
+
+
+class RespostaQueimadaDentroFora(BaseModel):
+    grupos: List[QueimadaDentroForaItem]
+    total: int
