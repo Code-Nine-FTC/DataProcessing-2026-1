@@ -222,6 +222,10 @@ class QueimadaEvento(Base):
     data_ocorrencia: Mapped[Optional[datetime]] = mapped_column(DateTime)
     fonte_sensor: Mapped[Optional[str]] = mapped_column(TEXT)
     intensidade: Mapped[Optional[float]] = mapped_column(Numeric)
+    bioma: Mapped[Optional[str]] = mapped_column(TEXT)
+    dias_sem_chuva: Mapped[Optional[int]] = mapped_column(Integer)
+    precipitacao_mm: Mapped[Optional[float]] = mapped_column(Numeric)
+    risco_fogo: Mapped[Optional[float]] = mapped_column(Numeric)
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
@@ -390,7 +394,7 @@ class DocumentoTrecho(Base):
     documento_id: Mapped[UUID] = mapped_column(ForeignKey("documento.id"))
     texto: Mapped[Optional[str]] = mapped_column(TEXT)
     ordem: Mapped[Optional[int]] = mapped_column(Integer)
-    embedding: Mapped[Vector] = mapped_column(Vector(1536))
+    embedding: Mapped[Vector] = mapped_column(Vector(768))  # paraphrase-multilingual-mpnet-base-v2
     tokens_count: Mapped[Optional[int]] = mapped_column(Integer)
     __table_args__ = (
         Index(
@@ -436,7 +440,7 @@ class RespostaSistema(Base):
     texto_resposta: Mapped[Optional[str]] = mapped_column(TEXT)
     sql_executado: Mapped[Optional[str]] = mapped_column(TEXT)
     fontes_utilizadas_json: Mapped[Optional[dict]] = mapped_column(JSONB)
-    bbox_resultado: Mapped[Any] = mapped_column(Geometry("POLYGON", srid=4326))
+    bbox_resultado: Mapped[Optional[Any]] = mapped_column(Geometry("POLYGON", srid=4326), nullable=True)
     tempo_resposta_ms: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(
         String, 
