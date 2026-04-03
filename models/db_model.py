@@ -2,29 +2,19 @@
 from datetime import datetime, date
 from typing import Any, List, Optional
 from uuid import UUID, uuid4
+import uuid
 
 from sqlalchemy import (
-    TEXT, VARCHAR, UUID as SQLAlchemyUUID, ForeignKey, 
-    Integer, Numeric, Boolean, DateTime, Date, func, 
-    CheckConstraint, text, SMALLINT, String, CheckConstraint, Index, UniqueConstraint
+    TEXT, VARCHAR, UUID as SQLAlchemyUUID, ForeignKey,
+    Integer, Numeric, Boolean, DateTime, Date, func,
+    CheckConstraint, text, SMALLINT, SmallInteger, String, Index, UniqueConstraint, select
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.asyncio import AsyncAttrs
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, selectinload
+from sqlalchemy.engine import Row
 from geoalchemy2 import Geometry
 from pgvector.sqlalchemy import Vector
-from typing import Optional
-from uuid import UUID
-import uuid
-from sqlalchemy import ForeignKey, Numeric, Integer, String, SmallInteger, DateTime, func, CheckConstraint, Index, UniqueConstraint
-
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-)
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from sqlalchemy.engine import Row
 
 
 
@@ -222,6 +212,10 @@ class QueimadaEvento(Base):
     data_ocorrencia: Mapped[Optional[datetime]] = mapped_column(DateTime)
     fonte_sensor: Mapped[Optional[str]] = mapped_column(TEXT)
     intensidade: Mapped[Optional[float]] = mapped_column(Numeric)
+    bioma: Mapped[Optional[str]] = mapped_column(TEXT)
+    dias_sem_chuva: Mapped[Optional[int]] = mapped_column(Integer)
+    precipitacao_mm: Mapped[Optional[float]] = mapped_column(Numeric)
+    risco_fogo: Mapped[Optional[float]] = mapped_column(Numeric)
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
@@ -369,7 +363,7 @@ class Conceito(Base):
 class ConceitoAlias(Base):
     __tablename__ = "conceito_alias"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
-    coceito_id: Mapped[UUID] = mapped_column(ForeignKey("conceito.id"))
+    conceito_id: Mapped[UUID] = mapped_column(ForeignKey("conceito.id"))
     alias: Mapped[Optional[str]] = mapped_column(TEXT)
 
 class Documento(Base):
@@ -390,7 +384,7 @@ class DocumentoTrecho(Base):
     documento_id: Mapped[UUID] = mapped_column(ForeignKey("documento.id"))
     texto: Mapped[Optional[str]] = mapped_column(TEXT)
     ordem: Mapped[Optional[int]] = mapped_column(Integer)
-    embedding: Mapped[Vector] = mapped_column(Vector(1536))
+    embedding: Mapped[Vector] = mapped_column(Vector(768))  # paraphrase-multilingual-mpnet-base-v2
     tokens_count: Mapped[Optional[int]] = mapped_column(Integer)
     __table_args__ = (
         Index(
@@ -436,7 +430,7 @@ class RespostaSistema(Base):
     texto_resposta: Mapped[Optional[str]] = mapped_column(TEXT)
     sql_executado: Mapped[Optional[str]] = mapped_column(TEXT)
     fontes_utilizadas_json: Mapped[Optional[dict]] = mapped_column(JSONB)
-    bbox_resultado: Mapped[Any] = mapped_column(Geometry("POLYGON", srid=4326))
+    bbox_resultado: Mapped[Optional[Any]] = mapped_column(Geometry("POLYGON", srid=4326), nullable=True)
     tempo_resposta_ms: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(
         String, 
