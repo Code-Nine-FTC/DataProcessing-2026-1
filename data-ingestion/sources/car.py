@@ -70,11 +70,11 @@ class CARTransformer(GeometricTransformer):
             geom = self.ensure_multipolygon(geom)
             if geom:
                 geom_wkt = geom.wkt
-                # Calcular centroide
+                # representative_point() garante ponto dentro do polígono
+                # (centroid pode cair fora em polígonos côncavos)
                 if not geom.is_empty:
-                    centroid = geom.centroid
-                    if centroid:
-                        centroid_wkt = f"POINT({centroid.x} {centroid.y})"
+                    rp = geom.representative_point()
+                    centroid_wkt = f"POINT({rp.x} {rp.y})"
 
         # Buscar municipio_id
         municipio_nome = self.pick(props, _MUNICIPIO)

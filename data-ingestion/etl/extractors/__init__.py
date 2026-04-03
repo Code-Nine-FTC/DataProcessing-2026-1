@@ -4,6 +4,7 @@ Responsável por buscar dados de fontes externas.
 """
 import logging
 import glob
+import os
 from abc import ABC, abstractmethod
 from typing import Optional
 
@@ -60,14 +61,8 @@ class WFSExtractor(BaseExtractor):
 
         try:
             gdf = self.wfs_client.fetch_all(request)
-        except ExtractionException as e:
-            logger.warning(f"Failed to fetch {self.wfs_layer}: {str(e)} - returning empty dataset")
-            # Graceful degradation: return empty dataset instead of failing
-            return ExtractedData(
-                source=self.data_source,
-                rows=[],
-                metadata={"feature_count": 0},
-            )
+        except ExtractionException:
+            raise  # Propaga a excepção em vez de silenciar
 
         # Graceful degradation: return empty dataset if no data
         if gdf.empty:
@@ -98,9 +93,11 @@ class CSVExtractor(BaseExtractor):
         self.csv_pattern = csv_pattern
 
     def _find_csv(self) -> Optional[str]:
-        """Encontra o arquivo CSV mais recente."""
-        files = sorted(glob.glob(self.csv_pattern))
-        return files[-1] if files else None
+        """Encontra o arquivo CSV mais recente pela data de modificação."""
+        files = glob.glob(self.csv_pattern)
+        if not files:
+            return None
+        return max(files, key=os.path.getmtime)
 
     def _read_csv(self, filepath: str) -> pd.DataFrame:
         """Lê arquivo CSV."""

@@ -102,11 +102,18 @@ class ICMBioExtractor(WFSExtractor):
         # Deduplicar por ID origem (mesma UC pode estar em múltiplos biomas)
         seen_ids = set()
         deduped = []
+        skipped_none = 0
         for feature in all_features:
-            id_orig = _pick(feature, _ID_ORIG, feature.get("properties", {}).get("gid"))
+            id_orig = _pick(feature, _ID_ORIG) or feature.get("properties", {}).get("gid")
+            if id_orig is None:
+                skipped_none += 1
+                continue
             if id_orig not in seen_ids:
                 seen_ids.add(id_orig)
                 deduped.append(feature)
+
+        if skipped_none:
+            logger.warning(f"{skipped_none} features descartadas por id_orig nulo.")
 
         logger.info(
             f"UC deduplication: {len(all_features)} → {len(deduped)} "

@@ -29,10 +29,19 @@ class DatabaseConfig:
         if "asyncpg" in url:
             url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
 
+        def _int_env(name: str, default: int) -> int:
+            val = os.getenv(name, str(default))
+            try:
+                return int(val)
+            except ValueError:
+                raise ValueError(
+                    f"Variável de ambiente {name}='{val}' não é um inteiro válido."
+                )
+
         return DatabaseConfig(
             url=url,
-            pool_size=int(os.getenv("DB_POOL_SIZE", 10)),
-            max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 20)),
+            pool_size=_int_env("DB_POOL_SIZE", 10),
+            max_overflow=_int_env("DB_MAX_OVERFLOW", 20),
             echo=os.getenv("DB_ECHO", "false").lower() == "true",
         )
 
@@ -52,12 +61,21 @@ class WFSConfig:
     @staticmethod
     def from_env() -> "WFSConfig":
         """Cria configuração a partir de variáveis de ambiente."""
+        def _int_env(name: str, default: int) -> int:
+            val = os.getenv(name, str(default))
+            try:
+                return int(val)
+            except ValueError:
+                raise ValueError(
+                    f"Variável de ambiente {name}='{val}' não é um inteiro válido."
+                )
+
         raw_bbox = os.getenv("WFS_BBOX", "").strip()
         return WFSConfig(
-            timeout=int(os.getenv("WFS_TIMEOUT", 120)),
-            batch_size=int(os.getenv("WFS_BATCH_SIZE", 500)),
-            max_retries=int(os.getenv("WFS_MAX_RETRIES", 3)),
-            retry_delay=int(os.getenv("WFS_RETRY_DELAY", 5)),
+            timeout=_int_env("WFS_TIMEOUT", 120),
+            batch_size=_int_env("WFS_BATCH_SIZE", 500),
+            max_retries=_int_env("WFS_MAX_RETRIES", 3),
+            retry_delay=_int_env("WFS_RETRY_DELAY", 5),
             bbox=raw_bbox if raw_bbox else None,
         )
 

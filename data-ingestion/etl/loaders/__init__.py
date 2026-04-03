@@ -66,36 +66,40 @@ class BaseLoader(ABC):
         failed = 0
         errors = []
 
+        # Tenta bulk insert; se falhar, faz fallback registro a registro
+        params_list = [
+            self._prepare_record_params(record, dataset_id) for record in records
+        ]
         try:
             with self.engine.begin() as conn:
-                # Preparar parametros para bulk insert
-                params_list = []
-                for record in records:
-                    params = self._prepare_record_params(record, dataset_id)
-                    params_list.append(params)
-
-                # Executar insert bulk
-                if params_list:
-                    conn.execute(
-                        text(self.get_insert_query()),
-                        params_list,
-                    )
-                    inserted = len(params_list)
-
-            logger.info(
-                f"[{self.table_name}] Successfully loaded {inserted} records"
+                conn.execute(text(self.get_insert_query()), params_list)
+            inserted = len(params_list)
+        except Exception as bulk_err:
+            logger.warning(
+                f"[{self.table_name}] Bulk insert falhou ({bulk_err}). "
+                "Tentando registro a registro..."
             )
+            for params in params_list:
+                try:
+                    with self.engine.begin() as conn:
+                        conn.execute(text(self.get_insert_query()), [params])
+                    inserted += 1
+                except Exception as row_err:
+                    logger.warning(f"[{self.table_name}] Registro ignorado: {row_err}")
+                    errors.append(str(row_err))
+                    failed += 1
 
-            return LoadResult(
-                total_records=len(records),
-                inserted_records=inserted,
-                failed_records=failed,
-                errors=errors,
-            )
+        logger.info(
+            f"[{self.table_name}] Successfully loaded {inserted}/{len(records)} records"
+            + (f" ({failed} ignorados)" if failed else "")
+        )
 
-        except Exception as e:
-            logger.error(f"[{self.table_name}] Load failed: {str(e)}")
-            raise LoadException(f"Failed to load into {self.table_name}: {str(e)}")
+        return LoadResult(
+            total_records=len(records),
+            inserted_records=inserted,
+            failed_records=failed,
+            errors=errors,
+        )
 
     def _prepare_record_params(
         self, record: TransformedRecord, dataset_id: str

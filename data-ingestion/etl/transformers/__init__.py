@@ -61,7 +61,7 @@ class BaseTransformer(ABC):
             return None
         try:
             f = float(val)
-            if math.isnan(f):
+            if math.isnan(f) or math.isinf(f):
                 return None
             if null_sentinel is not None and f == null_sentinel:
                 return None
@@ -81,12 +81,17 @@ class BaseTransformer(ABC):
 
     @staticmethod
     def ensure_multipolygon(geom) -> Optional[MultiPolygon]:
-        """Garante que a geometria é um MultiPolygon."""
+        """Garante que a geometria é um MultiPolygon. Ignora geometrias não-poligonais."""
         if geom is None or (hasattr(geom, "is_empty") and geom.is_empty):
             return None
-        if hasattr(geom, "geom_type") and geom.geom_type == "Polygon":
+        geom_type = getattr(geom, "geom_type", None)
+        if geom_type == "Polygon":
             return MultiPolygon([geom])
-        return geom
+        if geom_type == "MultiPolygon":
+            return geom
+        # Point, LineString, etc. não são válidos para colunas MULTIPOLYGON
+        logger.warning(f"ensure_multipolygon: tipo não suportado ignorado: {geom_type}")
+        return None
 
     @staticmethod
     def row_to_json(row: dict) -> str:

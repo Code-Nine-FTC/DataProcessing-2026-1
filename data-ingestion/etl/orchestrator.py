@@ -30,6 +30,16 @@ class PipelineOrchestrator:
         self.pipelines: Dict[str, callable] = {}
         self.results = {}
 
+    def close(self) -> None:
+        """Libera as conexões do pool de banco."""
+        self.engine.dispose()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
     def register_pipeline(self, name: str, factory: callable):
         """Registra uma factory de pipeline."""
         self.pipelines[name] = factory
@@ -68,7 +78,7 @@ class PipelineOrchestrator:
             try:
                 self.run_single(pipeline_name)
                 successful += 1
-            except PipelineException as e:
+            except Exception as e:
                 logger.error(f"Pipeline failed: {str(e)}")
                 failed += 1
 

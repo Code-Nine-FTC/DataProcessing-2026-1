@@ -143,18 +143,18 @@ class INPETransformer(BaseTransformer):
                 # Extrair data e hora
                 data_str = str(self.pick(row_dict, _DATAHORA) or "").strip()
                 data_ocorrencia = None
-                try:
-                    data_ocorrencia = datetime.strptime(data_str, "%Y/%m/%d %H:%M:%S")
-                except ValueError:
-                    # Use current date if parsing fails
-                    data_ocorrencia = datetime.now()
+                if data_str:
+                    try:
+                        data_ocorrencia = datetime.strptime(data_str, "%Y/%m/%d %H:%M:%S")
+                    except ValueError:
+                        logger.warning(f"Data inválida ignorada: '{data_str}'")
 
                 # Criar geometria POINT (não MULTIPOLYGON!)
                 geom_wkt = f"POINT({lon} {lat})"
 
                 record = TransformedRecord(
                     id=str(uuid4()),
-                    id_origem=f"{lat}_{lon}_{data_str}",
+                    id_origem=f"{lat}_{lon}_{data_str}_{str(uuid4())[:8]}",
                     table_name=self.table_name,
                     geometry=geom_wkt,
                     attributes={

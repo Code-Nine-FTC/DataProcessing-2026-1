@@ -27,6 +27,8 @@ class WFSRequest:
     crs: str = "EPSG:4326"
     # Se não for None, substitui WFSConfig.bbox; se ambos forem omitidos, não há filtro bbox.
     bbox: Optional[str] = None
+    # Se False, faz apenas UMA requisição sem startIndex (para servidores que não suportam paginação)
+    paginate: bool = True
 
 
 class WFSClient:
@@ -54,6 +56,8 @@ class WFSClient:
 
         while True:
             try:
+                # WFS 2.0 usa "count"; WFS 1.x usa "maxFeatures"
+                count_key = "count" if request.wfs_version == "2.0.0" else "maxFeatures"
                 params = {
                     "service": "WFS",
                     "version": request.wfs_version,
@@ -61,8 +65,13 @@ class WFSClient:
                     "typeName": request.layer,
                     "outputFormat": request.output_format,
                     "srsName": request.crs,
-                    "count": request.batch_size,
+                    count_key: request.batch_size,
                 }
+
+                # startIndex só é adicionado se paginação estiver habilitada
+                # (alguns servidores WFS 1.1.0 não suportam startIndex e retornam ExceptionReport)
+                if request.paginate:
+                    params["startIndex"] = start
 
                 effective_bbox = (
                     request.bbox
@@ -71,12 +80,6 @@ class WFSClient:
                 )
                 if effective_bbox:
                     params["bbox"] = effective_bbox
-
-                # WFS 2.0 usa startIndex; versões antigas usam startPosition
-                if request.wfs_version == "2.0.0":
-                    params["startIndex"] = start
-                else:
-                    params["startPosition"] = start
 
                 logger.info(
                     f"Fetching {request.layer} ({start}–{start + request.batch_size})..."
@@ -92,7 +95,15 @@ class WFSClient:
                 chunk = gpd.read_file(io.BytesIO(response.content))
 
                 if chunk.empty:
-                    logger.info(f"No more features from {request.layer}")
+                    # Verificar se o servidor retornou conteúdo real vazio
+                    # ou uma resposta de erro com body vazio (evitar loop infinito)
+                    if len(response.content) < 50:
+                        logger.warning(
+                            f"Resposta suspeita de {request.layer} (body < 50 bytes). "
+                            "Encerrando paginação."
+                        )
+                    else:
+                        logger.info(f"No more features from {request.layer}")
                     break
 
                 gdfs.append(chunk)

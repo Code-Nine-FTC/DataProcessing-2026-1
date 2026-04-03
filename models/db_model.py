@@ -2,29 +2,19 @@
 from datetime import datetime, date
 from typing import Any, List, Optional
 from uuid import UUID, uuid4
+import uuid
 
 from sqlalchemy import (
-    TEXT, VARCHAR, UUID as SQLAlchemyUUID, ForeignKey, 
-    Integer, Numeric, Boolean, DateTime, Date, func, 
-    CheckConstraint, text, SMALLINT, String, CheckConstraint, Index, UniqueConstraint
+    TEXT, VARCHAR, UUID as SQLAlchemyUUID, ForeignKey,
+    Integer, Numeric, Boolean, DateTime, Date, func,
+    CheckConstraint, text, SMALLINT, SmallInteger, String, Index, UniqueConstraint, select
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.asyncio import AsyncAttrs
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, selectinload
+from sqlalchemy.engine import Row
 from geoalchemy2 import Geometry
 from pgvector.sqlalchemy import Vector
-from typing import Optional
-from uuid import UUID
-import uuid
-from sqlalchemy import ForeignKey, Numeric, Integer, String, SmallInteger, DateTime, func, CheckConstraint, Index, UniqueConstraint
-
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-)
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from sqlalchemy.engine import Row
 
 
 
@@ -373,7 +363,7 @@ class Conceito(Base):
 class ConceitoAlias(Base):
     __tablename__ = "conceito_alias"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
-    coceito_id: Mapped[UUID] = mapped_column(ForeignKey("conceito.id"))
+    conceito_id: Mapped[UUID] = mapped_column(ForeignKey("conceito.id"))
     alias: Mapped[Optional[str]] = mapped_column(TEXT)
 
 class Documento(Base):
