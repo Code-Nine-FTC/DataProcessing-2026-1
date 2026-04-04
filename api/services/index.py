@@ -41,6 +41,25 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
+    # RF-07 #1 — Área total das propriedades por município
+    # ------------------------------------------------------------------
+    async def imoveis_area_por_municipio(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT CONCAT(m.nome, ' - ', e.sigla) AS label,
+                       ROUND(SUM(i.area_ha)::numeric, 2)::float AS valor
+                FROM imovel_rural i
+                JOIN municipio m ON m.id = i.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                WHERE i.area_ha IS NOT NULL
+                GROUP BY m.nome, e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
+
+    # ------------------------------------------------------------------
     # RF-07 #6 — Área desmatada (ha) por estado, com filtro de 12 meses
     # ------------------------------------------------------------------
     async def desmatamento_area_por_estado(self, ultimos_12_meses: bool = False) -> RespostaAgrupada:
@@ -127,6 +146,24 @@ class AnalyticsService:
                 JOIN municipio m ON m.id = q.municipio_id
                 JOIN estado e ON e.id = m.estado_id
                 GROUP BY e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #8 — Focos de incêndio por município
+    # ------------------------------------------------------------------
+    async def queimadas_focos_por_municipio(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT CONCAT(COALESCE(m.nome, 'Não informado'), ' - ', e.sigla) AS label,
+                       COUNT(q.id)::float AS valor
+                FROM queimada_evento q
+                JOIN municipio m ON m.id = q.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                GROUP BY m.nome, e.sigla
                 ORDER BY valor DESC
             """)
         )
