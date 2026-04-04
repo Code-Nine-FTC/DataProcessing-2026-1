@@ -52,7 +52,8 @@ async def validate_database_crs_integrity(db: AsyncSession, auto_correct: bool =
                 for record in invalid_geom_records:
                     logger.error(f"[Topology ERROR] Tabela '{table_name}': Geometria corrompida para ID {record.id}. Motivo: {record.invalidity_reason}")
                 
-                # Opcional: tentar corrigir as geometrias defeituosas num cenário onde auto_correct foi requisitado.
+                # Opcional: tentar corrigir as geometrias defeituosas.
+                # ST_CollectionExtract(geom, 3) preserva apenas os polígonos dentro de uma GeometryCollection.
                 if auto_correct:
                     logger.warning(f"[Autocorrect] Iniciando correção em '{table_name}'...")
                     fix_query = text(f"""
