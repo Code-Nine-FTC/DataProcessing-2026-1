@@ -10,6 +10,7 @@ from api.schemas.index import (
     RespostaUltimoIncendio,
     ResumoSobreposicoes,
 )
+from api.router.controller.analytics_controller import AnalyticsMunicipalHandler
 from api.services.index import AnalyticsService
 from api.utils.basic_response import BasicResponse
 from models.database import SessionConnection
@@ -28,6 +29,17 @@ async def get_imoveis_area_por_estado(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
     return BasicResponse(data=await AnalyticsService(session).imoveis_area_por_estado())
+
+
+@router.get(
+    "/imoveis/area-por-municipio",
+    response_model=BasicResponse[RespostaAgrupada],
+    summary="[RF-07 #1] Área total (ha) dos imóveis rurais por município",
+)
+async def get_imoveis_area_por_municipio(
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[RespostaAgrupada]:
+    return await AnalyticsMunicipalHandler(session).imoveis_area_por_municipio()
 
 
 @router.get(
@@ -99,6 +111,17 @@ async def get_queimadas_focos_por_estado(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
     return BasicResponse(data=await AnalyticsService(session).queimadas_focos_por_estado())
+
+
+@router.get(
+    "/queimadas/focos-por-municipio",
+    response_model=BasicResponse[RespostaAgrupada],
+    summary="[RF-07 #8] Focos de incêndio por município",
+)
+async def get_queimadas_focos_por_municipio(
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[RespostaAgrupada]:
+    return await AnalyticsMunicipalHandler(session).queimadas_focos_por_municipio()
 
 
 @router.get(
