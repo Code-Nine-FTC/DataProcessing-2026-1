@@ -1,39 +1,37 @@
 """
-ETL: Camadas ambientais estaduais — DataGeo SP
-Fonte:  GeoServer DataGeo (https://datageo.ambiente.sp.gov.br/geoserver/datageo/ows)
+Pipeline DataGeo SP - Camadas Ambientais Estaduais
+
+Fonte: DataGeo SP - Secretaria de Meio Ambiente SP
+URL: https://datageo.ambiente.sp.gov.br/geoserver/datageo/ows
 Tabela: camada_estadual_ambiental
-
-Este conector baixa camadas estaduais prioritárias (ex.: UCs) e normaliza
-para o mesmo formato usado pelo restante do pipeline.
+Layers: Areas_Protegidas_* (configurável via DATAGEO_SP_LAYERS env)
 """
+import logging
 import os
-import sys
-import uuid
 from datetime import date
+from uuid import uuid4
 
-from sqlalchemy import text
+from core.models import ExtractedData, TransformedRecord, DataSource
+from etl.extractors import BaseExtractor
+from etl.transformers import GeometricTransformer
+from etl.loaders import GeometricLoader
+from etl.pipeline import BasePipeline
+from infrastructure.wfs_client import WFSClient, WFSRequest
 
-sys.path.insert(0, ".")
-sys.path.insert(0, "data-ingestion")
+logger = logging.getLogger(__name__)
 
-from models.database import get_engine
-from loader import get_or_create_dataset, get_or_create_fonte_dado  # noqa: E402
-from utils import ensure_multipolygon, fetch_wfs, pick, row_to_json  # noqa: E402
-from api.utils.crs_handler import standardize_geodataframe  # noqa: E402
+DATAGEO_SOURCE = DataSource(
+    name="DataGeo SP - Camadas Ambientais",
+    url="https://datageo.ambiente.sp.gov.br/geoserver/datageo/ows",
+    format="WFS/GeoJSON",
+    agency="Secretaria de Meio Ambiente, Infraestrutura e Logística de SP",
+    scope="estadual",
+    frequency="irregular",
+    license="Dados Abertos (DataGeo)",
+)
 
-WFS_URL = "https://datageo.ambiente.sp.gov.br/geoserver/datageo/ows"
-
-FONTE = {
-    "nome": "DataGeo SP - Camadas Ambientais",
-    "orgao_responsavel": "Secretaria de Meio Ambiente, Infraestrutura e Logística de SP",
-    "url_origem": WFS_URL,
-    "formato": "WFS/GeoJSON",
-    "periodicidade": "irregular",
-    "escopo_geografico": "estadual",
-    "licenca": "Dados Abertos (DataGeo)",
-}
-
-CAMADAS = [
+# Camadas disponíveis
+AVAILABLE_LAYERS = [
     {
         "layer": "datageo:Areas_Protegidas_PI_DG_UCs_Protecao_Integral",
         "tema": "Unidades de Conservação Estaduais",
@@ -51,100 +49,144 @@ CAMADAS = [
 ]
 
 
-def _selected_layers():
-    targets = os.getenv("DATAGEO_SP_LAYERS")
-    if not targets:
-        return CAMADAS
-    target_set = {t.strip() for t in targets.split(",") if t.strip()}
-    return [cfg for cfg in CAMADAS if cfg["layer"] in target_set]
+class DataGeoSPExtractor(BaseExtractor):
+    """Extrator para camadas ambientais de SP."""
 
+    def __init__(self, wfs_client: WFSClient):
+        super().__init__(DATAGEO_SOURCE)
+        self.wfs_client = wfs_client
+        self._selected_layers = self._get_selected_layers()
 
-def _dataset_payload(layer_cfg: dict) -> dict:
-    slug = layer_cfg["layer"].split(":")[-1].upper()
-    today = date.today()
-    return {
-        "nome": f"DATAGEO_SP_{slug}",
-        "descricao": f"{layer_cfg['tema']} - {layer_cfg['subtipo']} (camada {layer_cfg['layer']})",
-        "versao": str(today.year),
-        "data_referencia": today,
-    }
+    def _get_selected_layers(self):
+        """Lê camadas selecionadas de variável de ambiente."""
+        env_layers = os.getenv("DATAGEO_SP_LAYERS", "").strip()
+        if not env_layers:
+            return AVAILABLE_LAYERS
 
+        selected_names = {s.strip() for s in env_layers.split(",") if s.strip()}
+        return [cfg for cfg in AVAILABLE_LAYERS if cfg["layer"] in selected_names]
 
-def _prepare_rows(gdf, dataset_id: str, layer_cfg: dict):
-    if gdf.empty:
-        return []
+    def extract(self) -> ExtractedData:
+        """Extrai dados de múltiplas camadas."""
+        all_features = []
 
-    gdf = standardize_geodataframe(gdf)
+        for layer_cfg in self._selected_layers:
+            logger.info(f"Fetching layer: {layer_cfg['layer']}")
 
-    rows = []
-    for _, row in gdf.iterrows():
-        geom = ensure_multipolygon(row.geometry)
-        if geom is None:
-            continue
-        rows.append(
-            {
-                "id": str(uuid.uuid4()),
-                "id_origem": str(pick(row, layer_cfg["id_fields"], row.name)),
-                "dataset_id": dataset_id,
-                "tema": layer_cfg["tema"],
-                "subtipo": layer_cfg["subtipo"],
-                "nome": pick(row, layer_cfg["nome_fields"]),
-                "geom_wkt": geom.wkt,
-                "atributos_json": row_to_json(row),
-            }
-        )
-    return rows
-
-
-def run():
-    layers = _selected_layers()
-    if not layers:
-        print("[datageo_sp] Nenhuma camada configurada (ver DATAGEO_SP_LAYERS). Abortando.")
-        return
-
-    print("[datageo_sp] Iniciando ETL...")
-    engine = get_engine()
-
-    with engine.begin() as conn:
-        fonte_id = get_or_create_fonte_dado(conn, **FONTE)
-
-    for layer_cfg in layers:
-        dataset_meta = _dataset_payload(layer_cfg)
-        with engine.begin() as conn:
-            dataset_id, is_new = get_or_create_dataset(conn, fonte_id, **dataset_meta)
-
-        if not is_new:
-            print(f"[datageo_sp] Dataset já importado para {layer_cfg['layer']}. Pulando.")
-            continue
-
-        print(f"[datageo_sp] Baixando camada {layer_cfg['layer']}...")
-        gdf = fetch_wfs(WFS_URL, layer_cfg["layer"], batch_size=1000)
-        if gdf.empty:
-            print(f"[datageo_sp] Camada {layer_cfg['layer']} não retornou features.")
-            continue
-
-        rows = _prepare_rows(gdf, dataset_id, layer_cfg)
-        if not rows:
-            print(f"[datageo_sp] Nenhuma geometria válida em {layer_cfg['layer']}.")
-            continue
-
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO camada_estadual_ambiental
-                        (id, id_origem, dataset_id, tema, subtipo, nome, geom, atributos_json)
-                    VALUES
-                        (:id, :id_origem, :dataset_id, :tema, :subtipo, :nome,
-                         ST_GeomFromText(:geom_wkt, 4326),
-                         CAST(:atributos_json AS JSONB))
-                    """
-                ),
-                rows,
+            request = WFSRequest(
+                url=self.data_source.url,
+                layer=layer_cfg["layer"],
+                wfs_version="2.0.0",
             )
 
-        print(f"[datageo_sp] {len(rows)} registros inseridos para {layer_cfg['layer']}.")
+            try:
+                gdf = self.wfs_client.fetch_all(request)
+                if not gdf.empty:
+                    # Escalares ok em colunas; tuplas (_id_fields/_nome_fields) quebram o
+                    # alinhamento do pandas (Length of values does not match index).
+                    gdf["_tema"] = layer_cfg["tema"]
+                    gdf["_subtipo"] = layer_cfg["subtipo"]
+                    records = gdf.to_dict("records")
+                    for rec in records:
+                        rec["_id_fields"] = layer_cfg["id_fields"]
+                        rec["_nome_fields"] = layer_cfg["nome_fields"]
+                    all_features.extend(records)
+            except Exception as e:
+                logger.warning(f"Failed to fetch {layer_cfg['layer']}: {str(e)}")
+
+        if not all_features:
+            logger.warning("No features fetched from any DataGeo layer - returning empty dataset")
+            # Graceful degradation: return empty dataset instead of failing
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"feature_count": 0, "layers": len(self._selected_layers)},
+            )
+
+        return ExtractedData(
+            source=self.data_source,
+            rows=all_features,
+            metadata={"feature_count": len(all_features), "layers": len(self._selected_layers)},
+        )
 
 
-if __name__ == "__main__":
-    run()
+class DataGeoSPTransformer(GeometricTransformer):
+    """Transformador para dados de DataGeo."""
+
+    def __init__(self):
+        super().__init__(table_name="camada_estadual_ambiental")
+
+    def transform_feature(self, feature: dict) -> TransformedRecord:
+        """Transforma feature de camada ambiental."""
+        props = feature.get("properties", feature)
+
+        # Extrair metadados de camada
+        tema = props.pop("_tema", "Camada Ambiental")
+        subtipo = props.pop("_subtipo", None)
+        id_fields = props.pop("_id_fields", ("id", "gid", "objectid"))
+        nome_fields = props.pop("_nome_fields", ("nome", "NOME", "name"))
+
+        geometry = feature.get("geometry")
+        geom_wkt = None
+        if geometry:
+            from shapely.geometry import shape
+            geom = shape(geometry)
+            geom = self.ensure_multipolygon(geom)
+            if geom:
+                geom_wkt = geom.wkt
+
+        return TransformedRecord(
+            id=str(uuid4()),
+            id_origem=str(self.pick(props, id_fields)),
+            table_name=self.table_name,
+            geometry=geom_wkt,
+            attributes={
+                "tema": tema,
+                "subtipo": subtipo,
+                "nome": self.pick(props, nome_fields),
+                "atributos_json": self.row_to_json(props),
+            },
+        )
+
+
+class DataGeoSPLoader(GeometricLoader):
+    """Carregador para camadas ambientais."""
+
+    def __init__(self, engine):
+        super().__init__(engine, table_name="camada_estadual_ambiental")
+
+    def get_insert_query(self) -> str:
+        """Query de inserção para camada_estadual_ambiental."""
+        return """
+            INSERT INTO camada_estadual_ambiental
+                (id, id_origem, dataset_id, tema, subtipo, nome,
+                 geom, atributos_json)
+            VALUES
+                (:id, :id_origem, :dataset_id, :tema, :subtipo, :nome,
+                 ST_GeomFromText(:geom_wkt, 4326),
+                 CAST(:atributos_json AS JSONB))
+        """
+
+
+class DataGeoSPPipeline(BasePipeline):
+    """Pipeline completa para DataGeo SP."""
+
+    def _get_dataset_name(self) -> str:
+        return "DATAGEO_SP_AMBIENTAIS"
+
+    def _get_dataset_description(self) -> str:
+        return "Camadas Ambientais do Estado de São Paulo - DataGeo"
+
+
+def create_pipeline(engine, wfs_client: WFSClient):
+    """Factory para criar pipeline de DataGeo SP."""
+    extractor = DataGeoSPExtractor(wfs_client)
+    transformer = DataGeoSPTransformer()
+    loader = DataGeoSPLoader(engine)
+
+    return DataGeoSPPipeline(
+        extractor=extractor,
+        transformer=transformer,
+        loader=loader,
+        fonte_dado=DATAGEO_SOURCE,
+    )

@@ -1,35 +1,42 @@
 """
-ETL: Unidades de Conservação — ICMBio / TerraBrasilis (INPE)
-Fonte:  TerraBrasilis WFS — camadas de UC por bioma
-        http://terrabrasilis.dpi.inpe.br/geoserver/wfs
+Pipeline ICMBio - Unidades de Conservação
+
+Fonte: TerraBrasilis WFS (INPE)
+URL: http://terrabrasilis.dpi.inpe.br/geoserver/wfs
 Tabela: unidade_conservacao
 
-Nota: o GeoServer do MMA (geoservicos.mma.gov.br) estava fora do ar.
-      Usamos o espelho do TerraBrasilis/INPE que mantém as mesmas UCs
-      organizadas por bioma; deduplicamos por id_origem para evitar
-      contar duas vezes UCs que atravessam mais de um bioma.
+Implementação do padrão ETL com separação de responsabilidades.
 """
-import io
-import sys
-import uuid
+import logging
+from uuid import uuid4
 from datetime import date
 
-import geopandas as gpd
-import pandas as pd
-import requests
 from sqlalchemy import text
 
-sys.path.insert(0, ".")
-sys.path.insert(0, "data-ingestion")
-from models.database import get_engine
-from loader import get_or_create_fonte_dado, get_or_create_dataset
-from utils import ensure_multipolygon, row_to_json
-from api.utils.crs_handler import standardize_geodataframe
+from core.models import ExtractedData, TransformedRecord, DataSource
+from core.config import WFSConfig
+from domain.entities import UnidadeConservacao
+from etl.extractors import WFSExtractor
+from etl.transformers import GeometricTransformer
+from etl.loaders import GeometricLoader
+from etl.pipeline import BasePipeline
+from infrastructure.wfs_client import WFSClient
+from infrastructure.repositories import MunicipioRepository
 
-WFS_URL = "http://terrabrasilis.dpi.inpe.br/geoserver/wfs"
+logger = logging.getLogger(__name__)
 
-# Uma camada por bioma — TerraBrasilis não suporta paginação WFS 2.0 nessas
-# camadas (sem PK), então usamos WFS 1.1.0 com maxFeatures alto de uma vez.
+# Configuração da fonte
+ICMBIO_SOURCE = DataSource(
+    name="ICMBio - Unidades de Conservação",
+    url="http://terrabrasilis.dpi.inpe.br/geoserver/wfs",
+    format="WFS/GeoJSON",
+    agency="Instituto Chico Mendes de Conservação da Biodiversidade",
+    scope="nacional",
+    frequency="anual",
+    license="CC BY 4.0",
+)
+
+# Camadas de UC por bioma (TerraBrasilis)
 BIOME_LAYERS = [
     "prodes-amazon-nb:conservation_units_amazon_biome",
     "prodes-cerrado-nb:conservation_units_cerrado_biome",
@@ -39,114 +46,188 @@ BIOME_LAYERS = [
     "prodes-pantanal-nb:conservation_units_pantanal_biome",
 ]
 
-FONTE = {
-    "nome": "ICMBio - Unidades de Conservação",
-    "orgao_responsavel": "Instituto Chico Mendes de Conservação da Biodiversidade",
-    "url_origem": WFS_URL,
-    "formato": "WFS/GeoJSON",
-    "periodicidade": "anual",
-    "escopo_geografico": "nacional",
-    "licenca": "CC BY 4.0",
-}
-
-DATASET = {
-    "nome": "UC_TERRABRASILIS",
-    "descricao": "Unidades de Conservação do Brasil - TerraBrasilis/INPE (espelho ICMBio)",
-    "versao": str(date.today().year),
-    "data_referencia": date.today(),
-}
-
-
-_NOME      = ("nome", "NOME", "nm_uc", "NM_UC", "nome_uc", "name")
+# Candidatos de nomes de colunas
+_NOME = ("nome", "NOME", "nm_uc", "NM_UC", "nome_uc", "name")
 _CATEGORIA = ("categoria", "CATEGORIA", "cat", "CAT_UC", "nome_cat")
-_ESFERA    = ("esfera", "ESFERA", "esfera_gov", "ESFERA_GOV")
-_GRUPO     = ("grupo", "GRUPO", "grupo_uc", "GRUPO_STATUS", "DS_GRUPO_STATUS")
-_ID_ORIG   = ("id", "ID", "gid", "FID", "objectid", "cod_uc")
+_ESFERA = ("esfera", "ESFERA", "esfera_gov", "ESFERA_GOV")
+_GRUPO = ("grupo", "GRUPO", "grupo_uc", "GRUPO_STATUS", "DS_GRUPO_STATUS")
+_ID_ORIG = ("id", "ID", "gid", "FID", "objectid", "cod_uc")
+_MUNICIPIO = ("municipio", "MUNICIPIO", "mun_nome", "nm_municipio")
+_UF_SIGLA = ("uf", "UF", "sigla_uf", "SIGLA_UF", "estado")
 
 
-def _fetch_biome_layer(layer: str) -> gpd.GeoDataFrame:
-    """Baixa uma camada UC do TerraBrasilis via WFS 1.1.0 (sem paginação)."""
-    params = {
-        "service": "WFS",
-        "version": "1.1.0",
-        "request": "GetFeature",
-        "typeName": layer,
-        "outputFormat": "application/json",
-        "maxFeatures": 10000,
-    }
-    resp = requests.get(WFS_URL, params=params, timeout=120)
-    resp.raise_for_status()
-    return gpd.read_file(io.BytesIO(resp.content))
+def _pick(record: dict, candidates: tuple, default=None):
+    """Retorna o primeiro valor não-nulo de uma lista de candidatos."""
+    for candidate in candidates:
+        if candidate not in record:
+            continue
+        v = record.get(candidate)
+        if v is not None and str(v).strip() not in ("", "nan", "None"):
+            return v
+    return default
 
 
-def run():
-    print("[icmbio] Iniciando ETL...")
-    engine = get_engine()
+class ICMBioExtractor(WFSExtractor):
+    """Extrator específico para ICMBio - busca múltiplas camadas de biomas."""
 
-    # 1. Baixar dados antes de abrir transação
-    gdfs = []
-    for layer in BIOME_LAYERS:
-        print(f"[icmbio] Baixando camada: {layer}...")
-        gdf_biome = _fetch_biome_layer(layer)
-        print(f"  → {len(gdf_biome)} features")
-        gdfs.append(gdf_biome)
+    def __init__(self, wfs_client: WFSClient):
+        super().__init__(ICMBIO_SOURCE, wfs_client, "")
 
-    gdf = pd.concat(gdfs, ignore_index=True)
-    print(f"[icmbio] Total bruto (com sobreposição de biomas): {len(gdf)}")
+    def extract(self) -> ExtractedData:
+        """Busca todas as UCs de todos os biomas."""
+        all_features = []
+        total_dedup = 0
 
-    # Deduplica por id_origem (mesma UC pode aparecer em múltiplos biomas)
-    id_col = next((c for c in _ID_ORIG if c in gdf.columns), None)
-    if id_col:
-        gdf = gdf.drop_duplicates(subset=[id_col])
-    print(f"[icmbio] Após deduplicação: {len(gdf)}")
+        for layer in BIOME_LAYERS:
+            logger.info(f"Fetching biome layer: {layer}")
+            self.wfs_layer = layer
+            try:
+                gdf = self.wfs_client.fetch_all(
+                    self._create_wfs_request(), deduplicate_by="id"
+                )
+                all_features.extend(gdf.to_dict("records"))
+                logger.info(f"  → {len(gdf)} features")
+            except Exception as e:
+                logger.warning(f"Failed to fetch {layer}: {str(e)}")
 
-    gdf = standardize_geodataframe(gdf)
-    print("[icmbio] Preparando inserção...")
+        if not all_features:
+            logger.warning("No features fetched from any biome layer - returning empty dataset")
+            # Graceful degradation: return empty dataset instead of failing
+            return ExtractedData(
+                source=ICMBIO_SOURCE,
+                rows=[],
+                metadata={"feature_count": 0, "biome_layers": len(BIOME_LAYERS)},
+            )
 
-    # 2. Preparar rows com nomes normalizados
-    rows = []
-    for _, row in gdf.iterrows():
-        geom = ensure_multipolygon(row.geometry)
-        rows.append({
-            "id": str(uuid.uuid4()),
-            "id_origem": str(pick(row, _ID_ORIG, row.name)),
-            "dataset_id": None,  # preenchido após criar dataset
-            "nome": pick(row, _NOME),
-            "categoria": pick(row, _CATEGORIA),
-            "esfera": pick(row, _ESFERA),
-            "grupo_snuc": pick(row, _GRUPO),
-            "area_ha": None,  # não disponível nesta fonte
-            "geom_wkt": geom.wkt if geom else None,
-            "atributos_json": row_to_json(row),
-        })
+        # Deduplicar por ID origem (mesma UC pode estar em múltiplos biomas)
+        seen_ids = set()
+        deduped = []
+        skipped_none = 0
+        for feature in all_features:
+            id_orig = _pick(feature, _ID_ORIG) or feature.get("properties", {}).get("gid")
+            if id_orig is None:
+                skipped_none += 1
+                continue
+            if id_orig not in seen_ids:
+                seen_ids.add(id_orig)
+                deduped.append(feature)
 
-    # 3. Tudo numa única transação — se o INSERT falhar, dataset não é commitado
-    with engine.begin() as conn:
-        fonte_id = get_or_create_fonte_dado(conn, **FONTE)
-        dataset_id, is_new = get_or_create_dataset(conn, fonte_id, **DATASET)
+        if skipped_none:
+            logger.warning(f"{skipped_none} features descartadas por id_orig nulo.")
 
-        if not is_new:
-            return
-
-        for r in rows:
-            r["dataset_id"] = dataset_id
-
-        conn.execute(
-            text("""
-                INSERT INTO unidade_conservacao
-                    (id, id_origem, dataset_id, nome, categoria, esfera,
-                     grupo_snuc, area_ha, geom, atributos_json)
-                VALUES
-                    (:id, :id_origem, :dataset_id, :nome, :categoria, :esfera,
-                     :grupo_snuc, :area_ha,
-                     ST_GeomFromText(:geom_wkt, 4326),
-                     CAST(:atributos_json AS JSONB))
-            """),
-            rows,
+        logger.info(
+            f"UC deduplication: {len(all_features)} → {len(deduped)} "
+            f"(removed {len(all_features) - len(deduped)})"
         )
 
-    print(f"[icmbio] {len(rows)} registros inseridos.")
+        return ExtractedData(
+            source=ICMBIO_SOURCE,
+            rows=deduped,
+            metadata={"feature_count": len(deduped), "biome_layers": len(BIOME_LAYERS)},
+        )
+
+    def _create_wfs_request(self):
+        """Cria request WFS para camada atual."""
+        from infrastructure.wfs_client import WFSRequest
+        return WFSRequest(
+            url=ICMBIO_SOURCE.url,
+            layer=self.wfs_layer,
+            wfs_version="1.1.0",
+        )
 
 
-if __name__ == "__main__":
-    run()
+class ICMBioTransformer(GeometricTransformer):
+    """Transformador para dados de ICMBio."""
+
+    def __init__(self, municipio_repo: MunicipioRepository):
+        super().__init__(table_name="unidade_conservacao")
+        self.municipio_repo = municipio_repo
+
+    def transform_feature(self, feature: dict) -> TransformedRecord:
+        """Transforma uma feature de UC. Filtra apenas SP quando possível."""
+        # GeoJSON pode vir como properties ou como fields diretos
+        props = feature.get("properties", feature)
+
+        uf = self.pick(props, _UF_SIGLA)
+        if uf and str(uf).upper() != "SP":
+            return None
+
+        geometry = feature.get("geometry")
+        geom_wkt = None
+        if geometry:
+            from shapely.geometry import shape
+            geom = shape(geometry)
+            geom = self.ensure_multipolygon(geom)
+            if geom:
+                geom_wkt = geom.wkt
+
+        municipio_nome = self.pick(props, _MUNICIPIO)
+        municipio_id = None
+        if municipio_nome and uf:
+            try:
+                municipio_id = self.municipio_repo.find_by_name_and_state(
+                    municipio_nome, uf
+                )
+            except Exception as e:
+                logger.warning(f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}")
+
+        return TransformedRecord(
+            id=str(uuid4()),
+            id_origem=str(self.pick(props, _ID_ORIG)),
+            table_name=self.table_name,
+            geometry=geom_wkt,
+            attributes={
+                "nome": self.pick(props, _NOME),
+                "categoria": self.pick(props, _CATEGORIA),
+                "esfera": self.pick(props, _ESFERA),
+                "grupo_snuc": self.pick(props, _GRUPO),
+                "area_ha": None,  # Não disponível nesta fonte
+                "municipio_id": municipio_id,
+                "atributos_json": self.row_to_json(props),
+            },
+        )
+
+
+class ICMBioLoader(GeometricLoader):
+    """Carregador para dados de ICMBio."""
+
+    def __init__(self, engine):
+        super().__init__(engine, table_name="unidade_conservacao")
+
+    def get_insert_query(self) -> str:
+        """Query de inserção para UC."""
+        return """
+            INSERT INTO unidade_conservacao
+                (id, id_origem, dataset_id, nome, categoria, esfera,
+                 grupo_snuc, area_ha, municipio_id, geom, atributos_json)
+            VALUES
+                (:id, :id_origem, :dataset_id, :nome, :categoria, :esfera,
+                 :grupo_snuc, :area_ha, :municipio_id,
+                 ST_GeomFromText(:geom_wkt, 4326),
+                 CAST(:atributos_json AS JSONB))
+        """
+
+
+class ICMBioPipeline(BasePipeline):
+    """Pipeline completa para ICMBio."""
+
+    def _get_dataset_name(self) -> str:
+        return "UC_TERRABRASILIS"
+
+    def _get_dataset_description(self) -> str:
+        return "Unidades de Conservação do Brasil - TerraBrasilis/INPE"
+
+
+def create_pipeline(engine, wfs_client: WFSClient):
+    """Factory para criar pipeline de ICMBio."""
+    municipio_repo = MunicipioRepository(engine)
+    extractor = ICMBioExtractor(wfs_client)
+    transformer = ICMBioTransformer(municipio_repo)
+    loader = ICMBioLoader(engine)
+
+    return ICMBioPipeline(
+        extractor=extractor,
+        transformer=transformer,
+        loader=loader,
+        fonte_dado=ICMBIO_SOURCE,
+    )

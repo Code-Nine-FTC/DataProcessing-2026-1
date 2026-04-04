@@ -4,7 +4,9 @@ import pytest
 import geopandas as gpd
 from shapely.geometry import Point
 
-from api.utils.crs_handler import standardize_and_load_geodata
+import sys
+sys.path.insert(0, "data-ingestion")
+from core.crs_handler import standardize_and_load_geodata
 
 @pytest.fixture
 def mock_shapefile_sirgas():

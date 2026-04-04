@@ -1,0 +1,10 @@
+sqlalchemy[asyncio]
+asyncpg
+geopandas
+shapely
+pandas
+requests
+psycopg2-binary
+pgvector
+geoalchemy2
+python-dotenv

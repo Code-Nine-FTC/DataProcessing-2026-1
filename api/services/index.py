@@ -1,0 +1,384 @@
+# -*- coding: utf-8 -*-
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.schemas.index import (
+    GrupoItem,
+    QueimadaDentroForaItem,
+    RespostaAgrupada,
+    RespostaQueimadaDentroFora,
+    RespostaTemporalDesmatamento,
+    RespostaTemporalQueimada,
+    RespostaUltimoIncendio,
+    ResumoSobreposicoes,
+    SerieTemporalAreaItem,
+    SerieTemporalItem,
+    UltimoIncendioItem,
+)
+
+
+class AnalyticsService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    # ------------------------------------------------------------------
+    # RF-07 #1 — Área total das propriedades por estado
+    # ------------------------------------------------------------------
+    async def imoveis_area_por_estado(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT e.sigla AS label,
+                       ROUND(SUM(i.area_ha)::numeric, 2)::float AS valor
+                FROM imovel_rural i
+                JOIN municipio m ON m.id = i.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                WHERE i.area_ha IS NOT NULL
+                GROUP BY e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
+
+    # ------------------------------------------------------------------
+    # RF-07 #6 — Área desmatada (ha) por estado, com filtro de 12 meses
+    # ------------------------------------------------------------------
+    async def desmatamento_area_por_estado(self, ultimos_12_meses: bool = False) -> RespostaAgrupada:
+        filtro = "AND d.data_ocorrencia >= CURRENT_DATE - INTERVAL '12 months'" if ultimos_12_meses else ""
+        result = await self._session.execute(
+            text(f"""
+                SELECT e.sigla AS label,
+                       ROUND(SUM(d.area_ha)::numeric, 2)::float AS valor
+                FROM desmatamento_alerta d
+                JOIN municipio m ON m.id = d.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                WHERE d.area_ha IS NOT NULL {filtro}
+                GROUP BY e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
+
+    # ------------------------------------------------------------------
+    # RF-07 #6 — Desmatamento: série temporal por mês (área total ha)
+    # ------------------------------------------------------------------
+    async def desmatamento_area_por_mes(self) -> RespostaTemporalDesmatamento:
+        result = await self._session.execute(
+            text("""
+                SELECT TO_CHAR(data_ocorrencia, 'YYYY-MM') AS periodo,
+                       ROUND(SUM(area_ha)::numeric, 2)::float AS area_ha
+                FROM desmatamento_alerta
+                WHERE data_ocorrencia IS NOT NULL AND area_ha IS NOT NULL
+                GROUP BY periodo
+                ORDER BY periodo
+            """)
+        )
+        series = [SerieTemporalAreaItem(periodo=row.periodo, area_ha=row.area_ha) for row in result]
+        return RespostaTemporalDesmatamento(
+            series=series,
+            total_ha=round(sum(s.area_ha for s in series), 2),
+        )
+
+    # ------------------------------------------------------------------
+    # RF-07 #7 — Alertas de desmatamento por tipo (contagem)
+    # ------------------------------------------------------------------
+    async def desmatamento_alertas_por_tipo(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT COALESCE(tipo_alerta, 'Não informado') AS label,
+                       COUNT(*)::float AS valor
+                FROM desmatamento_alerta
+                GROUP BY tipo_alerta
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #7 — Área de desmatamento sobreposta a imóveis rurais
+    # ------------------------------------------------------------------
+    async def desmatamento_area_em_imoveis(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT e.sigla AS label,
+                       ROUND(SUM(rd.area_intersecao_ha)::numeric, 2)::float AS valor
+                FROM rel_imovel_desmatamento rd
+                JOIN imovel_rural i ON i.id = rd.imovel_rural_id
+                JOIN municipio m ON m.id = i.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                WHERE rd.area_intersecao_ha IS NOT NULL
+                GROUP BY e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
+
+    # ------------------------------------------------------------------
+    # RF-07 #8 — Focos de incêndio por estado
+    # ------------------------------------------------------------------
+    async def queimadas_focos_por_estado(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT e.sigla AS label, COUNT(q.id)::float AS valor
+                FROM queimada_evento q
+                JOIN municipio m ON m.id = q.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                GROUP BY e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #8 — Focos de incêndio por mês (série temporal)
+    # ------------------------------------------------------------------
+    async def queimadas_focos_por_mes(self) -> RespostaTemporalQueimada:
+        result = await self._session.execute(
+            text("""
+                SELECT TO_CHAR(data_ocorrencia, 'YYYY-MM') AS periodo,
+                       COUNT(*)::int AS total
+                FROM queimada_evento
+                WHERE data_ocorrencia IS NOT NULL
+                GROUP BY periodo
+                ORDER BY periodo
+            """)
+        )
+        series = [SerieTemporalItem(periodo=row.periodo, total=row.total) for row in result]
+        return RespostaTemporalQueimada(series=series, total=sum(s.total for s in series))
+
+    # ------------------------------------------------------------------
+    # RF-07 #8 — Focos por bioma
+    # ------------------------------------------------------------------
+    async def queimadas_focos_por_bioma(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT COALESCE(bioma, 'Não informado') AS label,
+                       COUNT(*)::float AS valor
+                FROM queimada_evento
+                GROUP BY bioma
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #8 — Intensidade média (FRP) por bioma
+    # ------------------------------------------------------------------
+    async def queimadas_intensidade_por_bioma(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT COALESCE(bioma, 'Não informado') AS label,
+                       ROUND(AVG(intensidade)::numeric, 2)::float AS valor
+                FROM queimada_evento
+                WHERE intensidade IS NOT NULL
+                GROUP BY bioma
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        total = round(sum(g.valor for g in grupos) / len(grupos), 2) if grupos else 0.0
+        return RespostaAgrupada(grupos=grupos, total=total)
+
+    # ------------------------------------------------------------------
+    # RF-07 #8 — Dias sem chuva médio por estado
+    # ------------------------------------------------------------------
+    async def queimadas_dias_sem_chuva_por_estado(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT e.sigla AS label,
+                       ROUND(AVG(q.dias_sem_chuva)::numeric, 1)::float AS valor
+                FROM queimada_evento q
+                JOIN municipio m ON m.id = q.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                WHERE q.dias_sem_chuva IS NOT NULL
+                GROUP BY e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        total = round(sum(g.valor for g in grupos) / len(grupos), 1) if grupos else 0.0
+        return RespostaAgrupada(grupos=grupos, total=total)
+
+    # ------------------------------------------------------------------
+    # RF-07 #8 — Risco médio de fogo por estado
+    # ------------------------------------------------------------------
+    async def queimadas_risco_medio_por_estado(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT e.sigla AS label,
+                       ROUND(AVG(q.risco_fogo)::numeric, 2)::float AS valor
+                FROM queimada_evento q
+                JOIN municipio m ON m.id = q.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                WHERE q.risco_fogo IS NOT NULL
+                GROUP BY e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        total = round(sum(g.valor for g in grupos) / len(grupos), 2) if grupos else 0.0
+        return RespostaAgrupada(grupos=grupos, total=total)
+
+    # ------------------------------------------------------------------
+    # RF-07 #8 — Queimadas dentro vs. fora de imóveis rurais
+    # ------------------------------------------------------------------
+    async def queimadas_dentro_fora_imoveis(self) -> RespostaQueimadaDentroFora:
+        result = await self._session.execute(
+            text("""
+                SELECT dentro_imovel, COUNT(*)::int AS total
+                FROM rel_imovel_queimada
+                WHERE dentro_imovel IS NOT NULL
+                GROUP BY dentro_imovel
+            """)
+        )
+        grupos = [QueimadaDentroForaItem(dentro_imovel=row.dentro_imovel, total=row.total) for row in result]
+        return RespostaQueimadaDentroFora(grupos=grupos, total=sum(g.total for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #9 — Data do último incêndio por estado
+    # ------------------------------------------------------------------
+    async def queimadas_ultimo_incendio_por_estado(self) -> RespostaUltimoIncendio:
+        result = await self._session.execute(
+            text("""
+                SELECT e.sigla AS estado,
+                       TO_CHAR(MAX(q.data_ocorrencia), 'YYYY-MM-DD') AS data_ultimo_incendio
+                FROM queimada_evento q
+                JOIN municipio m ON m.id = q.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                WHERE q.data_ocorrencia IS NOT NULL
+                GROUP BY e.sigla
+                ORDER BY e.sigla
+            """)
+        )
+        estados = [
+            UltimoIncendioItem(estado=row.estado, data_ultimo_incendio=row.data_ultimo_incendio)
+            for row in result
+        ]
+        return RespostaUltimoIncendio(estados=estados)
+
+    # ------------------------------------------------------------------
+    # RF-07 #13 — Unidades de Conservação por grupo SNUC
+    # ------------------------------------------------------------------
+    async def uc_por_grupo_snuc(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT COALESCE(grupo_snuc, 'Não informado') AS label,
+                       COUNT(*)::float AS valor
+                FROM unidade_conservacao
+                GROUP BY grupo_snuc
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #13 — Unidades de Conservação por esfera (federal/estadual/municipal)
+    # ------------------------------------------------------------------
+    async def uc_por_esfera(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT COALESCE(esfera, 'Não informado') AS label,
+                       COUNT(*)::float AS valor
+                FROM unidade_conservacao
+                GROUP BY esfera
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #14 — Terras Indígenas por fase de demarcação
+    # ------------------------------------------------------------------
+    async def ti_por_fase(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT COALESCE(fase, 'Não informado') AS label,
+                       COUNT(*)::float AS valor
+                FROM terra_indigena
+                GROUP BY fase
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #18 — Assentamentos por modalidade
+    # ------------------------------------------------------------------
+    async def assentamentos_por_modalidade(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT COALESCE(modalidade, 'Não informado') AS label,
+                       COUNT(*)::float AS valor
+                FROM assentamento_rural
+                GROUP BY modalidade
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #18 — Famílias em assentamentos por estado
+    # ------------------------------------------------------------------
+    async def assentamentos_familias_por_estado(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT e.sigla AS label,
+                       SUM(a.familias)::float AS valor
+                FROM assentamento_rural a
+                JOIN municipio m ON m.id = a.municipio_id
+                JOIN estado e ON e.id = m.estado_id
+                WHERE a.familias IS NOT NULL
+                GROUP BY e.sigla
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #17 — Status do CAR
+    # ------------------------------------------------------------------
+    async def imoveis_por_status_car(self) -> RespostaAgrupada:
+        result = await self._session.execute(
+            text("""
+                SELECT COALESCE(situacao_cadastral, 'Não informado') AS label,
+                       COUNT(*)::float AS valor
+                FROM imovel_rural
+                GROUP BY situacao_cadastral
+                ORDER BY valor DESC
+            """)
+        )
+        grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
+        return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # RF-07 #13, #14, #15, #18 — Sobreposições com áreas especiais (contagem)
+    # ------------------------------------------------------------------
+    async def resumo_sobreposicoes(self) -> ResumoSobreposicoes:
+        result = await self._session.execute(
+            text("""
+                SELECT
+                    (SELECT COUNT(DISTINCT imovel_rural_id) FROM rel_imovel_uc)::int          AS qtd_uc,
+                    (SELECT COUNT(DISTINCT imovel_rural_id) FROM rel_imovel_ti)::int           AS qtd_ti,
+                    (SELECT COUNT(DISTINCT imovel_rural_id) FROM rel_imovel_quilombo)::int     AS qtd_quilombo,
+                    (SELECT COUNT(DISTINCT imovel_rural_id) FROM rel_imovel_assentamento)::int AS qtd_assentamento,
+                    (SELECT COUNT(*) FROM imovel_rural)::int                                   AS total_imoveis
+            """)
+        )
+        row = result.one()
+        return ResumoSobreposicoes(
+            imoveis_com_sobreposicao_uc=row.qtd_uc,
+            imoveis_com_sobreposicao_ti=row.qtd_ti,
+            imoveis_com_sobreposicao_quilombola=row.qtd_quilombo,
+            imoveis_com_sobreposicao_assentamento=row.qtd_assentamento,
+            total_imoveis=row.total_imoveis,
+        )
