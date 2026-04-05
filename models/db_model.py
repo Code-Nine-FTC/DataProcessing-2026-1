@@ -73,6 +73,7 @@ class Municipio(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     codigo_ibge: Mapped[Optional[str]] = mapped_column(VARCHAR(10))
     nome: Mapped[Optional[str]] = mapped_column(TEXT)
+    nome_normalizado: Mapped[Optional[str]] = mapped_column(TEXT)
     estado_id: Mapped[Optional[int]] = mapped_column(ForeignKey("estado.id"))
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
 

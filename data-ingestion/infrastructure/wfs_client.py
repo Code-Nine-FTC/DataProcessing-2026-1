@@ -10,6 +10,8 @@ import geopandas as gpd
 import pandas as pd
 import requests
 
+from core.crs_handler import standardize_geodataframe
+from core.geometry_validator import validate_and_clean_geometries
 from core.exceptions import ExtractionException
 from core.config import WFSConfig
 
@@ -157,8 +159,10 @@ class WFSClient:
                 f"(removed {original_count - len(gdf)})"
             )
 
-        # Garantir CRS correto
-        if gdf.crs != "EPSG:4326":
-            gdf = gdf.to_crs(epsg=4326)
+        # Garantir CRS correto com o validador robusto da API-26
+        gdf = standardize_geodataframe(gdf)
+
+        # Garantir integridade topológica e extrair MultiPoligonos para o ETL
+        gdf = validate_and_clean_geometries(gdf)
 
         return gdf

@@ -3,11 +3,12 @@ Configuração centralizada da aplicação.
 """
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
-# Load environment variables from .env file
+# Load environment variables from repository root .env file
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 @dataclass

@@ -27,7 +27,7 @@ MUNICIPIOS_SP_BASE: list[str] = [
     "presidente prudente", "franca", "araras", "americana", "araraquara",
     "sao carlos", "taubate", "volta redonda", "indaiatuba", "itu",
     "araçatuba", "aracatuba", "assis", "catanduva", "jaboticabal",
-    "lins", "ourinhos", "registro", "sao joao da boa vista",
+    "cacapava", "lins", "ourinhos", "registro", "sao joao da boa vista",
     "ilhabela", "ubatuba", "caraguatatuba", "sao sebastiao",
     "bertioga", "guaruja", "praia grande", "mongagua", "itanhaem",
     "peruibe", "iguape", "pariquera-acu", "cananeia", "miracatu",

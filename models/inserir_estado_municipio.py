@@ -1,6 +1,9 @@
 # inserir_estado_municipio.py
 
 import os
+import re
+import unicodedata
+from pathlib import Path
 import requests
 from requests.exceptions import ConnectionError, Timeout, RequestException
 from shapely.geometry import shape, MultiPolygon
@@ -11,12 +14,24 @@ from dotenv import load_dotenv
 
 from db_model import Estado, Municipio
 
+# ---------------------------------------------------------------------------
+# Normalização de nomes para comparação acento-insensível
+# ---------------------------------------------------------------------------
+
+def normalizar(texto: str) -> str:
+    texto = texto.lower().strip()
+    texto = unicodedata.normalize("NFD", texto)
+    texto = "".join(c for c in texto if unicodedata.category(c) != "Mn")
+    texto = re.sub(r"[^\w\s\-/]", " ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
 # ----------------------------------
 # CONFIG
 # ----------------------------------
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-_raw_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://codenine:sabotagem@localhost:5433/visiona-dev")
+_raw_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://codenine:sabotagem@localhost:5432/visiona-dev")
 # Garante driver síncrono (psycopg2), não asyncpg
 DATABASE_URL = _raw_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
 
@@ -168,6 +183,7 @@ def inserir_municipios(session, municipios, estado_id):
 
         obj = Municipio(
             nome=m["nome"],
+            nome_normalizado=normalizar(m["nome"]),
             codigo_ibge=m["codigo_ibge"],
             estado_id=estado_id,
             geom=from_shape(m["geometry"], srid=4326)
