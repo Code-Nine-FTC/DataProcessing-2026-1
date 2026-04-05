@@ -59,6 +59,23 @@ alembic revision --autogenerate -m "initial_migration"
 alembic upgrade head
 ```
 
+### 5. Para a inserção de dados
+```bash 
+# Inserir Municípios
+python models\inserir_estado_municipio.py
+
+# Inserir dados
+python data-ingestion/main.py
+```
+
+### 5. Treinar o Pipeline NLP
+Antes de usar o chat/agente NLP, é necessário treinar o classificador de intenções:
+
+```bash
+# Treinar o modelo de intenção (gera joblib no nlp_processor/models/)
+python -m nlp_processor.training.train
+```
+
 5. **Configurar o VSCode**:
     - Crie uma pasta `.vscode` na raiz do projeto.
     - Dentro da pasta `.vscode`, crie o arquivo `settings.json` e adicione:
@@ -101,7 +118,7 @@ alembic upgrade head
     }
     ```
 
-9. **Rodar a aplicação**:
+6. **Rodar a aplicação**:
     - Para rodar a aplicação:
     ```bash
     python -m api/main.py

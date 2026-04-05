@@ -14,13 +14,16 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nlp_processor.pipeline.intent_classifier import get_classifier
 from nlp_processor.pipeline.entity_extractor import extrair_entidades
 from nlp_processor.pipeline.embedder import get_embedder
+from nlp_processor.pipeline.preprocessor import normalizar
 from nlp_processor.pipeline.query_builder import executar_consulta
 from nlp_processor.pipeline.response_formatter import formatar_resposta
+from models.db_model import Municipio
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,18 @@ logger = logging.getLogger(__name__)
 # Abaixo disso, cai para buscar_documentos (mais genérico).
 # Com 9 classes, probabilidades acima de 0.35 já indicam predição confiável.
 CONFIDENCE_THRESHOLD = 0.35
+
+
+async def _carregar_municipios_normalizados(session: AsyncSession) -> list[str]:
+    stmt = select(Municipio.nome).where(Municipio.nome.is_not(None))
+    result = await session.execute(stmt)
+
+    nomes: set[str] = set()
+    for (nome,) in result.all():
+        nomes.add(normalizar(nome))
+
+    logger.info(f"Carregados {len(nomes)} municípios normalizados do banco")
+    return sorted(nomes)
 
 
 async def run_agent(
@@ -59,12 +74,29 @@ async def run_agent(
     intencao, confianca = classifier.predict(pergunta)
     logger.info("Intenção detectada: %s (%.2f)", intencao, confianca)
 
-    if confianca < CONFIDENCE_THRESHOLD:
-        intencao = "buscar_documentos"
-        logger.info("Confiança baixa — usando buscar_documentos como fallback.")
+    # 2. Extração de entidades (fazer ANTES de decidir sobre fallback)
+    municipios_extras: list[str] = []
+    try:
+        municipios_extras = await _carregar_municipios_normalizados(session)
+    except Exception:
+        logger.warning("Não foi possível carregar municípios do banco; usando gazetteer estático.")
 
-    # 2. Extração de entidades
-    entidades = extrair_entidades(pergunta)
+    entidades = extrair_entidades(pergunta, municipios_extras)
+
+    # Se confiança é baixa MAS extraímos um município, assume buscar_queimadas
+    # (a consulta mais comum é por focos em um local)
+    if confianca < CONFIDENCE_THRESHOLD:
+        if entidades.municipio:
+            intencao = "buscar_queimadas"
+            logger.info(
+                "Confiança baixa (%.2f) mas município detectado (%s) — "
+                "usando buscar_queimadas.",
+                confianca,
+                entidades.municipio,
+            )
+        else:
+            intencao = "buscar_documentos"
+            logger.info("Confiança baixa — usando buscar_documentos como fallback.")
 
     # 3. Embedding para RAG
     query_embedding: list[float] = []

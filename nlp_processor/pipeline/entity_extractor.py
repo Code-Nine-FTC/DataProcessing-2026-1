@@ -26,7 +26,7 @@ MUNICIPIOS_SP_BASE: list[str] = [
     "suzano", "itaquaquecetuba", "mogi guacu", "botucatu", "marilia",
     "presidente prudente", "franca", "araras", "americana", "araraquara",
     "sao carlos", "taubate", "volta redonda", "indaiatuba", "itu",
-    "araçatuba", "aracatuba", "assis", "catanduva", "jaboticabal",
+    "aracatuba", "assis", "catanduva", "jaboticabal",
     "cacapava", "lins", "ourinhos", "registro", "sao joao da boa vista",
     "ilhabela", "ubatuba", "caraguatatuba", "sao sebastiao",
     "bertioga", "guaruja", "praia grande", "mongagua", "itanhaem",

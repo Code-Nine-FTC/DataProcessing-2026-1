@@ -7,6 +7,7 @@ features GeoJSON + metadados de fontes.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from typing import Any, Optional
 
@@ -14,6 +15,8 @@ from sqlalchemy import Integer, Text, and_, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nlp_processor.pipeline.preprocessor import normalizar
+
+logger = logging.getLogger(__name__)
 from models.db_model import (
     AssentamentoRural,
     Dataset,
@@ -46,6 +49,40 @@ def _source_dict(fonte: FonteDado) -> dict:
         "url": fonte.url_origem,
         "periodicidade": fonte.periodicidade,
     }
+
+
+async def _get_municipio_id(session: AsyncSession, municipio: str) -> Optional[int]:
+    municipio_normalizado = normalizar(municipio)
+    logger.info(f"Procurando município: '{municipio}' -> normalizado: '{municipio_normalizado}'")
+
+    # Tentativa 1: usar nome_normalizado se preenchido
+    stmt = (
+        select(Municipio.id)
+        .where(Municipio.nome_normalizado == municipio_normalizado)
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    row = result.first()
+    if row:
+        logger.info(f"Encontrado via nome_normalizado! ID: {row[0]}")
+        return row[0]
+
+    # Fallback: buscar por nome e normalizar em Python
+    logger.warning(f"nome_normalizado não encontrado, tentando fallback em nome")
+    municipios = select(Municipio.id, Municipio.nome).where(Municipio.nome.is_not(None))
+    result = await session.execute(municipios)
+    rows = result.all()
+
+    logger.info(f"Total de municípios no banco: {len(rows)}")
+
+    for row_id, nome in rows:
+        nome_norm = normalizar(nome)
+        if nome_norm == municipio_normalizado:
+            logger.info(f"Encontrado via fallback! ID: {row_id}, nome original: '{nome}'")
+            return row_id
+
+    logger.warning(f"Nenhum município encontrado para '{municipio}'")
+    return None
 
 
 def _build_bbox(features: list[dict]) -> Optional[list[float]]:
@@ -114,7 +151,16 @@ async def buscar_queimadas(
     )
 
     if municipio:
-        stmt = stmt.where(Municipio.nome_normalizado == normalizar(municipio))
+        municipio_id = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 focos de queimada em {municipio}.",
+            }
+        stmt = stmt.where(Municipio.id == municipio_id)
     if data_inicio:
         stmt = stmt.where(QueimadaEvento.data_ocorrencia >= datetime.fromisoformat(data_inicio))
     if data_fim:
@@ -191,7 +237,16 @@ async def buscar_desmatamentos(
     )
 
     if municipio:
-        stmt = stmt.where(Municipio.nome_normalizado == normalizar(municipio))
+        municipio_id = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 alertas de desmatamento em {municipio}.",
+            }
+        stmt = stmt.where(Municipio.id == municipio_id)
     if data_inicio:
         stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
     if data_fim:
@@ -274,9 +329,18 @@ async def buscar_unidades_conservacao(
     )
 
     if municipio:
+        municipio_id = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontradas 0 unidades de conservação em {municipio}.",
+            }
         _mun_geom = (
             select(Municipio.geom)
-            .where(Municipio.nome_normalizado == normalizar(municipio))
+            .where(Municipio.id == municipio_id)
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(UnidadeConservacao.geom, _mun_geom))
@@ -357,9 +421,18 @@ async def buscar_terras_indigenas(
     )
 
     if municipio:
+        municipio_id = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontradas 0 terras indígenas em {municipio}.",
+            }
         _mun_geom = (
             select(Municipio.geom)
-            .where(Municipio.nome_normalizado == normalizar(municipio))
+            .where(Municipio.id == municipio_id)
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(TerraIndigena.geom, _mun_geom))
@@ -437,9 +510,18 @@ async def buscar_assentamentos(
     )
 
     if municipio:
+        municipio_id = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 assentamentos rurais em {municipio}.",
+            }
         _mun_geom = (
             select(Municipio.geom)
-            .where(Municipio.nome_normalizado == normalizar(municipio))
+            .where(Municipio.id == municipio_id)
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(AssentamentoRural.geom, _mun_geom))
@@ -515,9 +597,18 @@ async def buscar_territorios_quilombolas(
     )
 
     if municipio:
+        municipio_id = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 territórios quilombolas em {municipio}.",
+            }
         _mun_geom = (
             select(Municipio.geom)
-            .where(Municipio.nome_normalizado == normalizar(municipio))
+            .where(Municipio.id == municipio_id)
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(TerritorioQuilombola.geom, _mun_geom))
@@ -595,9 +686,18 @@ async def buscar_imoveis_rurais(
     if codigo_car:
         stmt = stmt.where(ImovelRural.codigo_car == codigo_car)
     if municipio:
+        municipio_id = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 imóveis rurais em {municipio}.",
+            }
         _mun_geom = (
             select(Municipio.geom)
-            .where(Municipio.nome_normalizado == normalizar(municipio))
+            .where(Municipio.id == municipio_id)
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(ImovelRural.geom, _mun_geom))
