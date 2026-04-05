@@ -13,6 +13,7 @@ from typing import Any, Optional
 from sqlalchemy import Integer, Text, and_, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nlp_processor.pipeline.preprocessor import normalizar
 from models.db_model import (
     AssentamentoRural,
     Dataset,
@@ -113,7 +114,7 @@ async def buscar_queimadas(
     )
 
     if municipio:
-        stmt = stmt.where(func.lower(Municipio.nome) == func.lower(municipio))
+        stmt = stmt.where(Municipio.nome_normalizado == normalizar(municipio))
     if data_inicio:
         stmt = stmt.where(QueimadaEvento.data_ocorrencia >= datetime.fromisoformat(data_inicio))
     if data_fim:
@@ -190,7 +191,7 @@ async def buscar_desmatamentos(
     )
 
     if municipio:
-        stmt = stmt.where(func.lower(Municipio.nome) == func.lower(municipio))
+        stmt = stmt.where(Municipio.nome_normalizado == normalizar(municipio))
     if data_inicio:
         stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
     if data_fim:
@@ -275,7 +276,7 @@ async def buscar_unidades_conservacao(
     if municipio:
         _mun_geom = (
             select(Municipio.geom)
-            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .where(Municipio.nome_normalizado == normalizar(municipio))
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(UnidadeConservacao.geom, _mun_geom))
@@ -358,7 +359,7 @@ async def buscar_terras_indigenas(
     if municipio:
         _mun_geom = (
             select(Municipio.geom)
-            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .where(Municipio.nome_normalizado == normalizar(municipio))
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(TerraIndigena.geom, _mun_geom))
@@ -438,7 +439,7 @@ async def buscar_assentamentos(
     if municipio:
         _mun_geom = (
             select(Municipio.geom)
-            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .where(Municipio.nome_normalizado == normalizar(municipio))
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(AssentamentoRural.geom, _mun_geom))
@@ -516,7 +517,7 @@ async def buscar_territorios_quilombolas(
     if municipio:
         _mun_geom = (
             select(Municipio.geom)
-            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .where(Municipio.nome_normalizado == normalizar(municipio))
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(TerritorioQuilombola.geom, _mun_geom))
@@ -596,7 +597,7 @@ async def buscar_imoveis_rurais(
     if municipio:
         _mun_geom = (
             select(Municipio.geom)
-            .where(func.lower(Municipio.nome) == func.lower(municipio))
+            .where(Municipio.nome_normalizado == normalizar(municipio))
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(ImovelRural.geom, _mun_geom))
