@@ -1,7 +1,7 @@
 # Variáveis de ambiente
 .env
 .env.*
-!.env.example
+!.env.exemplo
 
 # Python
 *.pyc
@@ -50,3 +50,5 @@ postgres_data/
 # OS
 .DS_Store
 Thumbs.db
+
+.vscode

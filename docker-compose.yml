@@ -12,7 +12,6 @@ services:
       - "5432:${POSTGRES_PORT}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/migrations:/docker-entrypoint-initdb.d
 
 volumes:
   postgres_data:
