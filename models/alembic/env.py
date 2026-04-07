@@ -6,7 +6,7 @@ from api.config.settings import settings
 from models.db_model import Base
 import asyncio
 from sqlalchemy import text
-
+from models.inserir_estado_municipio import run
 config = context.config
 
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
@@ -65,14 +65,19 @@ def do_run_migrations(connection: AsyncConnection) -> None:
     )
 
     with context.begin_transaction():
+        print("-"*50)
         print("🔧 Verificando/Instalando extensões (PostGIS & Vector)...")
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        
+        print("-"*50)
         print("🚀 Executando migrações de tabelas...")
         context.run_migrations()
         print("✅ Tudo pronto!")
-
+        print("-"*50)
+    print("📥 Inserindo dados de estado e municípios...")
+    run()
+    print("✅ Dados inseridos com sucesso!")
+    print("-"*50)
 def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
 
