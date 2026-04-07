@@ -48,39 +48,11 @@ docker compose up -d
 docker compose down -v
 ```
 
-### 4. Migrações do Banco de Dados
-O projeto utiliza o Alembic para gerenciar as tabelas e extensões (PostGIS/Vector).
-
-```bash
-# Gerar a migração inicial (se necessário)
-alembic revision --autogenerate -m "initial_migration"
-
-# Aplicar as migrações ao banco de dados
-alembic upgrade head
-```
-
-### 5. Para a inserção de dados
-```bash 
-# Inserir Municípios
-python models\inserir_estado_municipio.py
-
-# Inserir dados
-python data-ingestion/main.py
-```
-
-### 5. Treinar o Pipeline NLP
-Antes de usar o chat/agente NLP, é necessário treinar o classificador de intenções:
-
-```bash
-# Treinar o modelo de intenção (gera joblib no nlp_processor/models/)
-python -m nlp_processor.training.train
-```
-
-5. **Configurar o VSCode**:
+4. **Configurar o VSCode**:
     - Crie uma pasta `.vscode` na raiz do projeto.
     - Dentro da pasta `.vscode`, crie o arquivo `settings.json` e adicione:
     ```json
-    {
+        {
         "terminal.integrated.env.windows": {
             "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.pycache_global"
         },
@@ -89,7 +61,12 @@ python -m nlp_processor.training.train
         },
         "terminal.integrated.env.osx": {
             "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.pycache_global"
-        }
+        },
+        "python.analysis.extraPaths": [
+            "${workspaceFolder}"
+        ],
+        "python.defaultInterpreterPath": ".venv/bin/python",
+        "python.terminal.activateEnvInSelectedTerminal": true
     }
     ```
     - Dentro da pasta `.vscode`, crie o arquivo `launch.json` e adicione:
@@ -118,7 +95,32 @@ python -m nlp_processor.training.train
     }
     ```
 
-6. **Rodar a aplicação**:
+### 5. Migrações do Banco de Dados
+O projeto utiliza o Alembic para gerenciar as tabelas e extensões (PostGIS/Vector).
+
+```bash
+# Gerar a migração inicial (se necessário)
+alembic revision --autogenerate -m "initial_migration"
+
+# Aplicar as migrações ao banco de dados
+alembic upgrade head
+```
+
+### 6. Para a inserção de dados
+```bash 
+# Inserir dados
+python data-ingestion/main.py
+```
+
+### 7. Treinar o Pipeline NLP
+Antes de usar o chat/agente NLP, é necessário treinar o classificador de intenções:
+
+```bash
+# Treinar o modelo de intenção (gera joblib no nlp_processor/models/)
+python -m nlp_processor.training.train
+```
+
+8. **Rodar a aplicação**:
     - Para rodar a aplicação:
     ```bash
     python -m api/main.py
