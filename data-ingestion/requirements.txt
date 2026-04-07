@@ -8,3 +8,4 @@ psycopg2-binary
 pgvector
 geoalchemy2
 python-dotenv
+pytesseract>=0.3.10
