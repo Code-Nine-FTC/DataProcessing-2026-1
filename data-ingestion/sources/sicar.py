@@ -27,31 +27,24 @@ SICAR_SOURCE = DataSource(
 
 class SICARExtractor:
     """Extrator para Assentamentos Rurais do SICAR."""
-    def __init__(self, file_path, download_url=None):
+    def __init__(self, file_path, state_code='SP', polygon_type='PROPERTY'):
         self.file_path = file_path
-        self.download_url = download_url or "https://github.com/urbanogilson/SICAR/raw/master/assentamentos/assentamentos.zip"
+        self.state_code = state_code
+        self.polygon_type = polygon_type
         self.data_source = SICAR_SOURCE
 
     def download_if_needed(self):
         import os
-        import requests
         if not os.path.exists(self.file_path):
             os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
-            logger.info(f"Baixando arquivo SICAR de {self.download_url}...")
-            r = requests.get(self.download_url, stream=True)
-            if r.status_code == 200:
-                zip_path = self.file_path if self.file_path.endswith('.zip') else self.file_path + '.zip'
-                with open(zip_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                # Extrai se for zip
-                if zip_path.endswith('.zip'):
-                    import zipfile
-                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        zip_ref.extractall(os.path.dirname(self.file_path))
-                    logger.info(f"Arquivo SICAR extraído em {os.path.dirname(self.file_path)}")
-            else:
-                raise Exception(f"Falha ao baixar arquivo SICAR: {r.status_code}")
+            logger.info(f"Baixando dados SICAR via API para estado {self.state_code} e tipo {self.polygon_type}...")
+            from SICAR import Sicar, State, Polygon
+            car = Sicar()
+            # Mapeamento para enums
+            state_enum = getattr(State, self.state_code)
+            polygon_enum = getattr(Polygon, self.polygon_type)
+            car.download_state(state_enum, polygon_enum, folder=os.path.dirname(self.file_path))
+            logger.info(f"Download SICAR concluído em {os.path.dirname(self.file_path)}")
 
     def extract(self) -> ExtractedData:
         self.download_if_needed()
