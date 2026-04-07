@@ -10,7 +10,9 @@ from typing import Optional
 
 import geopandas as gpd
 import pandas as pd
-
+import os
+import geopandas as gpd
+import pandas as pd
 from core.models import ExtractedData, DataSource
 from core.exceptions import ExtractionException
 
@@ -79,6 +81,10 @@ class WFSExtractor(BaseExtractor):
             metadata={"feature_count": len(gdf), "crs": str(gdf.crs)},
         )
 
+    def save_data(self,  data: ExtractedData,path: str = "output"):
+        os.makedirs(path, exist_ok=True)
+        gdf = gpd.GeoDataFrame(data.rows, crs="EPSG:4326")
+        gdf.to_file(f"{path}/{self.wfs_layer}.geojson", driver='GeoJSON',engine='pyogrio')
 
 class CSVExtractor(BaseExtractor):
     """Extrator base para dados em CSV."""

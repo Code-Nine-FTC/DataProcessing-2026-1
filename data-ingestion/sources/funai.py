@@ -57,18 +57,22 @@ class FUNAIExtractor(WFSExtractor):
 
         gdf = self.wfs_client.fetch_all(request)
 
+        
         if gdf.empty:
             return ExtractedData(
                 source=self.data_source,
                 rows=[],
                 metadata={"feature_count": 0},
             )
-
-        return ExtractedData(
+        
+        data = ExtractedData(
             source=self.data_source,
             rows=gdf.to_dict("records"),
             metadata={"feature_count": len(gdf), "crs": str(gdf.crs)},
         )
+        self.save_data(data=data, path="output")
+
+        return data
 
 
 class FUNAITransformer(GeometricTransformer):
@@ -100,7 +104,7 @@ class FUNAITransformer(GeometricTransformer):
         if municipio_nome and uf:
             try:
                 municipio_id = self.municipio_repo.find_by_name_and_state(
-                    municipio_nome, uf
+                    municipio_nome, uf, geom_wkt=geom_wkt
                 )
             except Exception as e:
                 logger.warning(f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}")
