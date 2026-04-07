@@ -143,19 +143,27 @@ class MunicipioRepository:
     def __init__(self, engine: Engine):
         self.engine = engine
 
-    def find_by_name_and_state(self, municipio_nome: str, uf: str) -> Optional[int]:
-        """Busca município por nome e UF (sigla do estado)."""
+    def find_by_name_and_state(self, municipio_nome: str, uf: str, geom_wkt: Optional[str] = None) -> Optional[int]:
         try:
             with self.engine.begin() as conn:
                 result = conn.execute(
                     text("""
-                        SELECT m.id FROM municipio m
+                        SELECT m.id 
+                        FROM municipio m
                         JOIN estado e ON m.estado_id = e.id
-                        WHERE LOWER(m.nome) = LOWER(:mun_nome)
-                          AND UPPER(e.sigla) = UPPER(:uf)
+                        WHERE unaccent(LOWER(m.nome)) = unaccent(LOWER(:mun_nome)) 
+                        AND UPPER(e.sigla) = UPPER(:uf)
+
+                        UNION ALL
+
+                        -- Só executa esta parte se a primeira não retornar nada (LIMIT 1 no final do bloco todo)
+                        SELECT m.id 
+                        FROM municipio m
+                        WHERE ST_Within(ST_Centroid(ST_SetSRID(ST_GeomFromEWKT(:geom_wkt), 4326)), m.geom)
+
                         LIMIT 1
                     """),
-                    {"mun_nome": municipio_nome, "uf": uf},
+                    {"mun_nome": municipio_nome, "uf": uf, "geom_wkt": geom_wkt},
                 ).fetchone()
                 return result[0] if result else None
         except Exception as e:
