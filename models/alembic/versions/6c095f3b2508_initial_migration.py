@@ -137,27 +137,28 @@ def upgrade() -> None:
     )
         # --- Ingestão automática dos dados SICAR ao criar a tabela ---
     try:
-            import sys
-            import os
-            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
-            from data_ingestion.sources.sicar import SICARExtractor, SICARTransformer, SICARLoader
-            from infrastructure.repositories import MunicipioRepository
-            from sqlalchemy import create_engine
-            # Ajuste o caminho do arquivo SICAR conforme necessário
-            SICAR_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../data/sicar/assentamentos.shp'))
-            # Ajuste a string de conexão conforme seu ambiente
-            DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/postgres')
-            engine = create_engine(DATABASE_URL)
-            municipio_repo = MunicipioRepository(engine)
-            extractor = SICARExtractor(SICAR_FILE)
-            extracted = extractor.extract()
-            transformer = SICARTransformer(municipio_repo)
-            records = [transformer.transform_feature(f) for f in extracted.rows]
-            loader = SICARLoader(engine)
-            loader.load(records)
-            print('Ingestão SICAR concluída.')
+        import sys
+        import os
+        # Adiciona o diretório data-ingestion como pacote Python válido
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../data-ingestion')))
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+        from sources.sicar import SICARExtractor, SICARTransformer, SICARLoader
+        from infrastructure.repositories import MunicipioRepository
+        from sqlalchemy import create_engine
+        # Caminho do arquivo shapefile baixado pelo SICAR
+        SICAR_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../data/sicar/SP/PROPERTY/PROPERTY.shp'))
+        DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/postgres')
+        engine = create_engine(DATABASE_URL)
+        municipio_repo = MunicipioRepository(engine)
+        extractor = SICARExtractor(SICAR_FILE, state_code='SP', polygon_type='PROPERTY')
+        extracted = extractor.extract()
+        transformer = SICARTransformer(municipio_repo)
+        records = [transformer.transform_feature(f) for f in extracted.rows]
+        loader = SICARLoader(engine)
+        loader.load(records)
+        print('Ingestão SICAR concluída.')
     except Exception as e:
-            print(f'Falha na ingestão automática SICAR: {e}')
+        print(f'Falha na ingestão automática SICAR: {e}')
     op.create_table('camada_estadual_ambiental',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('id_origem', sa.TEXT(), nullable=True),
