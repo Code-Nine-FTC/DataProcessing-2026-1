@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -137,7 +138,7 @@ async def get_layer_geojson(
             "properties": props,
         })
 
-    return JSONResponse(content={
+    return JSONResponse(content=jsonable_encoder({
         "type": "FeatureCollection",
         "features": features,
-    })
+    }))
