@@ -115,6 +115,8 @@ source .venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 ```
 
+⚠️ **Nota sobre SICAR**: Se receber erro `tesseract is not installed`, veja [TESSERACT_SETUP.md](../TESSERACT_SETUP.md) para configurar OCR.
+
 ### Passo 4: Configurar Banco de Dados
 
 ```bash

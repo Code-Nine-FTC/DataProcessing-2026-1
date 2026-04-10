@@ -76,27 +76,33 @@ class ICMBioExtractor(WFSExtractor):
     def extract(self) -> ExtractedData:
         """Busca todas as UCs de todos os biomas."""
         all_features = []
-        total_dedup = 0
+        failed_layers = []
 
         for layer in BIOME_LAYERS:
             logger.info(f"Fetching biome layer: {layer}")
             self.wfs_layer = layer
             try:
                 gdf = self.wfs_client.fetch_all(
-                    self._create_wfs_request(), deduplicate_by="id"
+                    self._create_wfs_request(), deduplicate_by="gid"
                 )
                 all_features.extend(gdf.to_dict("records"))
                 logger.info(f"  → {len(gdf)} features")
             except Exception as e:
                 logger.warning(f"Failed to fetch {layer}: {str(e)}")
+                failed_layers.append(layer)
+
+        if failed_layers:
+            logger.error(
+                "Falha em %d/%d camadas ICMBio: %s",
+                len(failed_layers), len(BIOME_LAYERS), failed_layers,
+            )
 
         if not all_features:
-            logger.warning("No features fetched from any biome layer - returning empty dataset")
-            # Graceful degradation: return empty dataset instead of failing
-            return ExtractedData(
-                source=ICMBIO_SOURCE,
-                rows=[],
-                metadata={"feature_count": 0, "biome_layers": len(BIOME_LAYERS)},
+            from core.exceptions import ExtractionException
+            raise ExtractionException(
+                f"Nenhuma feature obtida do TerraBrasilis WFS. "
+                f"Todas as {len(BIOME_LAYERS)} camadas falharam: {failed_layers}. "
+                "Verifique conectividade com http://terrabrasilis.dpi.inpe.br"
             )
 
         # Deduplicar por ID origem (mesma UC pode estar em múltiplos biomas)
@@ -133,6 +139,10 @@ class ICMBioExtractor(WFSExtractor):
             url=ICMBIO_SOURCE.url,
             layer=self.wfs_layer,
             wfs_version="1.1.0",
+            # WFS 1.1.0 do TerraBrasilis não suporta startIndex (retorna ExceptionReport);
+            # desabilitar paginação para buscar tudo em uma única requisição.
+            paginate=False,
+            batch_size=10000,
         )
 
 
@@ -144,13 +154,11 @@ class ICMBioTransformer(GeometricTransformer):
         self.municipio_repo = municipio_repo
 
     def transform_feature(self, feature: dict) -> TransformedRecord:
-        """Transforma uma feature de UC. Filtra apenas SP quando possível."""
+        """Transforma uma feature de UC."""
         # GeoJSON pode vir como properties ou como fields diretos
         props = feature.get("properties", feature)
 
         uf = self.pick(props, _UF_SIGLA)
-        if uf and str(uf).upper() != "SP":
-            return None
 
         geometry = feature.get("geometry")
         geom_wkt = None
