@@ -55,20 +55,8 @@ async def _get_municipio_id(session: AsyncSession, municipio: str) -> Optional[i
     municipio_normalizado = normalizar(municipio)
     logger.info(f"Procurando município: '{municipio}' -> normalizado: '{municipio_normalizado}'")
 
-    # Tentativa 1: usar nome_normalizado se preenchido
-    stmt = (
-        select(Municipio.id)
-        .where(Municipio.nome_normalizado == municipio_normalizado)
-        .limit(1)
-    )
-    result = await session.execute(stmt)
-    row = result.first()
-    if row:
-        logger.info(f"Encontrado via nome_normalizado! ID: {row[0]}")
-        return row[0]
-
-    # Fallback: buscar por nome e normalizar em Python
-    logger.warning(f"nome_normalizado não encontrado, tentando fallback em nome")
+    # Busca apenas pelos municípios já carregados no banco e normaliza em Python,
+    # para não depender de colunas que podem não existir em bases antigas.
     municipios = select(Municipio.id, Municipio.nome).where(Municipio.nome.is_not(None))
     result = await session.execute(municipios)
     rows = result.all()

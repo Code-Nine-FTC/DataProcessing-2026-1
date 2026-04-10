@@ -5,19 +5,20 @@ execução do agente e persistência dos resultados no banco.
 """
 from __future__ import annotations
 
-import json
 import logging
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
 from geoalchemy2.elements import WKTElement
 
-from sqlalchemy import cast, func, select, Text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db_model import (
     Chat,
     ConsultaUsuario,
+    IntencaoConsulta,
     RespostaSistema,
 )
 from nlp_processor.agent import run_agent
@@ -126,6 +127,19 @@ async def _next_turno(session: AsyncSession, chat_id: UUID) -> int:
     return (result.scalar() or 0) + 1
 
 
+async def _get_or_create_intencao(session: AsyncSession, nome: str) -> IntencaoConsulta:
+    stmt = select(IntencaoConsulta).where(IntencaoConsulta.nome == nome).limit(1)
+    result = await session.execute(stmt)
+    intencao = result.scalar_one_or_none()
+    if intencao is not None:
+        return intencao
+
+    intencao = IntencaoConsulta(nome=nome)
+    session.add(intencao)
+    await session.flush()
+    return intencao
+
+
 # ---------------------------------------------------------------------------
 # Processador principal
 # ---------------------------------------------------------------------------
@@ -160,39 +174,56 @@ class NLPProcessor:
         # 2. Carregar histórico
         historico = await _load_historico(session, chat.id)
 
-        # 3. Calcular turno
-        turno = await _next_turno(session, chat.id)
-
-        # 4. Salvar consulta do usuário
-        consulta = ConsultaUsuario(
-            chat_id=chat.id,
-            pergunta=pergunta,
-            turno=turno,
-        )
-        session.add(consulta)
-        await session.flush()
-
-        # 5. Executar agente
+        # 3. Executar agente
         try:
-            texto, features, fontes, status = await run_agent(
+            resultado = await run_agent(
                 session=session,
                 pergunta=pergunta,
                 historico=historico,
             )
-        except Exception as exc:
+            texto = resultado["texto_resposta"]
+            features = resultado["features"]
+            fontes = resultado["fontes"]
+            status = resultado["status"]
+        except Exception:
             logger.exception("Erro crítico no agente NLP")
             texto = "Ocorreu um erro interno ao processar sua pergunta. Tente novamente."
             features = []
             fontes = []
             status = "erro"
+            resultado = {}
 
-        # 6. Calcular bbox
+        # 4. Calcular turno
+        turno = await _next_turno(session, chat.id)
+
+        # 5. Garantir intenção no catálogo e salvar consulta do usuário
+        intencao_nome = resultado.get("intencao")
+        intencao_obj = None
+        if intencao_nome:
+            intencao_obj = await _get_or_create_intencao(session, intencao_nome)
+
+        # 6. Salvar consulta do usuário
+        consulta = ConsultaUsuario(
+            chat_id=chat.id,
+            pergunta=pergunta,
+            data_hora=datetime.utcnow(),
+            intencao_detectada=intencao_nome,
+            entidades_detectadas_json=resultado.get("entidades_detectadas_json"),
+            filtros_detectados_json=resultado.get("filtros_detectados_json"),
+            intencao_id=intencao_obj.id if intencao_obj else None,
+            intencao_score=resultado.get("intencao_score"),
+            turno=turno,
+        )
+        session.add(consulta)
+        await session.flush()
+
+        # 7. Calcular bbox
         bbox = _compute_bbox(features)
 
-        # 7. Montar GeoJSON da resposta
+        # 8. Montar GeoJSON da resposta
         mapa = _features_to_geojson(features)
 
-        # 8. Persistir resposta
+        # 9. Persistir resposta
         resposta = RespostaSistema(
             consulta_usuario_id=consulta.id,
             texto_resposta=texto,
