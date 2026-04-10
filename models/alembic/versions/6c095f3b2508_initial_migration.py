@@ -135,19 +135,71 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['municipio_id'], ['municipio.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('camada_estadual_ambiental',
-    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-    sa.Column('id_origem', sa.TEXT(), nullable=True),
-    sa.Column('dataset_id', sa.UUID(), nullable=True),
-    sa.Column('nome', sa.TEXT(), nullable=True),
-    sa.Column('subtipo', sa.TEXT(), nullable=True),
-    sa.Column('tema', sa.TEXT(), nullable=True),
-    sa.Column('municipio_id', sa.Integer(), nullable=True),
-    sa.Column('geom', geoalchemy2.types.Geometry(geometry_type='MULTIPOLYGON', srid=4326, dimension=2, from_text='ST_GeomFromEWKT', name='geometry', nullable=False), nullable=False),
-    sa.Column('atributos_json', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['dataset_id'], ['dataset.id'], ),
-    sa.ForeignKeyConstraint(['municipio_id'], ['municipio.id'], ),
-    sa.PrimaryKeyConstraint('id')
+# --- Ingestão automática dos dados SICAR ao criar a tabela ---
+    try:
+        import sys
+        import os
+        import uuid
+
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../data-ingestion')))
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+
+        from sources.sicar import SICARExtractor, SICARTransformer, SICARLoader
+        from infrastructure.repositories import MunicipioRepository
+        from sqlalchemy import create_engine
+
+        # 🔥 Pode ser pasta (se extractor busca recursivo)
+        SICAR_FILE = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), '../../../data/sicar/SP')
+        )
+
+        DATABASE_URL = os.environ.get(
+            'DATABASE_URL',
+            'postgresql://postgres:postgres@localhost:5432/postgres'
+        )
+
+        engine = create_engine(DATABASE_URL)
+
+        municipio_repo = MunicipioRepository(engine)
+
+        extractor = SICARExtractor(SICAR_FILE, state_code='SP')
+        extracted = extractor.extract()
+
+        transformer = SICARTransformer(municipio_repo)
+        records = [transformer.transform_feature(f) for f in extracted.rows]
+
+        dataset_id = str(uuid.uuid4())
+
+        loader = SICARLoader(engine)
+        # loader.load(records, dataset_id)
+
+        print('Ingestão SICAR concluída.')
+
+    except Exception as e:
+        print(f'Falha na ingestão automática SICAR: {e}')
+
+    # 🔥 FORA do try (mesma indentação do try!)
+    op.create_table(
+        'camada_estadual_ambiental',
+        sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+        sa.Column('id_origem', sa.TEXT(), nullable=True),
+        sa.Column('dataset_id', sa.UUID(), nullable=True),
+        sa.Column('nome', sa.TEXT(), nullable=True),
+        sa.Column('subtipo', sa.TEXT(), nullable=True),
+        sa.Column('tema', sa.TEXT(), nullable=True),
+        sa.Column('municipio_id', sa.Integer(), nullable=True),
+        sa.Column('geom', geoalchemy2.types.Geometry(
+            geometry_type='MULTIPOLYGON',
+            srid=4326,
+            dimension=2,
+            from_text='ST_GeomFromEWKT',
+            name='geometry',
+            nullable=False
+        ), nullable=False),
+        sa.Column('atributos_json', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.ForeignKeyConstraint(['dataset_id'], ['dataset.id']),
+        sa.ForeignKeyConstraint(['municipio_id'], ['municipio.id']),
+        sa.PrimaryKeyConstraint('id')
     )
     op.create_table('desmatamento_alerta',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
