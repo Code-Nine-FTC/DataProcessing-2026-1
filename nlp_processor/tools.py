@@ -12,11 +12,30 @@ from datetime import date, datetime
 from typing import Any, Optional
 
 from sqlalchemy import Integer, Text, and_, cast, func, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nlp_processor.pipeline.preprocessor import normalizar
 
 logger = logging.getLogger(__name__)
+
+
+def _stmt_sql(stmt: Any) -> str:
+    try:
+        compiled = stmt.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+        return str(compiled)
+    except Exception:
+        return str(stmt)
+
+
+def _join_sql(*parts: Optional[str]) -> Optional[str]:
+    sql_parts = [part for part in parts if part]
+    if not sql_parts:
+        return None
+    return "\n\n".join(sql_parts)
 from models.db_model import (
     AssentamentoRural,
     Dataset,
@@ -51,13 +70,14 @@ def _source_dict(fonte: FonteDado) -> dict:
     }
 
 
-async def _get_municipio_id(session: AsyncSession, municipio: str) -> Optional[int]:
+async def _get_municipio_id(session: AsyncSession, municipio: str) -> tuple[Optional[int], str]:
     municipio_normalizado = normalizar(municipio)
     logger.info(f"Procurando município: '{municipio}' -> normalizado: '{municipio_normalizado}'")
 
     # Busca apenas pelos municípios já carregados no banco e normaliza em Python,
     # para não depender de colunas que podem não existir em bases antigas.
     municipios = select(Municipio.id, Municipio.nome).where(Municipio.nome.is_not(None))
+    sql_executado = _stmt_sql(municipios)
     result = await session.execute(municipios)
     rows = result.all()
 
@@ -67,10 +87,10 @@ async def _get_municipio_id(session: AsyncSession, municipio: str) -> Optional[i
         nome_norm = normalizar(nome)
         if nome_norm == municipio_normalizado:
             logger.info(f"Encontrado via fallback! ID: {row_id}, nome original: '{nome}'")
-            return row_id
+            return row_id, sql_executado
 
     logger.warning(f"Nenhum município encontrado para '{municipio}'")
-    return None
+    return None, sql_executado
 
 
 def _build_bbox(features: list[dict]) -> Optional[list[float]]:
@@ -119,6 +139,7 @@ async def buscar_queimadas(
     limite: int = 500,
 ) -> dict:
     """Busca focos de queimada no estado de São Paulo."""
+    sql_partes: list[str] = []
     stmt = (
         select(
             QueimadaEvento.id,
@@ -143,7 +164,7 @@ async def buscar_queimadas(
     )
 
     if municipio:
-        municipio_id = await _get_municipio_id(session, municipio)
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
         if municipio_id is None:
             return {
                 "total": 0,
@@ -151,14 +172,17 @@ async def buscar_queimadas(
                 "bbox": None,
                 "fontes": [],
                 "descricao": f"Encontrados 0 focos de queimada em {municipio}.",
+                "sql_executado": municipio_sql,
             }
         stmt = stmt.where(Municipio.id == municipio_id)
+        sql_partes.append(municipio_sql)
     if data_inicio:
         stmt = stmt.where(QueimadaEvento.data_ocorrencia >= datetime.fromisoformat(data_inicio))
     if data_fim:
         stmt = stmt.where(QueimadaEvento.data_ocorrencia <= datetime.fromisoformat(data_fim))
 
     stmt = stmt.order_by(QueimadaEvento.data_ocorrencia.desc()).limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
 
     rows = (await session.execute(stmt)).all()
 
@@ -197,6 +221,7 @@ async def buscar_queimadas(
         "descricao": f"Encontrados {len(features)} focos de queimada"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
+        "sql_executado": sql_executado,
     }
 
 
@@ -213,6 +238,7 @@ async def buscar_desmatamentos(
     limite: int = 300,
 ) -> dict:
     """Busca alertas de desmatamento no estado de São Paulo."""
+    sql_partes: list[str] = []
     stmt = (
         select(
             DesmatamentoAlerta.id,
@@ -233,7 +259,7 @@ async def buscar_desmatamentos(
     )
 
     if municipio:
-        municipio_id = await _get_municipio_id(session, municipio)
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
         if municipio_id is None:
             return {
                 "total": 0,
@@ -241,8 +267,10 @@ async def buscar_desmatamentos(
                 "bbox": None,
                 "fontes": [],
                 "descricao": f"Encontrados 0 alertas de desmatamento em {municipio}.",
+                "sql_executado": municipio_sql,
             }
         stmt = stmt.where(Municipio.id == municipio_id)
+        sql_partes.append(municipio_sql)
     if data_inicio:
         stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
     if data_fim:
@@ -251,6 +279,7 @@ async def buscar_desmatamentos(
         stmt = stmt.where(func.lower(DesmatamentoAlerta.tipo_alerta) == tipo_alerta.lower())
 
     stmt = stmt.order_by(DesmatamentoAlerta.data_ocorrencia.desc()).limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
 
     rows = (await session.execute(stmt)).all()
 
@@ -285,6 +314,7 @@ async def buscar_desmatamentos(
         "descricao": f"Encontrados {len(features)} alertas de desmatamento"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
+        "sql_executado": sql_executado,
     }
 
 
@@ -299,6 +329,7 @@ async def buscar_unidades_conservacao(
     grupo_snuc: Optional[str] = None,
 ) -> dict:
     """Busca unidades de conservação no estado de São Paulo."""
+    sql_partes: list[str] = []
     stmt = (
         select(
             UnidadeConservacao.id,
@@ -325,7 +356,7 @@ async def buscar_unidades_conservacao(
     )
 
     if municipio:
-        municipio_id = await _get_municipio_id(session, municipio)
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
         if municipio_id is None:
             return {
                 "total": 0,
@@ -333,6 +364,7 @@ async def buscar_unidades_conservacao(
                 "bbox": None,
                 "fontes": [],
                 "descricao": f"Encontradas 0 unidades de conservação em {municipio}.",
+                "sql_executado": municipio_sql,
             }
         _mun_geom = (
             select(Municipio.geom)
@@ -340,10 +372,13 @@ async def buscar_unidades_conservacao(
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(UnidadeConservacao.geom, _mun_geom))
+        sql_partes.append(municipio_sql)
     if categoria:
         stmt = stmt.where(func.lower(UnidadeConservacao.categoria).contains(categoria.lower()))
     if grupo_snuc:
         stmt = stmt.where(func.lower(UnidadeConservacao.grupo_snuc) == grupo_snuc.lower())
+
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
 
     rows = (await session.execute(stmt)).all()
 
@@ -380,6 +415,7 @@ async def buscar_unidades_conservacao(
         "descricao": f"Encontradas {len(features)} unidades de conservação"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
+        "sql_executado": sql_executado,
     }
 
 
@@ -393,6 +429,7 @@ async def buscar_terras_indigenas(
     fase: Optional[str] = None,
 ) -> dict:
     """Busca terras indígenas no estado de São Paulo."""
+    sql_partes: list[str] = []
     stmt = (
         select(
             TerraIndigena.id,
@@ -417,7 +454,7 @@ async def buscar_terras_indigenas(
     )
 
     if municipio:
-        municipio_id = await _get_municipio_id(session, municipio)
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
         if municipio_id is None:
             return {
                 "total": 0,
@@ -425,6 +462,7 @@ async def buscar_terras_indigenas(
                 "bbox": None,
                 "fontes": [],
                 "descricao": f"Encontradas 0 terras indígenas em {municipio}.",
+                "sql_executado": municipio_sql,
             }
         _mun_geom = (
             select(Municipio.geom)
@@ -432,8 +470,11 @@ async def buscar_terras_indigenas(
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(TerraIndigena.geom, _mun_geom))
+        sql_partes.append(municipio_sql)
     if fase:
         stmt = stmt.where(func.lower(TerraIndigena.fase).contains(fase.lower()))
+
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
 
     rows = (await session.execute(stmt)).all()
 
@@ -468,6 +509,7 @@ async def buscar_terras_indigenas(
         "descricao": f"Encontradas {len(features)} terras indígenas"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
+        "sql_executado": sql_executado,
     }
 
 
@@ -481,6 +523,7 @@ async def buscar_assentamentos(
     modalidade: Optional[str] = None,
 ) -> dict:
     """Busca assentamentos rurais do INCRA no estado de São Paulo."""
+    sql_partes: list[str] = []
     stmt = (
         select(
             AssentamentoRural.id,
@@ -506,7 +549,7 @@ async def buscar_assentamentos(
     )
 
     if municipio:
-        municipio_id = await _get_municipio_id(session, municipio)
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
         if municipio_id is None:
             return {
                 "total": 0,
@@ -514,6 +557,7 @@ async def buscar_assentamentos(
                 "bbox": None,
                 "fontes": [],
                 "descricao": f"Encontrados 0 assentamentos rurais em {municipio}.",
+                "sql_executado": municipio_sql,
             }
         _mun_geom = (
             select(Municipio.geom)
@@ -521,8 +565,11 @@ async def buscar_assentamentos(
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(AssentamentoRural.geom, _mun_geom))
+        sql_partes.append(municipio_sql)
     if modalidade:
         stmt = stmt.where(func.lower(AssentamentoRural.modalidade).contains(modalidade.lower()))
+
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
 
     rows = (await session.execute(stmt)).all()
 
@@ -558,6 +605,7 @@ async def buscar_assentamentos(
         "descricao": f"Encontrados {len(features)} assentamentos rurais"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
+        "sql_executado": sql_executado,
     }
 
 
@@ -570,6 +618,7 @@ async def buscar_territorios_quilombolas(
     municipio: Optional[str] = None,
 ) -> dict:
     """Busca territórios quilombolas no estado de São Paulo."""
+    sql_partes: list[str] = []
     stmt = (
         select(
             TerritorioQuilombola.id,
@@ -593,7 +642,7 @@ async def buscar_territorios_quilombolas(
     )
 
     if municipio:
-        municipio_id = await _get_municipio_id(session, municipio)
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
         if municipio_id is None:
             return {
                 "total": 0,
@@ -601,6 +650,7 @@ async def buscar_territorios_quilombolas(
                 "bbox": None,
                 "fontes": [],
                 "descricao": f"Encontrados 0 territórios quilombolas em {municipio}.",
+                "sql_executado": municipio_sql,
             }
         _mun_geom = (
             select(Municipio.geom)
@@ -608,6 +658,9 @@ async def buscar_territorios_quilombolas(
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(TerritorioQuilombola.geom, _mun_geom))
+        sql_partes.append(municipio_sql)
+
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
 
     rows = (await session.execute(stmt)).all()
 
@@ -641,6 +694,7 @@ async def buscar_territorios_quilombolas(
         "descricao": f"Encontrados {len(features)} territórios quilombolas"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
+        "sql_executado": sql_executado,
     }
 
 
@@ -655,6 +709,7 @@ async def buscar_imoveis_rurais(
     limite: int = 100,
 ) -> dict:
     """Busca imóveis rurais (CAR) no estado de São Paulo."""
+    sql_partes: list[str] = []
     stmt = (
         select(
             ImovelRural.id,
@@ -682,7 +737,7 @@ async def buscar_imoveis_rurais(
     if codigo_car:
         stmt = stmt.where(ImovelRural.codigo_car == codigo_car)
     if municipio:
-        municipio_id = await _get_municipio_id(session, municipio)
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
         if municipio_id is None:
             return {
                 "total": 0,
@@ -690,6 +745,7 @@ async def buscar_imoveis_rurais(
                 "bbox": None,
                 "fontes": [],
                 "descricao": f"Encontrados 0 imóveis rurais em {municipio}.",
+                "sql_executado": municipio_sql,
             }
         _mun_geom = (
             select(Municipio.geom)
@@ -697,8 +753,10 @@ async def buscar_imoveis_rurais(
             .scalar_subquery()
         )
         stmt = stmt.where(func.ST_Intersects(ImovelRural.geom, _mun_geom))
+        sql_partes.append(municipio_sql)
 
     stmt = stmt.limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
     rows = (await session.execute(stmt)).all()
 
     features = []
@@ -733,6 +791,7 @@ async def buscar_imoveis_rurais(
         "descricao": f"Encontrados {len(features)} imóveis rurais"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
+        "sql_executado": sql_executado,
     }
 
 
@@ -772,6 +831,8 @@ async def buscar_documentos_rag(
         .limit(limite)
     )
 
+    sql_executado = _stmt_sql(stmt)
+
     rows = (await session.execute(stmt)).all()
 
     trechos = []
@@ -800,6 +861,7 @@ async def buscar_documentos_rag(
         "contexto_textual": contexto,
         "fontes": list(fontes.values()),
         "descricao": f"Encontrados {len(trechos)} trechos de documentos relevantes.",
+        "sql_executado": sql_executado,
     }
 
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from time import perf_counter
 from typing import Optional
 from uuid import UUID
 
@@ -168,6 +169,7 @@ class NLPProcessor:
             "status": str,
         }
         """
+        inicio_processamento = perf_counter()
         # 1. Obter/criar chat
         chat = await _load_or_create_chat(session, chat_id)
 
@@ -191,7 +193,11 @@ class NLPProcessor:
             features = []
             fontes = []
             status = "erro"
-            resultado = {}
+            resultado = {
+                "sql_executado": None,
+                "mensagem_erro": "Erro crítico no agente NLP.",
+                "tempo_resposta_ms": int((perf_counter() - inicio_processamento) * 1000),
+            }
 
         # 4. Calcular turno
         turno = await _next_turno(session, chat.id)
@@ -227,8 +233,11 @@ class NLPProcessor:
         resposta = RespostaSistema(
             consulta_usuario_id=consulta.id,
             texto_resposta=texto,
+            sql_executado=resultado.get("sql_executado"),
             fontes_utilizadas_json={"fontes": fontes},
             bbox_resultado=_bbox_to_wkt(bbox) if bbox else None,
+            tempo_resposta_ms=resultado.get("tempo_resposta_ms"),
+            mensagem_erro=resultado.get("mensagem_erro"),
             status=status,
         )
         session.add(resposta)

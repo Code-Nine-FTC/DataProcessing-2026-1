@@ -87,6 +87,8 @@ async def executar_consulta(
     fontes: dict[str, dict] = {}
     descricao_partes: list[str] = []
     contexto_documental = ""
+    sql_partes: list[str] = []
+    mensagens_erro: list[str] = []
 
     # --- consulta geoespacial ---
     tool_name = _INTENT_MAP.get(intencao)
@@ -100,8 +102,11 @@ async def executar_consulta(
                 for f in result.get("fontes", []):
                     fontes[f["nome"]] = f
                 descricao_partes.append(result.get("descricao", ""))
+                if result.get("sql_executado"):
+                    sql_partes.append(result["sql_executado"])
             except Exception:
                 logger.exception("Erro ao executar ferramenta '%s'", tool_name)
+                mensagens_erro.append(f"Erro ao executar ferramenta '{tool_name}'.")
 
     # --- consulta RAG em documentos ---
     if query_embedding:
@@ -110,12 +115,17 @@ async def executar_consulta(
             contexto_documental = rag_result.get("contexto_textual", "")
             for f in rag_result.get("fontes", []):
                 fontes[f["nome"]] = f
+            if rag_result.get("sql_executado"):
+                sql_partes.append(rag_result["sql_executado"])
         except Exception:
             logger.exception("Erro na busca RAG")
+            mensagens_erro.append("Erro na busca RAG.")
 
     return {
         "features": features,
         "fontes": list(fontes.values()),
         "descricao": " ".join(descricao_partes),
         "contexto_documental": contexto_documental,
+        "sql_executado": "\n\n".join(sql_partes) if sql_partes else None,
+        "mensagem_erro": " ".join(mensagens_erro) if mensagens_erro else None,
     }
