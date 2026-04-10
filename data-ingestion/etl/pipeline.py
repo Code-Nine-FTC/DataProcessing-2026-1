@@ -62,12 +62,15 @@ class BasePipeline(IPipeline, ABC):
 
             # 3. Create Dataset
             logger.info("→ Create Dataset")
+            caminho_arquivo = getattr(self.extractor, "file_path", None)
             dataset_id, is_new = self.dataset_repo.create(
                 fonte_id=fonte_id,
                 nome=self._get_dataset_name(),
                 descricao=self._get_dataset_description(),
                 versao=str(date.today().year),
                 data_referencia=date.today(),
+                caminho_arquivo=caminho_arquivo,
+                metadata_json=extracted_data.metadata if extracted_data.metadata else None,
             )
 
             already_loaded = self.loader.count_rows_for_dataset(dataset_id)

@@ -97,6 +97,9 @@ class DatasetRepository:
         descricao: Optional[str] = None,
         versao: Optional[str] = None,
         data_referencia: Optional[date] = None,
+        caminho_arquivo: Optional[str] = None,
+        metadata_json: Optional[dict] = None,
+        hash_arquivo: Optional[str] = None,
     ) -> Tuple[str, bool]:
         """
         Cria um novo Dataset se não existir.
@@ -109,6 +112,8 @@ class DatasetRepository:
             logger.info(f"Dataset '{nome}' already exists: {existing_id}")
             return existing_id, False
 
+        import json as _json
+
         dataset_id = str(uuid.uuid4())
         try:
             with self.engine.begin() as conn:
@@ -116,10 +121,12 @@ class DatasetRepository:
                     text("""
                         INSERT INTO dataset
                             (id, fonte_dado_id, nome, descricao, versao,
-                             data_coleta, data_referencia)
+                             data_coleta, data_referencia,
+                             caminho_arquivo, metadata_json, hash_arquivo)
                         VALUES
                             (:id, :fid, :nome, :descricao, :version,
-                             :coleta, :referencia)
+                             :coleta, :referencia,
+                             :caminho_arquivo, CAST(:metadata_json AS JSONB), :hash_arquivo)
                     """),
                     {
                         "id": dataset_id,
@@ -129,6 +136,9 @@ class DatasetRepository:
                         "version": versao,
                         "coleta": datetime.now(),
                         "referencia": data_referencia,
+                        "caminho_arquivo": caminho_arquivo,
+                        "metadata_json": _json.dumps(metadata_json) if metadata_json is not None else None,
+                        "hash_arquivo": hash_arquivo,
                     },
                 )
             logger.info(f"Created Dataset: {nome} ({dataset_id})")
