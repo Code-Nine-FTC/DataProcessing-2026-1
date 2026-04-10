@@ -3,15 +3,16 @@ Pipeline Palmares - Territórios Quilombolas
 
 Fonte: Fundação Cultural Palmares / INCRA Acervo Fundiário
 URL: https://acervofundiario.incra.gov.br/i3geo/ogc.php
+Formato: Shapefile (via download manual)
+Path: models/docs/quilombolas_sp.shp
 Tabela: territorio_quilombola
-Layer: quilombola_titulado (WFS 1.1.0)
 """
 import logging
 from datetime import date
 from uuid import uuid4
 
 from core.models import ExtractedData, TransformedRecord, DataSource
-from etl.extractors import WFSExtractor
+from etl.extractors import ShapefileExtractor
 from etl.transformers import GeometricTransformer
 from etl.loaders import GeometricLoader
 from etl.pipeline import BasePipeline
@@ -22,73 +23,46 @@ logger = logging.getLogger(__name__)
 
 PALMARES_SOURCE = DataSource(
     name="Fundação Cultural Palmares - Territórios Quilombolas",
-    url="https://acervofundiario.incra.gov.br/i3geo/ogc.php",
-    format="WFS/GeoJSON",
+    url="https://acervofundiario.incra.gov.br/acervo/login.php",
+    format="Shapefile",
     agency="Fundação Cultural Palmares / INCRA",
     scope="nacional",
     frequency="irregular",
     license="Dados Abertos Gov",
 )
 
-_NOME = ("NOME_COMU", "nome_comunidade", "NOME", "nome", "NM_COMUNI")
-_STATUS = ("STATUS", "status_processo", "FASE", "fase", "SIT_FUNDO")
-_AREA = ("AREA_HA", "area_ha", "AREA_HECTA", "area")
-_ID_ORIG = ("NR_PROCES", "nr_processo", "gid", "FID", "id")
-_MUNICIPIO = ("MUNICIPIO", "municipio", "NOM_MUNICI", "mun_nome")
-_UF_SIGLA = ("UF", "uf", "SIGLA_UF", "sigla_uf", "SIG_UF")
+_NOME = ("nm_comunid", "NOME_COMU", "nome_comunidade", "NOME", "NM_COMUNI")
+_STATUS = ("fase", "st_titulad", "STATUS", "status_processo", "FASE")
+_AREA = ("nr_area_ha", "area_calc_", "AREA_HA", "area_ha", "AREA_HECTA")
+_ID_ORIG = ("nr_process", "cd_quilomb", "NR_PROCES", "nr_processo", "gid")
+_MUNICIPIO = ("nm_municip", "MUNICIPIO", "municipio", "NOM_MUNICI")
+_UF_SIGLA = ("cd_uf", "UF", "uf", "SIGLA_UF", "SIG_UF")
+_PATH = "models/docs/quilombolas_sp.shp"
 
 
-class PalmaresExtractor(WFSExtractor):
-    """Extrator para Territórios Quilombolas."""
-
-    def __init__(self, wfs_client: WFSClient):
-        super().__init__(PALMARES_SOURCE, wfs_client, "quilombola_titulado")
+class PalmaresExtractor(ShapefileExtractor):
+    def __init__(self):
+        super().__init__(PALMARES_SOURCE, shp_path=_PATH)
 
     def extract(self) -> ExtractedData:
-        """Extrai dados de Territórios Quilombolas do WFS."""
-        from core.exceptions import ExtractionException
+        data = super().extract()
 
-        request = WFSRequest(
-            url=self.data_source.url,
-            layer=self.wfs_layer,
-            wfs_version="1.1.0",  # INCRA usa WFS 1.1.0
-        )
+        if data.rows:
+            logger.info(f"Salvando {len(data.rows)} registros de Palmares em output/")
+            self.save_data(data=data, path="output/palmares")
+        else:
+            logger.warning("Nenhum dado encontrado para extrair de Palmares.")
 
-        try:
-            gdf = self.wfs_client.fetch_all(request)
-        except ExtractionException as e:
-            logger.warning(f"Failed to fetch {self.wfs_layer}: {str(e)} - returning empty dataset")
-            # Graceful degradation
-            return ExtractedData(
-                source=self.data_source,
-                rows=[],
-                metadata={"feature_count": 0},
-            )
-
-        if gdf.empty:
-            logger.warning("No quilombola territories fetched from Palmares - returning empty dataset")
-            return ExtractedData(
-                source=self.data_source,
-                rows=[],
-                metadata={"feature_count": 0},
-            )
-
-        return ExtractedData(
-            source=self.data_source,
-            rows=gdf.to_dict("records"),
-            metadata={"feature_count": len(gdf), "crs": str(gdf.crs)},
-        )
+        return data
 
 
 class PalmaresTransformer(GeometricTransformer):
-    """Transformador para dados de Territórios Quilombolas."""
 
     def __init__(self, municipio_repo: MunicipioRepository):
         super().__init__(table_name="territorio_quilombola")
         self.municipio_repo = municipio_repo
 
     def transform_feature(self, feature: dict) -> TransformedRecord:
-        """Transforma feature de território quilombola. Filtra apenas SP."""
         props = feature.get("properties", feature)
 
         uf = self.pick(props, _UF_SIGLA)
@@ -109,7 +83,7 @@ class PalmaresTransformer(GeometricTransformer):
         if municipio_nome and uf:
             try:
                 municipio_id = self.municipio_repo.find_by_name_and_state(
-                    municipio_nome, uf
+                    municipio_nome, uf, geom_wkt=geom_wkt
                 )
             except Exception as e:
                 logger.warning(f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}")
@@ -129,13 +103,11 @@ class PalmaresTransformer(GeometricTransformer):
 
 
 class PalmaresLoader(GeometricLoader):
-    """Carregador para Territórios Quilombolas."""
 
     def __init__(self, engine):
         super().__init__(engine, table_name="territorio_quilombola")
 
     def get_insert_query(self) -> str:
-        """Query de inserção para territorio_quilombola."""
         return """
             INSERT INTO territorio_quilombola
                 (id, id_origem, dataset_id, nome, area_ha,
@@ -149,7 +121,6 @@ class PalmaresLoader(GeometricLoader):
 
 
 class PalmaresPipeline(BasePipeline):
-    """Pipeline completa para Palmares."""
 
     def _get_dataset_name(self) -> str:
         return "QUILOMBOLA_PALMARES"
@@ -158,10 +129,9 @@ class PalmaresPipeline(BasePipeline):
         return "Territórios Quilombolas do Brasil - Acervo Fundiário INCRA/FCP"
 
 
-def create_pipeline(engine, wfs_client: WFSClient):
-    """Factory para criar pipeline de Palmares."""
+def create_pipeline(engine, wfs_client=None):
     municipio_repo = MunicipioRepository(engine)
-    extractor = PalmaresExtractor(wfs_client)
+    extractor = PalmaresExtractor()
     transformer = PalmaresTransformer(municipio_repo)
     loader = PalmaresLoader(engine)
 
