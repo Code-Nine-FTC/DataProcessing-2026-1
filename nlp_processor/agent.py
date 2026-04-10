@@ -12,7 +12,9 @@ Fluxo:
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 import logging
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,11 +47,23 @@ async def _carregar_municipios_normalizados(session: AsyncSession) -> list[str]:
     return sorted(nomes)
 
 
+def _serializar_entidades(entidades) -> dict[str, Any]:
+    return asdict(entidades)
+
+
+def _serializar_filtros(entidades_json: dict[str, Any]) -> dict[str, Any]:
+    return {
+        chave: valor
+        for chave, valor in entidades_json.items()
+        if chave != "palavras_chave" and valor is not None
+    }
+
+
 async def run_agent(
     session: AsyncSession,
     pergunta: str,
     historico: list[dict],  # mantido para compatibilidade com index.py
-) -> tuple[str, list[dict], list[dict], str]:
+) -> dict[str, Any]:
     """
     Executa o pipeline NLP local.
 
@@ -63,13 +77,19 @@ async def run_agent(
     # 1. Classificação de intenção
     if not classifier.is_ready():
         logger.error("Modelo de intenções não treinado. Execute nlp_processor.training.train")
-        return (
-            "O sistema de processamento de linguagem não está treinado. "
-            "Execute `python -m nlp_processor.training.train` antes de usar o chat.",
-            [],
-            [],
-            "erro",
-        )
+        return {
+            "texto_resposta": (
+                "O sistema de processamento de linguagem não está treinado. "
+                "Execute `python -m nlp_processor.training.train` antes de usar o chat."
+            ),
+            "features": [],
+            "fontes": [],
+            "status": "erro",
+            "intencao": None,
+            "intencao_score": None,
+            "entidades_detectadas_json": {},
+            "filtros_detectados_json": {},
+        }
 
     intencao, confianca = classifier.predict(pergunta)
     logger.info("Intenção detectada: %s (%.2f)", intencao, confianca)
@@ -82,6 +102,8 @@ async def run_agent(
         logger.warning("Não foi possível carregar municípios do banco; usando gazetteer estático.")
 
     entidades = extrair_entidades(pergunta, municipios_extras)
+    entidades_json = _serializar_entidades(entidades)
+    filtros_json = _serializar_filtros(entidades_json)
 
     # Se confiança é baixa MAS extraímos um município, assume buscar_queimadas
     # (a consulta mais comum é por focos em um local)
@@ -115,12 +137,16 @@ async def run_agent(
         )
     except Exception:
         logger.exception("Erro ao executar consulta no banco.")
-        return (
-            "Ocorreu um erro ao consultar os dados. Tente novamente.",
-            [],
-            [],
-            "erro",
-        )
+        return {
+            "texto_resposta": "Ocorreu um erro ao consultar os dados. Tente novamente.",
+            "features": [],
+            "fontes": [],
+            "status": "erro",
+            "intencao": intencao,
+            "intencao_score": confianca,
+            "entidades_detectadas_json": entidades_json,
+            "filtros_detectados_json": filtros_json,
+        }
 
     features = resultado["features"]
     fontes = resultado["fontes"]
@@ -144,5 +170,14 @@ async def run_agent(
         confianca=confianca,
     )
 
-    return texto, features, fontes, status
+    return {
+        "texto_resposta": texto,
+        "features": features,
+        "fontes": fontes,
+        "status": status,
+        "intencao": intencao,
+        "intencao_score": confianca,
+        "entidades_detectadas_json": entidades_json,
+        "filtros_detectados_json": filtros_json,
+    }
 
