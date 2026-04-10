@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import logging
+from time import perf_counter
 from typing import Any
 
 from sqlalchemy import select
@@ -71,24 +72,50 @@ async def run_agent(
         (texto_resposta, features_geojson, fontes, status)
         status: 'sucesso' | 'sem_resultado' | 'fora_escopo' | 'erro'
     """
+    inicio = perf_counter()
     classifier = get_classifier()
     embedder = get_embedder()
+
+    def _finalizar(
+        texto_resposta: str,
+        features: list[dict],
+        fontes: list[dict],
+        status: str,
+        intencao: str | None,
+        intencao_score: float | None,
+        entidades_detectadas_json: dict[str, Any],
+        filtros_detectados_json: dict[str, Any],
+        sql_executado: str | None = None,
+        mensagem_erro: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "texto_resposta": texto_resposta,
+            "features": features,
+            "fontes": fontes,
+            "status": status,
+            "intencao": intencao,
+            "intencao_score": intencao_score,
+            "entidades_detectadas_json": entidades_detectadas_json,
+            "filtros_detectados_json": filtros_detectados_json,
+            "sql_executado": sql_executado,
+            "mensagem_erro": mensagem_erro,
+            "tempo_resposta_ms": int((perf_counter() - inicio) * 1000),
+        }
 
     # 1. Classificação de intenção
     if not classifier.is_ready():
         logger.error("Modelo de intenções não treinado. Execute nlp_processor.training.train")
-        return {
-            "texto_resposta": (
-                "Ocorreu um erro interno. Tente novamente."
-            ),
-            "features": [],
-            "fontes": [],
-            "status": "erro",
-            "intencao": None,
-            "intencao_score": None,
-            "entidades_detectadas_json": {},
-            "filtros_detectados_json": {},
-        }
+        return _finalizar(
+            texto_resposta="Ocorreu um erro interno. Tente novamente.",
+            features=[],
+            fontes=[],
+            status="erro",
+            intencao=None,
+            intencao_score=None,
+            entidades_detectadas_json={},
+            filtros_detectados_json={},
+            mensagem_erro="Modelo de intenções não treinado.",
+        )
 
     intencao, confianca = classifier.predict(pergunta)
     logger.info("Intenção detectada: %s (%.2f)", intencao, confianca)
@@ -136,16 +163,17 @@ async def run_agent(
         )
     except Exception:
         logger.exception("Erro ao executar consulta no banco.")
-        return {
-            "texto_resposta": "Ocorreu um erro ao consultar os dados. Tente novamente.",
-            "features": [],
-            "fontes": [],
-            "status": "erro",
-            "intencao": intencao,
-            "intencao_score": confianca,
-            "entidades_detectadas_json": entidades_json,
-            "filtros_detectados_json": filtros_json,
-        }
+        return _finalizar(
+            texto_resposta="Ocorreu um erro ao consultar os dados. Tente novamente.",
+            features=[],
+            fontes=[],
+            status="erro",
+            intencao=intencao,
+            intencao_score=confianca,
+            entidades_detectadas_json=entidades_json,
+            filtros_detectados_json=filtros_json,
+            mensagem_erro="Erro ao executar consulta no banco.",
+        )
 
     features = resultado["features"]
     fontes = resultado["fontes"]
@@ -178,5 +206,8 @@ async def run_agent(
         "intencao_score": confianca,
         "entidades_detectadas_json": entidades_json,
         "filtros_detectados_json": filtros_json,
+        "sql_executado": resultado.get("sql_executado"),
+        "mensagem_erro": resultado.get("mensagem_erro"),
+        "tempo_resposta_ms": int((perf_counter() - inicio) * 1000),
     }
 
