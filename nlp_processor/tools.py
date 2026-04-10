@@ -125,6 +125,10 @@ async def buscar_queimadas(
             QueimadaEvento.data_ocorrencia,
             QueimadaEvento.fonte_sensor,
             QueimadaEvento.intensidade,
+            QueimadaEvento.bioma,
+            QueimadaEvento.dias_sem_chuva,
+            QueimadaEvento.precipitacao_mm,
+            QueimadaEvento.risco_fogo,
             Municipio.nome.label("municipio_nome"),
             _geom_as_geojson(QueimadaEvento.geom).label("geom_json"),
             FonteDado.nome.label("fonte_nome"),
@@ -172,6 +176,10 @@ async def buscar_queimadas(
                 "fonte_sensor": row.fonte_sensor,
                 "intensidade": float(row.intensidade) if row.intensidade else None,
                 "municipio": row.municipio_nome,
+                "bioma": row.bioma,
+                "dias_sem_chuva": float(row.dias_sem_chuva) if row.dias_sem_chuva is not None else None,
+                "precipitacao_mm": float(row.precipitacao_mm) if row.precipitacao_mm is not None else None,
+                "risco_fogo": float(row.risco_fogo) if row.risco_fogo is not None else None,
             },
         })
         if row.fonte_nome:

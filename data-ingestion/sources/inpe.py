@@ -103,6 +103,10 @@ _LON = ("Longitude", "longitude", "LON", "lon")
 _DATAHORA = ("DataHora", "data_hora", "DataHora_GMT", "Data")
 _SATELITE = ("Satelite", "satelite", "Satélite", "SATELITE", "satellite")
 _FRP = ("FRP", "frp", "Frp", "potencia")
+_BIOMA = ("Bioma", "bioma", "BIOMA")
+_DIASEMCHUVA = ("DiaSemChuva", "diasemchuva", "dias_sem_chuva")
+_PRECIPITACAO = ("Precipitacao", "precipitacao", "precipitacao_mm")
+_RISCOFOGO = ("RiscoFogo", "riscofogo", "risco_fogo")
 
 
 class INPEExtractor(CSVExtractor):
@@ -163,6 +167,10 @@ class INPETransformer(BaseTransformer):
                             self.pick(row_dict, _SATELITE) or ""
                         ).strip() or None,
                         "intensidade": self.safe_float(self.pick(row_dict, _FRP)),
+                        "bioma": str(self.pick(row_dict, _BIOMA) or "").strip() or None,
+                        "dias_sem_chuva": self.safe_int(self.pick(row_dict, _DIASEMCHUVA)),
+                        "precipitacao_mm": self.safe_float(self.pick(row_dict, _PRECIPITACAO)),
+                        "risco_fogo": self.safe_float(self.pick(row_dict, _RISCOFOGO)),
                         # Demais colunas do CSV ficam em atributos_json (schema atual
                         # só expõe data_ocorrencia, fonte_sensor, intensidade além de geom).
                         "atributos_json": self.row_to_json(row_dict),
@@ -202,10 +210,11 @@ class INPELoader(GeometricLoader):
         return """
             INSERT INTO queimada_evento
                 (id, id_origem, dataset_id, data_ocorrencia, fonte_sensor,
-                 intensidade, geom, atributos_json)
+                 intensidade, bioma, dias_sem_chuva, precipitacao_mm, risco_fogo,
+                 geom, atributos_json)
             VALUES
                 (:id, :id_origem, :dataset_id, :data_ocorrencia, :fonte_sensor,
-                 :intensidade,
+                 :intensidade, :bioma, :dias_sem_chuva, :precipitacao_mm, :risco_fogo,
                  ST_GeomFromText(:geom_wkt, 4326),
                  CAST(:atributos_json AS JSONB))
         """
