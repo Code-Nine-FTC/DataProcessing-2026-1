@@ -79,8 +79,7 @@ async def run_agent(
         logger.error("Modelo de intenções não treinado. Execute nlp_processor.training.train")
         return {
             "texto_resposta": (
-                "O sistema de processamento de linguagem não está treinado. "
-                "Execute `python -m nlp_processor.training.train` antes de usar o chat."
+                "Ocorreu um erro interno. Tente novamente."
             ),
             "features": [],
             "fontes": [],

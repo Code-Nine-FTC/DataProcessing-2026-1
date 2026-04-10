@@ -175,16 +175,23 @@ class NLPProcessor:
         historico = await _load_historico(session, chat.id)
 
         # 3. Executar agente
-        resultado = await run_agent(
-            session=session,
-            pergunta=pergunta,
-            historico=historico,
-        )
-
-        texto = resultado["texto_resposta"]
-        features = resultado["features"]
-        fontes = resultado["fontes"]
-        status = resultado["status"]
+        try:
+            resultado = await run_agent(
+                session=session,
+                pergunta=pergunta,
+                historico=historico,
+            )
+            texto = resultado["texto_resposta"]
+            features = resultado["features"]
+            fontes = resultado["fontes"]
+            status = resultado["status"]
+        except Exception:
+            logger.exception("Erro crítico no agente NLP")
+            texto = "Ocorreu um erro interno ao processar sua pergunta. Tente novamente."
+            features = []
+            fontes = []
+            status = "erro"
+            resultado = {}
 
         # 4. Calcular turno
         turno = await _next_turno(session, chat.id)
