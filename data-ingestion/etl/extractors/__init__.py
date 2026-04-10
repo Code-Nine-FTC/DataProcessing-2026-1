@@ -15,6 +15,8 @@ import geopandas as gpd
 import pandas as pd
 from core.models import ExtractedData, DataSource
 from core.exceptions import ExtractionException
+from datetime import date
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,11 @@ class BaseExtractor(ABC):
         except Exception as e:
             logger.error(f"[{self.data_source.name}] Extraction failed: {str(e)}")
             raise
+
+    def save_data(self,  data: ExtractedData,path: str = "output"):
+        os.makedirs(path, exist_ok=True)
+        gdf = gpd.GeoDataFrame(data.rows, crs="EPSG:4326")
+        gdf.to_file(f"{path}/data-{date.today()}.geojson", driver='GeoJSON',engine='pyogrio')
 
 
 class WFSExtractor(BaseExtractor):
@@ -80,11 +87,6 @@ class WFSExtractor(BaseExtractor):
             rows=gdf.to_dict("records"),
             metadata={"feature_count": len(gdf), "crs": str(gdf.crs)},
         )
-
-    def save_data(self,  data: ExtractedData,path: str = "output"):
-        os.makedirs(path, exist_ok=True)
-        gdf = gpd.GeoDataFrame(data.rows, crs="EPSG:4326")
-        gdf.to_file(f"{path}/{self.wfs_layer}.geojson", driver='GeoJSON',engine='pyogrio')
 
 class CSVExtractor(BaseExtractor):
     """Extrator base para dados em CSV."""
@@ -138,5 +140,62 @@ class CSVExtractor(BaseExtractor):
                 "row_count": len(df),
                 "columns": list(df.columns),
                 "source_file": csv_file,
+            },
+        )
+
+
+class ShapefileExtractor(BaseExtractor):
+    """Extrator específico para Shapefiles de Terras Quilombolas."""
+
+    def __init__(self, data_source: DataSource, shp_path: str):
+        super().__init__(data_source)
+        self.shp_path = shp_path
+
+    def _find_shp(self) -> Optional[str]:
+        """Localiza o arquivo .shp nos documentos do projeto."""
+        # Se você passar apenas o diretório, buscamos qualquer .shp lá dentro
+        if os.path.isdir(self.shp_path):
+            files = glob.glob(os.path.join(self.shp_path, "*.shp"))
+        else:
+            files = glob.glob(self.shp_path)
+            
+        if not files:
+            return None
+        return max(files, key=os.path.getmtime)
+
+    def extract(self) -> ExtractedData:
+        """Extrai os dados geográficos e atributos do Shapefile."""
+        shp_file = self._find_shp()
+        
+        if not shp_file:
+            logger.warning(f"Nenhum arquivo Shapefile encontrado em: {self.shp_path}")
+            return ExtractedData(
+                source=self.data_source,
+                rows=[],
+                metadata={"row_count": 0, "source_file": None}
+            )
+
+        # Lendo o shapefile
+        # engine='pyogrio' é mais rápido, mas 'fiona' é o padrão mais comum
+        gdf = gpd.read_file(shp_file)
+
+        # 1. Padronização de Coordenadas (Sincronizando com seu teste EPSG:4674 -> 4326)
+        if gdf.crs is not None and gdf.crs != "EPSG:4326":
+            logger.info(f"Convertendo CRS de {gdf.crs} para EPSG:4326")
+            gdf = gdf.to_crs("EPSG:4326")
+
+        # 2. Tratamento de NaNs (Opcional, mas ajuda a evitar erros no JSON/Dicionário)
+        # Substitui valores nulos por None (que vira null no JSON)
+        df_clean = gdf.where(pd.notnull(gdf), None)
+
+        return ExtractedData(
+            source=self.data_source,
+            rows=df_clean.to_dict("records"),
+            metadata={
+                "row_count": len(gdf),
+                "columns": list(gdf.columns),
+                "crs": "EPSG:4326",
+                "source_file": shp_file,
+                "geometrias": list(gdf.geometry.type.unique())
             },
         )
