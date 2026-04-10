@@ -104,7 +104,7 @@ _DATAHORA = ("DataHora", "data_hora", "DataHora_GMT", "Data")
 _SATELITE = ("Satelite", "satelite", "Satélite", "SATELITE", "satellite")
 _FRP = ("FRP", "frp", "Frp", "potencia")
 _BIOMA = ("Bioma", "bioma", "BIOMA")
-_DIASEMCHUVA = ("DiasSemChuva", "diasemchuva", "dias_sem_chuva")
+_DIASEMCHUVA = ("DiaSemChuva", "diasemchuva", "dias_sem_chuva")
 _PRECIPITACAO = ("Precipitacao", "precipitacao", "precipitacao_mm")
 _RISCOFOGO = ("RiscoFogo", "riscofogo", "risco_fogo")
 
