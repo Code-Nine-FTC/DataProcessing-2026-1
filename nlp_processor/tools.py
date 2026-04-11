@@ -14,7 +14,7 @@ from typing import Any, Optional
 from sqlalchemy import Integer, Text, and_, cast, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy import Float
 from nlp_processor.pipeline.preprocessor import normalizar
 
 logger = logging.getLogger(__name__)
@@ -808,7 +808,7 @@ async def buscar_documentos_rag(
     from pgvector.sqlalchemy import Vector
 
     # Cosine distance search usando pgvector
-    distance_expr = DocumentoTrecho.embedding.op("<->")(
+    distance_expr = DocumentoTrecho.embedding.op("<->", return_type=Float())(
         cast(query_embedding, Vector(768))
     )
 

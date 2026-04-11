@@ -17,6 +17,7 @@ Tabelas afetadas:
 Executar APÓS todas as outras pipelines.
 """
 import logging
+import uuid
 from datetime import datetime
 
 from sqlalchemy import text
@@ -207,6 +208,89 @@ class SpatialRelationshipPostProcessor:
             logger.warning(f"Failed to calculate imovel_quilombo relationships: {str(e)}")
             return 0
 
+    def populate_documentos_from_datasets(self) -> int:
+        """Sincroniza metadados dos Datasets para a tabela documento e documento_trecho."""
+        logger.info("Computing fallback: dataset -> documento_trecho (embeddings)...")
+        
+        try:
+            # Requer import do embedder do pipeline NLP
+            import sys
+            import os
+            # Adiciona a raiz do projeto no sys.path se não estiver
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+            if base_dir not in sys.path:
+                sys.path.append(base_dir)
+                
+            from nlp_processor.pipeline.embedder import get_embedder
+            embedder = get_embedder()
+            
+            with self.engine.begin() as conn:
+                # 1. Obter todos os datasets que ainda não viraram documento
+                query_datasets = text("""
+                    SELECT 
+                        d.id as dataset_id, 
+                        d.nome as dataset_nome, 
+                        d.descricao, 
+                        f.nome as fonte_nome, 
+                        f.orgao_responsavel
+                    FROM dataset d
+                    JOIN fonte_dado f ON d.fonte_dado_id = f.id
+                    WHERE d.id NOT IN (SELECT dataset_id FROM documento WHERE dataset_id IS NOT NULL)
+                """)
+                
+                datasets = conn.execute(query_datasets).fetchall()
+                if not datasets:
+                    return 0
+                
+                count = 0
+                for row in datasets:
+                    doc_id = str(uuid.uuid4())
+                    titulo = f"{row.fonte_nome} - {row.dataset_nome}"
+                    texto_integral = (
+                        f"Dataset: {row.dataset_nome}. "
+                        f"Fonte de Dados: {row.fonte_nome} ({row.orgao_responsavel}). "
+                        f"Descrição: {row.descricao or 'Não disponível'}."
+                    )
+                    
+                    # 2. Inserir Documento
+                    insert_doc = text("""
+                        INSERT INTO documento (id, dataset_id, titulo, tipo, data_criacao, texto_integral)
+                        VALUES (:id, :dataset_id, :titulo, 'metadata_dataset', :agora, :texto_integral)
+                    """)
+                    conn.execute(insert_doc, {
+                        "id": doc_id, 
+                        "dataset_id": row.dataset_id,
+                        "titulo": titulo,
+                        "agora": datetime.now(),
+                        "texto_integral": texto_integral
+                    })
+                    
+                    # 3. Gerar embedding e Inserir Documento Trecho
+                    vector_embedding = embedder.embed(texto_integral)
+                    embedding_str = f"[{','.join(str(f) for f in vector_embedding)}]"
+                    tokens_count = len(texto_integral.split())
+                    
+                    insert_trecho = text("""
+                        INSERT INTO documento_trecho (id, documento_id, texto, ordem, embedding, tokens_count)
+                        VALUES (:id, :documento_id, :texto, 1, CAST(:embedding AS vector), :tokens)
+                    """)
+                    conn.execute(insert_trecho, {
+                        "id": str(uuid.uuid4()),
+                        "documento_id": doc_id,
+                        "texto": texto_integral,
+                        "embedding": embedding_str,
+                        "tokens": tokens_count
+                    })
+                    
+                    count += 1
+                
+                logger.info(f"  → {count} documents and embeddings created")
+                return count
+                
+        except Exception as e:
+            logger.warning(f"Failed to populate documents and embeddings: {str(e)}")
+            return 0
+
     def calculate_imovel_bacia(self) -> int:
         """Calcula: Imóvel ↔ Bacia Hidrográfica."""
         logger.info("Computing imovel_rural ↔ bacia_hidrografica relationships...")
@@ -280,6 +364,7 @@ class SpatialRelationshipPostProcessor:
             "assentamento": self.calculate_imovel_assentamento(),
             "quilombo": self.calculate_imovel_quilombo(),
             "bacia": self.calculate_imovel_bacia(),
+            "documentos_fallback": self.populate_documentos_from_datasets(),
         }
 
         logger.info("\n" + "="*70)
