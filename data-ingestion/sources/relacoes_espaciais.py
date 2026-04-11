@@ -53,13 +53,22 @@ class SpatialRelationshipPostProcessor:
         Returns:
             Número de relacionamentos criados
         """
-        logger.info(
-            f"Computing {source_table} ↔ {target_table} relationships..."
-        )
+        logger.info(f"Computing {source_table} ↔ {target_table} relationships...")
 
         with self.engine.begin() as conn:
             # Limpar relacionamentos antigos
             conn.execute(text(f"DELETE FROM {relation_table} WHERE TRUE"))
+            conn.execute(text("SET LOCAL statement_timeout = '5min'"))
+
+            # Índices espaciais para melhorar desempenho do ST_Intersects.
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS idx_{source_table}_geom_gist "
+                f"ON {source_table} USING GIST (geom)"
+            ))
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS idx_{target_table}_geom_gist "
+                f"ON {target_table} USING GIST (geom)"
+            ))
 
             # Inserir novos relacionamentos
             cols = [
@@ -77,25 +86,24 @@ class SpatialRelationshipPostProcessor:
                     gen_random_uuid(),
                     source.id,
                     target.id,
-                    ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0
+                    ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0
                         as area_intersecao_ha,
                     CASE
                         WHEN source.area_ha > 0 THEN
-                            (ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0)
+                            (ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0)
                             / source.area_ha * 100
                         ELSE 0
                     END as percentual_sobreposicao
                 FROM {source_table} source
-                JOIN {target_table} target ON ST_Intersects(source.geom, target.geom)
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM {relation_table} rel
-                    WHERE rel.{source_table.rstrip('s')}_id = source.id
-                      AND rel.{target_table.rstrip('s')}_id = target.id
-                )
+                JOIN {target_table} target
+                  ON source.geom && target.geom
+                 AND ST_Intersects(ST_MakeValid(source.geom), ST_MakeValid(target.geom))
             """
 
-            result = conn.execute(text(query))
-            count = result.rowcount
+            conn.execute(text(query))
+            result = conn.execute(text(f"SELECT COUNT(*) FROM {relation_table}"))
+            count = result.scalar()
+
             logger.info(f"  → {count} relationships created")
             return count
 
@@ -106,6 +114,20 @@ class SpatialRelationshipPostProcessor:
         try:
             with self.engine.begin() as conn:
                 conn.execute(text("DELETE FROM rel_imovel_queimada WHERE TRUE"))
+                conn.execute(text("SET LOCAL statement_timeout = '5min'"))
+
+                # Índices espaciais para acelerar a junção por proximidade.
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_imovel_rural_geom_gist "
+                    "ON imovel_rural USING GIST (geom)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_queimada_evento_geom_gist "
+                    "ON queimada_evento USING GIST (geom)"
+                ))
+
+                # Aproximação em graus (~5km) para evitar dependência de geography/srid refs.
+                dist_deg = 5000.0 / 111320.0
 
                 query = text("""
                     INSERT INTO rel_imovel_queimada
@@ -115,20 +137,16 @@ class SpatialRelationshipPostProcessor:
                         gen_random_uuid(),
                         ir.id,
                         qe.id,
-                        ST_Distance(ir.geom::geography, qe.geom::geography) as distancia_m,
-                        ST_Contains(ir.geom, qe.geom) as dentro_imovel,
+                        ST_Distance(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom)) * 111320.0 as distancia_m,
+                        ST_Contains(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom)) as dentro_imovel,
                         :agora
-                    FROM imovel_rural ir
-                    CROSS JOIN queimada_evento qe
-                    WHERE ST_DWithin(ir.geom::geography, qe.geom::geography, 5000)
-                      AND NOT EXISTS (
-                        SELECT 1 FROM rel_imovel_queimada
-                        WHERE imovel_rural_id = ir.id
-                          AND queimada_evento_id = qe.id
-                      )
+                                        FROM queimada_evento qe
+                                        JOIN imovel_rural ir
+                                            ON ir.geom && ST_Expand(qe.geom, :dist_deg)
+                                         AND ST_DWithin(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom), :dist_deg)
                 """)
 
-                conn.execute(query, {"agora": datetime.now()})
+                conn.execute(query, {"agora": datetime.now(), "dist_deg": dist_deg})
                 result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_queimada"))
                 count = result.scalar()
                 logger.info(f"  → {count} relationships created")
@@ -223,15 +241,15 @@ class SpatialRelationshipPostProcessor:
                         gen_random_uuid(),
                         ir.id,
                         bh.id,
-                        ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0 as area_intersecao_ha,
+                        ST_Area(ST_Intersection(ST_MakeValid(ir.geom), ST_MakeValid(bh.geom))) / 10000.0 as area_intersecao_ha,
                         CASE
                             WHEN ir.area_ha > 0 THEN
-                                (ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0)
+                                (ST_Area(ST_Intersection(ST_MakeValid(ir.geom), ST_MakeValid(bh.geom))) / 10000.0)
                                 / ir.area_ha * 100
                             ELSE 0
                         END as percentual_sobreposicao
                     FROM imovel_rural ir
-                    JOIN bacia_hidrografica bh ON ST_Intersects(ir.geom, bh.geom)
+                    JOIN bacia_hidrografica bh ON ST_Intersects(ST_MakeValid(ir.geom), ST_MakeValid(bh.geom))
                     WHERE NOT EXISTS (
                         SELECT 1 FROM rel_imovel_bacia
                         WHERE imovel_rural_id = ir.id
@@ -248,6 +266,85 @@ class SpatialRelationshipPostProcessor:
             logger.warning(f"Failed to calculate imovel_bacia relationships: {str(e)}")
             return 0
 
+    def link_camada_estadual_to_municipios(self) -> int:
+        """Relaciona camada_estadual_ambiental ao município mais aderente espacialmente.
+
+        Regra principal: município com maior área de interseção.
+        Fallback: município que contém um ponto interno da geometria.
+        """
+        logger.info("Linking camada_estadual_ambiental → municipio...")
+
+        try:
+            with self.engine.begin() as conn:
+                updated_total = 0
+                # Escolhe um único município por ativo com base na maior interseção.
+                r1 = conn.execute(text("""
+                    WITH ranked AS (
+                        SELECT
+                            cea.id AS camada_id,
+                            m.id AS municipio_id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY cea.id
+                                ORDER BY ST_Area(ST_Intersection(ST_MakeValid(cea.geom), m.geom)) DESC,
+                                         m.id
+                            ) AS rn
+                        FROM camada_estadual_ambiental cea
+                        JOIN municipio m ON ST_Intersects(ST_MakeValid(cea.geom), m.geom)
+                        WHERE cea.municipio_id IS NULL
+                    )
+                    UPDATE camada_estadual_ambiental cea
+                    SET municipio_id = ranked.municipio_id
+                    FROM ranked
+                    WHERE cea.id = ranked.camada_id
+                      AND ranked.rn = 1
+                    RETURNING cea.id
+                """))
+                updated_total += len(r1.fetchall())
+
+                # Fallback para geometrias que não intersectaram por ruído topológico.
+                r2 = conn.execute(text("""
+                                        UPDATE camada_estadual_ambiental cea
+                                        SET municipio_id = m.id
+                                        FROM municipio m
+                                        WHERE cea.municipio_id IS NULL
+                                            AND ST_Contains(m.geom, ST_PointOnSurface(ST_MakeValid(cea.geom)))
+                                        RETURNING cea.id
+                """))
+                updated_total += len(r2.fetchall())
+
+                # Último fallback: município mais próximo do ponto interno da geometria.
+                r3 = conn.execute(text("""
+                    WITH nearest AS (
+                        SELECT
+                            cea.id AS camada_id,
+                            m.id AS municipio_id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY cea.id
+                                ORDER BY ST_Distance(
+                                    ST_PointOnSurface(ST_MakeValid(cea.geom)),
+                                    ST_PointOnSurface(m.geom)
+                                ) ASC,
+                                m.id
+                            ) AS rn
+                        FROM camada_estadual_ambiental cea
+                        JOIN municipio m ON TRUE
+                        WHERE cea.municipio_id IS NULL
+                    )
+                    UPDATE camada_estadual_ambiental cea
+                    SET municipio_id = nearest.municipio_id
+                    FROM nearest
+                    WHERE cea.id = nearest.camada_id
+                      AND nearest.rn = 1
+                    RETURNING cea.id
+                """))
+                updated_total += len(r3.fetchall())
+
+            logger.info("  → %s registros de camada_estadual_ambiental vinculados a município", updated_total)
+            return updated_total
+        except Exception as e:
+            logger.warning("Failed to link camada_estadual_ambiental to municipio: %s", str(e))
+            return 0
+
     def run_all(self):
         """Executa todos os cálculos de relacionamentos."""
         logger.info("\n" + "="*70)
@@ -261,6 +358,8 @@ class SpatialRelationshipPostProcessor:
             logger.warning(
                 "Não foi possível atualizar municipio_id em queimada_evento: %s", e
             )
+
+        camada_municipio_updates = self.link_camada_estadual_to_municipios()
 
         with self.engine.connect() as conn:
             n_im = conn.execute(
@@ -286,6 +385,11 @@ class SpatialRelationshipPostProcessor:
         logger.info("SUMMARY")
         logger.info("="*70)
         total = sum(results.values())
+        logger.info(
+            "  %-20s → %6s updates",
+            "camada->municipio",
+            camada_municipio_updates,
+        )
         for name, count in results.items():
             logger.info(f"  {name:20} → {count:6} relationships")
         logger.info(f"  {'TOTAL':20} → {total:6} relationships")
