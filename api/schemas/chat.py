@@ -13,7 +13,6 @@ class ChatMensagemRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     resposta_sistema_id: UUID
     avaliacao: int = Field(..., ge=-1, le=1, description="-1 ruim, 0 neutro, 1 bom")
-    comentario: Optional[str] = Field(None, max_length=1000)
 
 class MapGeometry(BaseModel):
     type: str
@@ -30,6 +29,10 @@ class FeatureCollection(BaseModel):
     type: str = "FeatureCollection"
     features: List[MapFeature]
 
+
+class FeedbackInfo(BaseModel):
+    id: UUID
+    avaliacao: int = Field(description="-1 ruim, 0 neutro, 1 bom")
 
 class FonteCitada(BaseModel):
     nome: str
@@ -57,10 +60,12 @@ class ChatResumo(BaseModel):
 
 class MensagemHistorico(BaseModel):
     consulta_id: UUID
+    resposta_id: Optional[UUID] = None
     pergunta: str
     resposta: Optional[str] = None
     turno: int
     fontes: List[FonteCitada] = []
+    feedback: Optional[FeedbackInfo] = None
 
 
 class ChatHistoricoResponse(BaseModel):
