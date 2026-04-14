@@ -129,7 +129,6 @@ class ChatService:
         feedback = FeedbackResposta(
             resposta_sistema_id=req.resposta_sistema_id,
             avaliacao=req.avaliacao,
-            comentario=req.comentario,
         )
         session.add(feedback)
         await session.commit()

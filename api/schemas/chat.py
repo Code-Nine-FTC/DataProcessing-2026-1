@@ -13,7 +13,6 @@ class ChatMensagemRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     resposta_sistema_id: UUID
     avaliacao: int = Field(..., ge=-1, le=1, description="-1 ruim, 0 neutro, 1 bom")
-    comentario: Optional[str] = Field(None, max_length=1000)
 
 class MapGeometry(BaseModel):
     type: str
