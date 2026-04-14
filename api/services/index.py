@@ -22,7 +22,7 @@ class AnalyticsService:
         self._session = session
 
     # ------------------------------------------------------------------
-    # RF-07 #1 — Área total das propriedades por estado
+    # Área total das propriedades por estado
     # ------------------------------------------------------------------
     async def imoveis_area_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -41,7 +41,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
-    # RF-07 #1 — Área total das propriedades por município
+    # Área total das propriedades por município
     # ------------------------------------------------------------------
     async def imoveis_area_por_municipio(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -60,7 +60,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
-    # RF-07 #6 — Área desmatada (ha) por estado, com filtro de 12 meses
+    # Área desmatada (ha) por estado, com filtro de 12 meses
     # ------------------------------------------------------------------
     async def desmatamento_area_por_estado(self, ultimos_12_meses: bool = False) -> RespostaAgrupada:
         filtro = "AND d.data_ocorrencia >= CURRENT_DATE - INTERVAL '12 months'" if ultimos_12_meses else ""
@@ -80,7 +80,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
-    # RF-07 #6 — Desmatamento: série temporal por mês (área total ha)
+    # Desmatamento: série temporal por mês (área total ha)
     # ------------------------------------------------------------------
     async def desmatamento_area_por_mes(self) -> RespostaTemporalDesmatamento:
         result = await self._session.execute(
@@ -100,7 +100,7 @@ class AnalyticsService:
         )
 
     # ------------------------------------------------------------------
-    # RF-07 #7 — Alertas de desmatamento por tipo (contagem)
+    # Alertas de desmatamento por tipo (contagem)
     # ------------------------------------------------------------------
     async def desmatamento_alertas_por_tipo(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -116,7 +116,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #7 — Área de desmatamento sobreposta a imóveis rurais
+    # Área de desmatamento sobreposta a imóveis rurais
     # ------------------------------------------------------------------
     async def desmatamento_area_em_imoveis(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -136,7 +136,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Focos de incêndio por estado
+    # Focos de incêndio por estado
     # ------------------------------------------------------------------
     async def queimadas_focos_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -153,7 +153,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Focos de incêndio por município
+    # Focos de incêndio por município
     # ------------------------------------------------------------------
     async def queimadas_focos_por_municipio(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -171,7 +171,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Focos de incêndio por mês (série temporal)
+    # Focos de incêndio por mês (série temporal)
     # ------------------------------------------------------------------
     async def queimadas_focos_por_mes(self) -> RespostaTemporalQueimada:
         result = await self._session.execute(
@@ -188,7 +188,7 @@ class AnalyticsService:
         return RespostaTemporalQueimada(series=series, total=sum(s.total for s in series))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Focos por bioma
+    # Focos por bioma
     # ------------------------------------------------------------------
     async def queimadas_focos_por_bioma(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -204,7 +204,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Intensidade média (FRP) por bioma
+    # Intensidade média (FRP) por bioma
     # ------------------------------------------------------------------
     async def queimadas_intensidade_por_bioma(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -222,7 +222,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=total)
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Dias sem chuva médio por estado
+    # Dias sem chuva médio por estado
     # ------------------------------------------------------------------
     async def queimadas_dias_sem_chuva_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -242,7 +242,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=total)
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Risco médio de fogo por estado
+    # Risco médio de fogo por estado
     # ------------------------------------------------------------------
     async def queimadas_risco_medio_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -262,7 +262,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=total)
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Queimadas dentro vs. fora de imóveis rurais
+    # Queimadas dentro vs. fora de imóveis rurais
     # ------------------------------------------------------------------
     async def queimadas_dentro_fora_imoveis(self) -> RespostaQueimadaDentroFora:
         result = await self._session.execute(
@@ -277,7 +277,7 @@ class AnalyticsService:
         return RespostaQueimadaDentroFora(grupos=grupos, total=sum(g.total for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #9 — Data do último incêndio por estado
+    # Data do último incêndio por estado
     # ------------------------------------------------------------------
     async def queimadas_ultimo_incendio_por_estado(self) -> RespostaUltimoIncendio:
         result = await self._session.execute(
@@ -299,7 +299,7 @@ class AnalyticsService:
         return RespostaUltimoIncendio(estados=estados)
 
     # ------------------------------------------------------------------
-    # RF-07 #13 — Unidades de Conservação por grupo SNUC
+    # Unidades de Conservação por grupo SNUC
     # ------------------------------------------------------------------
     async def uc_por_grupo_snuc(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -315,7 +315,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #13 — Unidades de Conservação por esfera (federal/estadual/municipal)
+    # Unidades de Conservação por esfera (federal/estadual/municipal)
     # ------------------------------------------------------------------
     async def uc_por_esfera(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -331,7 +331,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #14 — Terras Indígenas por fase de demarcação
+    # Terras Indígenas por fase de demarcação
     # ------------------------------------------------------------------
     async def ti_por_fase(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -347,7 +347,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #18 — Assentamentos por modalidade
+    # Assentamentos por modalidade
     # ------------------------------------------------------------------
     async def assentamentos_por_modalidade(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -363,7 +363,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #18 — Famílias em assentamentos por estado
+    # Famílias em assentamentos por estado
     # ------------------------------------------------------------------
     async def assentamentos_familias_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -382,7 +382,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #17 — Status do CAR
+    # Status do CAR
     # ------------------------------------------------------------------
     async def imoveis_por_status_car(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -398,7 +398,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #13, #14, #15, #18 — Sobreposições com áreas especiais (contagem)
+    # Sobreposições com áreas especiais (contagem)
     # ------------------------------------------------------------------
     async def resumo_sobreposicoes(self) -> ResumoSobreposicoes:
         result = await self._session.execute(
