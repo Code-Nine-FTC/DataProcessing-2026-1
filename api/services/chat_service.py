@@ -14,6 +14,7 @@ from api.schemas.chat import (
     ChatMensagemResponse,
     ChatResumo,
     FeatureCollection,
+    FeedbackInfo,
     FeedbackRequest,
     FonteCitada,
     MensagemHistorico,
@@ -80,10 +81,15 @@ class ChatService:
             raise HTTPException(status_code=404, detail="Chat não encontrado.")
 
         stmt = (
-            select(ConsultaUsuario, RespostaSistema)
+            select(ConsultaUsuario, RespostaSistema, FeedbackResposta)
             .join(
                 RespostaSistema,
                 RespostaSistema.consulta_usuario_id == ConsultaUsuario.id,
+                isouter=True,
+            )
+            .join(
+                FeedbackResposta,
+                FeedbackResposta.resposta_sistema_id == RespostaSistema.id,
                 isouter=True,
             )
             .where(ConsultaUsuario.chat_id == chat_id)
@@ -92,19 +98,28 @@ class ChatService:
         rows = (await session.execute(stmt)).all()
 
         mensagens = []
-        for consulta, resposta in rows:
+        for consulta, resposta, feedback in rows:
             fontes: list[FonteCitada] = []
             if resposta and resposta.fontes_utilizadas_json:
                 for f in resposta.fontes_utilizadas_json.get("fontes", []):
                     fontes.append(FonteCitada(**f))
 
+            feedback_info = None
+            if feedback:
+                feedback_info = FeedbackInfo(
+                    id=feedback.id,
+                    avaliacao=feedback.avaliacao,
+                )
+
             mensagens.append(
                 MensagemHistorico(
                     consulta_id=consulta.id,
+                    resposta_id=resposta.id if resposta else None,
                     pergunta=consulta.pergunta or "",
                     resposta=resposta.texto_resposta if resposta else None,
                     turno=consulta.turno or 0,
                     fontes=fontes,
+                    feedback=feedback_info,
                 )
             )
 

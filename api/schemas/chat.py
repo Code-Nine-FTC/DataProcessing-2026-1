@@ -30,6 +30,10 @@ class FeatureCollection(BaseModel):
     features: List[MapFeature]
 
 
+class FeedbackInfo(BaseModel):
+    id: UUID
+    avaliacao: int = Field(description="-1 ruim, 0 neutro, 1 bom")
+
 class FonteCitada(BaseModel):
     nome: str
     orgao: Optional[str] = None
@@ -56,10 +60,12 @@ class ChatResumo(BaseModel):
 
 class MensagemHistorico(BaseModel):
     consulta_id: UUID
+    resposta_id: Optional[UUID] = None
     pergunta: str
     resposta: Optional[str] = None
     turno: int
     fontes: List[FonteCitada] = []
+    feedback: Optional[FeedbackInfo] = None
 
 
 class ChatHistoricoResponse(BaseModel):
