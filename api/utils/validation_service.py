@@ -14,16 +14,16 @@ async def validate_database_crs_integrity(db: AsyncSession, auto_correct: bool =
     is_fully_healthy = True
     
     try:
-        # Busca todas as tabelas e colunas com geometria (ignorando views e esquemas de sistema)
+        # Busca todas as tabelas e colunas com geometria e seu tipo
         tables_query = text("""
-            SELECT f_table_name, f_geometry_column 
+            SELECT f_table_name, f_geometry_column, type 
             FROM geometry_columns 
             WHERE f_table_schema = 'public';
         """)
         tables_result = await db.execute(tables_query)
         spatial_tables = tables_result.fetchall()
 
-        for table_name, geom_col in spatial_tables:
+        for table_name, geom_col, geom_type in spatial_tables:
             # 1. Varredura por inconsistência no SRID.
             srid_query = text(f"""
                 SELECT id, ST_SRID({geom_col}) AS current_srid 
@@ -37,6 +37,20 @@ async def validate_database_crs_integrity(db: AsyncSession, auto_correct: bool =
                 is_fully_healthy = False
                 for record in inconsistent_srid_records:
                     logger.error(f"[Integrity ERROR] Tabela '{table_name}': Registro ID {record.id} possui CRS atípico EPSG:{record.current_srid}.")
+                
+                if auto_correct:
+                    logger.warning(f"[Autocorrect SRID] Projetando geometrias da Tabela '{table_name}' para EPSG:4326...")
+                    fix_srid_query = text(f"""
+                        UPDATE {table_name}
+                        SET {geom_col} = ST_Transform(
+                                            ST_SetSRID({geom_col}, CASE WHEN ST_SRID({geom_col}) = 0 THEN 4674 ELSE ST_SRID({geom_col}) END), 
+                                            4326
+                                         )
+                        WHERE ST_SRID({geom_col}) != 4326 AND {geom_col} IS NOT NULL;
+                    """)
+                    await db.execute(fix_srid_query)
+                    await db.commit()
+                    logger.info(f"[Autocorrect SRID OK] Tabela '{table_name}' normalizada para WGS 84.")
             
             # 2. Varredura de Topologia
             topologic_query = text(f"""
@@ -52,15 +66,25 @@ async def validate_database_crs_integrity(db: AsyncSession, auto_correct: bool =
                 for record in invalid_geom_records:
                     logger.error(f"[Topology ERROR] Tabela '{table_name}': Geometria corrompida para ID {record.id}. Motivo: {record.invalidity_reason}")
                 
-                # Opcional: tentar corrigir as geometrias defeituosas.
-                # ST_CollectionExtract(geom, 3) preserva apenas os polígonos dentro de uma GeometryCollection.
+                # Tentar corrigir geometrias (somente aplica ColectionExtract para polígonos)
                 if auto_correct:
-                    logger.warning(f"[Autocorrect] Iniciando correção em '{table_name}'...")
-                    fix_query = text(f"""
-                        UPDATE {table_name}
-                        SET {geom_col} = ST_Multi(ST_CollectionExtract(ST_MakeValid({geom_col}), 3))
-                        WHERE ST_IsValid({geom_col}) = false AND {geom_col} IS NOT NULL;
-                    """)
+                    logger.warning(f"[Autocorrect] Iniciando correção topológica em '{table_name}.{geom_col}' ({geom_type})...")
+                    
+                    if "POLYGON" in geom_type.upper():
+                        # Para áreas, forçamos manter apenas polígonos válidos
+                        fix_query = text(f"""
+                            UPDATE {table_name}
+                            SET {geom_col} = ST_Multi(ST_CollectionExtract(ST_MakeValid({geom_col}), 3))
+                            WHERE ST_IsValid({geom_col}) = false AND {geom_col} IS NOT NULL;
+                        """)
+                    else:
+                        # Para linhas, pontos e genéricos, usa apenas o MakeValid básico
+                        fix_query = text(f"""
+                            UPDATE {table_name}
+                            SET {geom_col} = ST_MakeValid({geom_col})
+                            WHERE ST_IsValid({geom_col}) = false AND {geom_col} IS NOT NULL;
+                        """)
+                        
                     await db.execute(fix_query)
                     await db.commit()
                     logger.info(f"[Autocorrect OK] Tabela '{table_name}' corrigida com ST_MakeValid.")
