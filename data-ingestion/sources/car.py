@@ -58,27 +58,29 @@ class CARTransformer(GeometricTransformer):
         self.municipio_repo = municipio_repo
 
     def transform_feature(self, feature: dict) -> TransformedRecord:
-        """Transforma feature de imóvel rural."""
+        """Transforma feature de imóvel rural. Filtra apenas SP."""
         props = feature.get("properties", feature)
+
+        # Filtra apenas SP, igual às outras pipelines
+        uf = self.pick(props, _UF)
+        if uf and str(uf).upper() != "SP":
+            return None
 
         geometry = feature.get("geometry")
         geom_wkt = None
-        centroid_wkt = None
         if geometry:
             from shapely.geometry import shape
             geom = shape(geometry)
             geom = self.ensure_multipolygon(geom)
-            if geom:
+            if geom and not geom.is_empty:
                 geom_wkt = geom.wkt
-                # representative_point() garante ponto dentro do polígono
-                # (centroid pode cair fora em polígonos côncavos)
-                if not geom.is_empty:
-                    rp = geom.representative_point()
-                    centroid_wkt = f"POINT({rp.x} {rp.y})"
+
+        # Descarta registro sem geometria válida (evita violação de NOT NULL em geom/centroid)
+        if geom_wkt is None:
+            return None
 
         # Buscar municipio_id
         municipio_nome = self.pick(props, _MUNICIPIO)
-        uf = self.pick(props, _UF)
         municipio_id = None
 
         if municipio_nome and uf:
@@ -102,7 +104,6 @@ class CARTransformer(GeometricTransformer):
                 "area_ha": self.safe_float(self.pick(props, _AREA)),
                 "municipio_id": municipio_id,
                 "situacao_cadastral": self.pick(props, _SITUACAO),
-                "centroid_wkt": centroid_wkt,
                 "atributos_json": self.row_to_json(props),
             },
         )
@@ -115,7 +116,9 @@ class CARLoader(GeometricLoader):
         super().__init__(engine, table_name="imovel_rural")
 
     def get_insert_query(self) -> str:
-        """Query de inserção para imovel_rural."""
+        """Query de inserção para imovel_rural.
+        centroid é derivado da geometria no banco para garantir NOT NULL.
+        """
         return """
             INSERT INTO imovel_rural
                 (id, id_origem, dataset_id, nome_imovel, codigo_car,
@@ -124,19 +127,9 @@ class CARLoader(GeometricLoader):
                 (:id, :id_origem, :dataset_id, :nome_imovel, :codigo_car,
                  :area_ha, :municipio_id, :situacao_cadastral,
                  ST_GeomFromText(:geom_wkt, 4326),
-                 ST_GeomFromText(:centroid_wkt, 4326),
+                 ST_PointOnSurface(ST_GeomFromText(:geom_wkt, 4326)),
                  CAST(:atributos_json AS JSONB))
         """
-
-    def _prepare_record_params(self, record: TransformedRecord, dataset_id: str) -> dict:
-        """Prepara parâmetros com geometria e centroide."""
-        params = super()._prepare_record_params(record, dataset_id)
-        # Safe access para centroid_wkt
-        if "centroid_wkt" in record.attributes:
-            params["centroid_wkt"] = record.attributes.pop("centroid_wkt")
-        else:
-            params["centroid_wkt"] = None
-        return params
 
 
 class CARPipeline(BasePipeline):
