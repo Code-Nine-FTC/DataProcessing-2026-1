@@ -401,9 +401,12 @@ class Chat(Base):
     __tablename__ = "chat"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
     title: Mapped[Optional[str]] = mapped_column(TEXT)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+    )
 
-class IntencaoConsulta(Base): # Adicionado conforme melhorias
+class IntencaoConsulta(Base):
     __tablename__ = "intencao_consulta"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
     nome: Mapped[Optional[str]] = mapped_column(TEXT)
@@ -461,4 +464,4 @@ class RelImovelBacia(Base):
     bacia_hidrografica_id: Mapped[int] = mapped_column(ForeignKey("bacia_hidrografica.id"))
     area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric)
     percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric)
-    tipo_relacao: Mapped[Optional[str]] = mapped_column(String) # 'dentro', 'parcial', etc.
+    tipo_relacao: Mapped[Optional[str]] = mapped_column(String)

@@ -66,7 +66,7 @@ class ChatService:
     async def listar_chats(self, session: AsyncSession) -> list[ChatResumo]:
         stmt = select(Chat).order_by(Chat.created_at.desc()).limit(50)
         rows = (await session.execute(stmt)).scalars().all()
-        return [ChatResumo(id=c.id, title=c.title) for c in rows]
+        return [ChatResumo(id=c.id, title=c.title, created_at=c.created_at) for c in rows]
 
     # ------------------------------------------------------------------
     # Histórico de um chat

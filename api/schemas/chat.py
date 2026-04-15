@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -56,6 +57,7 @@ class ChatMensagemResponse(BaseModel):
 class ChatResumo(BaseModel):
     id: UUID
     title: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 
 class MensagemHistorico(BaseModel):
