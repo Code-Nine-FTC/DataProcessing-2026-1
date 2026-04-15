@@ -56,6 +56,7 @@ class ChatMensagemResponse(BaseModel):
 class ChatResumo(BaseModel):
     id: UUID
     title: Optional[str] = None
+    ativo: bool = True
 
 
 class MensagemHistorico(BaseModel):

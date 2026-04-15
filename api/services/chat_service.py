@@ -64,9 +64,14 @@ class ChatService:
     # ------------------------------------------------------------------
 
     async def listar_chats(self, session: AsyncSession) -> list[ChatResumo]:
-        stmt = select(Chat).order_by(Chat.created_at.desc()).limit(50)
+        stmt = (
+            select(Chat)
+            .where(Chat.ativo == True)
+            .order_by(Chat.created_at.desc())
+            .limit(50)
+        )
         rows = (await session.execute(stmt)).scalars().all()
-        return [ChatResumo(id=c.id, title=c.title) for c in rows]
+        return [ChatResumo(id=c.id, title=c.title, ativo=c.ativo) for c in rows]
 
     # ------------------------------------------------------------------
     # Histórico de um chat
@@ -128,6 +133,22 @@ class ChatService:
             title=chat.title,
             mensagens=mensagens,
         )
+
+    # ------------------------------------------------------------------
+    # Desativar chat (soft delete)
+    # ------------------------------------------------------------------
+
+    async def desativar_chat(
+        self, chat_id: UUID, session: AsyncSession
+    ) -> dict:
+        chat = await session.get(Chat, chat_id)
+        if chat is None:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Chat não encontrado.")
+
+        chat.ativo = False
+        await session.commit()
+        return {"mensagem": "Chat desativado com sucesso."}
 
     # ------------------------------------------------------------------
     # Feedback
