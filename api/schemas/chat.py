@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -56,6 +57,7 @@ class ChatMensagemResponse(BaseModel):
 class ChatResumo(BaseModel):
     id: UUID
     title: Optional[str] = None
+    created_at: datetime
     ativo: bool = True
 
 
@@ -72,4 +74,5 @@ class MensagemHistorico(BaseModel):
 class ChatHistoricoResponse(BaseModel):
     chat_id: UUID
     title: Optional[str] = None
+    created_at: datetime
     mensagens: List[MensagemHistorico]

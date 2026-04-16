@@ -67,11 +67,14 @@ class ChatService:
         stmt = (
             select(Chat)
             .where(Chat.ativo == True)
-            .order_by(Chat.created_at.desc())
+            .order_by(Chat.created_at.desc().nullslast())
             .limit(50)
         )
         rows = (await session.execute(stmt)).scalars().all()
-        return [ChatResumo(id=c.id, title=c.title, ativo=c.ativo) for c in rows]
+        return [
+            ChatResumo(id=c.id, title=c.title, created_at=c.created_at, ativo=c.ativo)
+            for c in rows
+        ]
 
     # ------------------------------------------------------------------
     # Histórico de um chat
@@ -131,6 +134,7 @@ class ChatService:
         return ChatHistoricoResponse(
             chat_id=chat.id,
             title=chat.title,
+            created_at=chat.created_at,
             mensagens=mensagens,
         )
 
