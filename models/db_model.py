@@ -416,7 +416,8 @@ class Chat(Base):
     __tablename__ = "chat"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
     title: Mapped[Optional[str]] = mapped_column(TEXT)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
 
 class IntencaoConsulta(Base): # Adicionado conforme melhorias
     __tablename__ = "intencao_consulta"

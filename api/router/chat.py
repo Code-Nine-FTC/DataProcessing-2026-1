@@ -66,6 +66,18 @@ async def historico_chat(
     return await _service.historico_chat(chat_id, session)
 
 
+@router.delete(
+    "/{chat_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Desativa (soft delete) um chat",
+)
+async def desativar_chat(
+    chat_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await _service.desativar_chat(chat_id, session)
+
+
 @router.post(
     "/feedback",
     status_code=status.HTTP_201_CREATED,

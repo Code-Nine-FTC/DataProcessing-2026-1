@@ -1,7 +1,8 @@
 from shapely.geometry import Polygon, MultiPolygon, GeometryCollection, Point, LineString
 import sys
 sys.path.insert(0, "data-ingestion")
-from utils import ensure_multipolygon
+from etl.transformers import BaseTransformer
+ensure_multipolygon = BaseTransformer.ensure_multipolygon
 import pytest
 
 def test_valid_polygon():

@@ -10,11 +10,9 @@ from typing import Optional
 
 import geopandas as gpd
 import pandas as pd
-import os
-import geopandas as gpd
-import pandas as pd
 from core.models import ExtractedData, DataSource
 from core.exceptions import ExtractionException
+from core.crs_handler import standardize_geodataframe
 from datetime import date
 
 
@@ -81,6 +79,9 @@ class WFSExtractor(BaseExtractor):
                 rows=[],
                 metadata={"feature_count": 0},
             )
+
+        # Padronização de Coordenadas (RF-01)
+        gdf = standardize_geodataframe(gdf)
 
         return ExtractedData(
             source=self.data_source,
@@ -179,10 +180,8 @@ class ShapefileExtractor(BaseExtractor):
         # engine='pyogrio' é mais rápido, mas 'fiona' é o padrão mais comum
         gdf = gpd.read_file(shp_file)
 
-        # 1. Padronização de Coordenadas (Sincronizando com seu teste EPSG:4674 -> 4326)
-        if gdf.crs is not None and gdf.crs != "EPSG:4326":
-            logger.info(f"Convertendo CRS de {gdf.crs} para EPSG:4326")
-            gdf = gdf.to_crs("EPSG:4326")
+        # 1. Padronização de Coordenadas (Sincronizando com seu teste EPSG:4674 -> 4326) / RF-01
+        gdf = standardize_geodataframe(gdf)
 
         # 2. Tratamento de NaNs (Opcional, mas ajuda a evitar erros no JSON/Dicionário)
         # Substitui valores nulos por None (que vira null no JSON)

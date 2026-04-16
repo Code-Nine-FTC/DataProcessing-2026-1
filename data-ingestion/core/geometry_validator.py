@@ -18,7 +18,13 @@ def _extract_polygons(geom):
         
     if isinstance(geom, GeometryCollection):
         # Filtra apenas geometrias de área (descarta falhas de linhas ou pontos criadas em auto-interseções)
-        polys = [g for g in geom.geoms if isinstance(g, (Polygon, MultiPolygon))]
+        # Flatten: MultiPolygon precisa de Polygons individuais, não de MultiPolygons aninhados
+        polys = []
+        for g in geom.geoms:
+            if isinstance(g, Polygon):
+                polys.append(g)
+            elif isinstance(g, MultiPolygon):
+                polys.extend(g.geoms)
         if polys:
             return MultiPolygon(polys)
             
