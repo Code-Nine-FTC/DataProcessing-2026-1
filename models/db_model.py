@@ -405,6 +405,7 @@ class Chat(Base):
         DateTime,
         server_default=func.now(),
     )
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     ativo: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
 
 class IntencaoConsulta(Base):

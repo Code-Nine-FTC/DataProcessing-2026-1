@@ -80,6 +80,7 @@ class ChatService:
             )
             for c in rows
         ]
+        return [ChatResumo(id=c.id, title=c.title, ativo=c.ativo) for c in rows]
 
     # ------------------------------------------------------------------
     # Histórico de um chat
