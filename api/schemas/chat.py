@@ -58,6 +58,7 @@ class ChatResumo(BaseModel):
     id: UUID
     title: Optional[str] = None
     created_at: Optional[datetime] = None
+    ativo: bool = True
 
 
 class MensagemHistorico(BaseModel):

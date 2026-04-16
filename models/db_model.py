@@ -405,6 +405,7 @@ class Chat(Base):
         DateTime,
         server_default=func.now(),
     )
+    ativo: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
 
 class IntencaoConsulta(Base):
     __tablename__ = "intencao_consulta"
