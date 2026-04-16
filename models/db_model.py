@@ -205,6 +205,21 @@ class ImovelRural(Base):
     centroid: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
 
+    @staticmethod
+    async def get_imoveis_intersecting_geometry(session: AsyncSession, geojson_geometry: str) -> list[Row]:
+        query = text("""
+            SELECT
+                id::text AS id,
+                nome_imovel AS nome,
+                area_ha,
+                ST_AsGeoJSON(geom)::json AS geom,
+                atributos_json
+            FROM imovel_rural
+            WHERE ST_Intersects(geom, ST_SetSRID(ST_GeomFromGeoJSON(:geojson_geometry), 4326))
+        """)
+        result = await session.execute(query, {"geojson_geometry": geojson_geometry})
+        return result.all()
+
 class QueimadaEvento(Base):
     __tablename__ = "queimada_evento"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))

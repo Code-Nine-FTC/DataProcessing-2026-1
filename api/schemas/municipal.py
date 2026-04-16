@@ -9,6 +9,17 @@ class GeometriaSchema(BaseModel):
     area_ha: Optional[float] = None
     atributos_json: Optional[Dict] = None
 
+class GeoJSONGeometry(BaseModel):
+    type: str
+    geometry: Dict
+
+class ResponseImovelRuralIntersection(BaseModel):
+    id: str
+    nome: Optional[str]
+    area_ha: Optional[float]
+    geom: Dict
+    atributos_json: Optional[Dict]
+
 
 class ResponseMunicipal(BaseModel):
     id: int
