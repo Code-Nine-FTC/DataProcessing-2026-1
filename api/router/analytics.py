@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.index import (
     RespostaAgrupada,
+    RespostaProximidade,
     RespostaQueimadaDentroFora,
     RespostaTemporalDesmatamento,
     RespostaTemporalQueimada,
@@ -98,6 +99,21 @@ async def get_desmatamento_area_em_imoveis(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
     return BasicResponse(data=await AnalyticsService(session).desmatamento_area_em_imoveis())
+
+
+@router.get(
+    "/desmatamento/distancia-alertas-imoveis",
+    response_model=BasicResponse[RespostaProximidade],
+    summary="[RF-04] Distância (ST_Distance) entre imóveis rurais e alertas de desmatamento próximos",
+)
+async def get_desmatamento_distancia_alertas(
+    raio_km: float = Query(10.0, description="Raio de busca em km", ge=0.1, le=500.0),
+    limite: int = Query(100, description="Número máximo de resultados", ge=1, le=1000),
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[RespostaProximidade]:
+    return BasicResponse(
+        data=await AnalyticsService(session).desmatamento_distancia_alertas(raio_km, limite)
+    )
 
 
 # --- Queimadas ---
