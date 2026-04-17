@@ -4,8 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.index import (
     GrupoItem,
+    ProximidadeItem,
     QueimadaDentroForaItem,
     RespostaAgrupada,
+    RespostaProximidade,
     RespostaQueimadaDentroFora,
     RespostaTemporalDesmatamento,
     RespostaTemporalQueimada,
@@ -396,6 +398,47 @@ class AnalyticsService:
         )
         grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
+
+    # ------------------------------------------------------------------
+    # [RF-04] Distância (ST_Distance) entre imóveis e alertas de desmatamento próximos
+    # Retorna pares (imóvel, alerta) que estão dentro do raio mas sem sobreposição
+    # ------------------------------------------------------------------
+    async def desmatamento_distancia_alertas(
+        self, raio_km: float = 10.0, limite: int = 100
+    ) -> RespostaProximidade:
+        result = await self._session.execute(
+            text("""
+                SELECT
+                    i.id::text   AS imovel_id,
+                    i.nome_imovel,
+                    m.nome       AS municipio,
+                    d.id::text   AS alerta_id,
+                    d.tipo_alerta,
+                    ROUND(
+                        ST_Distance(i.geom::geography, d.geom::geography)::numeric, 2
+                    )::float     AS distancia_m
+                FROM imovel_rural i
+                JOIN desmatamento_alerta d
+                    ON ST_DWithin(i.geom::geography, d.geom::geography, :raio_m)
+                   AND NOT ST_Intersects(i.geom, d.geom)
+                LEFT JOIN municipio m ON m.id = i.municipio_id
+                ORDER BY distancia_m
+                LIMIT :limite
+            """),
+            {"raio_m": raio_km * 1000, "limite": limite},
+        )
+        itens = [
+            ProximidadeItem(
+                imovel_id=row.imovel_id,
+                nome_imovel=row.nome_imovel,
+                municipio=row.municipio,
+                alerta_id=row.alerta_id,
+                tipo_alerta=row.tipo_alerta,
+                distancia_m=row.distancia_m,
+            )
+            for row in result
+        ]
+        return RespostaProximidade(itens=itens, total=len(itens))
 
     # ------------------------------------------------------------------
     # Sobreposições com áreas especiais (contagem)

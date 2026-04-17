@@ -61,13 +61,6 @@ def upgrade() -> None:
     sa.Column('ativo', sa.Boolean(), server_default='true', nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('grade_espacial',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('nome', sa.TEXT(), nullable=True),
-    sa.Column('codigo', sa.TEXT(), nullable=True),
-    sa.Column('geom', geoalchemy2.types.Geometry(geometry_type='MULTIPOLYGON', srid=4326, dimension=2, from_text='ST_GeomFromEWKT', name='geometry', nullable=False), nullable=False),
-    sa.PrimaryKeyConstraint('id')
-    )
     op.create_table('intencao_consulta',
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('nome', sa.TEXT(), nullable=True),
@@ -241,17 +234,6 @@ def upgrade() -> None:
     sa.Column('atributos_json', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.ForeignKeyConstraint(['dataset_id'], ['dataset.id'], ),
     sa.ForeignKeyConstraint(['municipio_id'], ['municipio.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('processamento',
-    sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-    sa.Column('dataset_id', sa.UUID(), nullable=True),
-    sa.Column('tipo_processamento', sa.TEXT(), nullable=True),
-    sa.Column('data_execucao', sa.DateTime(), nullable=True),
-    sa.Column('status', sa.TEXT(), nullable=True),
-    sa.Column('log_execucao', sa.TEXT(), nullable=True),
-    sa.Column('parametros_json', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.ForeignKeyConstraint(['dataset_id'], ['dataset.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('queimada_evento',
@@ -448,7 +430,6 @@ def downgrade() -> None:
     op.drop_table('terra_indigena')
     op.drop_table('resposta_sistema')
     op.drop_table('queimada_evento')
-    op.drop_table('processamento')
     op.drop_table('imovel_rural')
     op.drop_table('documento')
     op.drop_table('desmatamento_alerta')
@@ -459,7 +440,6 @@ def downgrade() -> None:
     op.drop_table('consulta_usuario')
     op.drop_table('conceito_alias')
     op.drop_table('intencao_consulta')
-    op.drop_table('grade_espacial')
     op.drop_table('fonte_dado')
     op.drop_table('estado')
     op.drop_table('conceito')

@@ -58,3 +58,17 @@ class QueimadaDentroForaItem(BaseModel):
 class RespostaQueimadaDentroFora(BaseModel):
     grupos: List[QueimadaDentroForaItem]
     total: int
+
+
+class ProximidadeItem(BaseModel):
+    imovel_id: str
+    nome_imovel: Optional[str]
+    municipio: Optional[str]
+    alerta_id: str
+    tipo_alerta: Optional[str]
+    distancia_m: float
+
+
+class RespostaProximidade(BaseModel):
+    itens: List[ProximidadeItem]
+    total: int

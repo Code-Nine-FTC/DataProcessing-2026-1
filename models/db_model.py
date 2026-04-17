@@ -49,16 +49,6 @@ class Dataset(Base):
     caminho_arquivo: Mapped[Optional[str]] = mapped_column(TEXT)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSONB)
 
-class Processamento(Base):
-    __tablename__ = "processamento"
-    id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
-    dataset_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("dataset.id"))
-    tipo_processamento: Mapped[Optional[str]] = mapped_column(TEXT)
-    data_execucao: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    status: Mapped[Optional[str]] = mapped_column(TEXT)
-    log_execucao: Mapped[Optional[str]] = mapped_column(TEXT)
-    parametros_json: Mapped[Optional[dict]] = mapped_column(JSONB)
-
 # --- 2. BASE GEOGRÁFICA (ESTADOS, MUNICÍPIOS, BACIAS) ---
 
 class Estado(Base):
@@ -174,13 +164,6 @@ class Municipio(Base):
         result = await session.execute(query, {"mun_id": municipio_id})
         return result.all()
 
-
-class GradeEspacial(Base):
-    __tablename__ = "grade_espacial"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    nome: Mapped[Optional[str]] = mapped_column(TEXT)
-    codigo: Mapped[Optional[str]] = mapped_column(TEXT)
-    geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
 
 class BaciaHidrografica(Base):
     __tablename__ = "bacia_hidrografica"
