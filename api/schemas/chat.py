@@ -57,7 +57,7 @@ class ChatMensagemResponse(BaseModel):
 class ChatResumo(BaseModel):
     id: UUID
     title: Optional[str] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
     ativo: bool = True
 
 
@@ -74,5 +74,9 @@ class MensagemHistorico(BaseModel):
 class ChatHistoricoResponse(BaseModel):
     chat_id: UUID
     title: Optional[str] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
     mensagens: List[MensagemHistorico]
+    bbox: Optional[List[float]] = Field(
+        None,
+        description="Bounding box [minLng, minLat, maxLng, maxLat] da última consulta.",
+    )

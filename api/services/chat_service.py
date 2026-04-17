@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
+from geoalchemy2.shape import to_shape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -131,11 +132,20 @@ class ChatService:
                 )
             )
 
+        # Extrair bbox da última resposta
+        bbox = None
+        if rows:
+            last_resposta = rows[-1][1]  # RespostaSistema da última tupla
+            if last_resposta and last_resposta.bbox_resultado is not None:
+                shape = to_shape(last_resposta.bbox_resultado)
+                bbox = list(shape.bounds)  # (minx, miny, maxx, maxy)
+
         return ChatHistoricoResponse(
             chat_id=chat.id,
             title=chat.title,
             created_at=chat.created_at,
             mensagens=mensagens,
+            bbox=bbox,
         )
 
     # ------------------------------------------------------------------
