@@ -76,7 +76,9 @@ class ChatHistoricoResponse(BaseModel):
     title: Optional[str] = None
     created_at: Optional[datetime] = None
     mensagens: List[MensagemHistorico]
+    mapa: Optional[FeatureCollection] = None
     bbox: Optional[List[float]] = Field(
         None,
         description="Bounding box [minLng, minLat, maxLng, maxLat] da última consulta.",
     )
+    status: Optional[str] = None

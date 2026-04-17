@@ -132,20 +132,28 @@ class ChatService:
                 )
             )
 
-        # Extrair bbox da última resposta
+        # Extrair mapa, bbox e status da última resposta
+        mapa = None
         bbox = None
+        last_status = None
         if rows:
-            last_resposta = rows[-1][1]  # RespostaSistema da última tupla
-            if last_resposta and last_resposta.bbox_resultado is not None:
-                shape = to_shape(last_resposta.bbox_resultado)
-                bbox = list(shape.bounds)  # (minx, miny, maxx, maxy)
+            last_resposta = rows[-1][1]
+            if last_resposta:
+                if last_resposta.mapa_geojson:
+                    mapa = FeatureCollection(**last_resposta.mapa_geojson)
+                if last_resposta.bbox_resultado is not None:
+                    shape = to_shape(last_resposta.bbox_resultado)
+                    bbox = list(shape.bounds)
+                last_status = last_resposta.status
 
         return ChatHistoricoResponse(
             chat_id=chat.id,
             title=chat.title,
             created_at=chat.created_at,
             mensagens=mensagens,
+            mapa=mapa,
             bbox=bbox,
+            status=last_status,
         )
 
     # ------------------------------------------------------------------
