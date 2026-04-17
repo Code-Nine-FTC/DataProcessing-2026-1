@@ -236,6 +236,7 @@ class NLPProcessor:
             sql_executado=resultado.get("sql_executado"),
             fontes_utilizadas_json={"fontes": fontes},
             bbox_resultado=_bbox_to_wkt(bbox) if bbox else None,
+            mapa_geojson=mapa,
             tempo_resposta_ms=resultado.get("tempo_resposta_ms"),
             mensagem_erro=resultado.get("mensagem_erro"),
             status=status,
