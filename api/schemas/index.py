@@ -72,3 +72,17 @@ class ProximidadeItem(BaseModel):
 class RespostaProximidade(BaseModel):
     itens: List[ProximidadeItem]
     total: int
+
+
+class ProximidadeQueimadaItem(BaseModel):
+    imovel_id: str
+    nome_imovel: Optional[str]
+    municipio: Optional[str]
+    queimada_id: str
+    bioma: Optional[str]
+    distancia_m: float
+
+
+class RespostaProximidadeQueimada(BaseModel):
+    itens: List[ProximidadeQueimadaItem]
+    total: int

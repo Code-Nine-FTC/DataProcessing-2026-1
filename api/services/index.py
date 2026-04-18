@@ -5,9 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.schemas.index import (
     GrupoItem,
     ProximidadeItem,
+    ProximidadeQueimadaItem,
     QueimadaDentroForaItem,
     RespostaAgrupada,
     RespostaProximidade,
+    RespostaProximidadeQueimada,
     RespostaQueimadaDentroFora,
     RespostaTemporalDesmatamento,
     RespostaTemporalQueimada,
@@ -439,6 +441,47 @@ class AnalyticsService:
             for row in result
         ]
         return RespostaProximidade(itens=itens, total=len(itens))
+
+    # ------------------------------------------------------------------
+    # [RF-04] Distância (ST_Distance) entre imóveis e focos de queimada próximos
+    # Retorna pares (imóvel, queimada) que estão dentro do raio mas sem sobreposição
+    # ------------------------------------------------------------------
+    async def queimadas_distancia_imoveis(
+        self, raio_km: float = 10.0, limite: int = 100
+    ) -> RespostaProximidadeQueimada:
+        result = await self._session.execute(
+            text("""
+                SELECT
+                    i.id::text   AS imovel_id,
+                    i.nome_imovel,
+                    m.nome       AS municipio,
+                    q.id::text   AS queimada_id,
+                    q.bioma      AS bioma,
+                    ROUND(
+                        ST_Distance(i.geom::geography, q.geom::geography)::numeric, 2
+                    )::float     AS distancia_m
+                FROM imovel_rural i
+                JOIN queimada_evento q
+                    ON ST_DWithin(i.geom::geography, q.geom::geography, :raio_m)
+                   AND NOT ST_Intersects(i.geom, q.geom)
+                LEFT JOIN municipio m ON m.id = i.municipio_id
+                ORDER BY distancia_m
+                LIMIT :limite
+            """),
+            {"raio_m": raio_km * 1000, "limite": limite},
+        )
+        itens = [
+            ProximidadeQueimadaItem(
+                imovel_id=row.imovel_id,
+                nome_imovel=row.nome_imovel,
+                municipio=row.municipio,
+                queimada_id=row.queimada_id,
+                bioma=row.bioma,
+                distancia_m=row.distancia_m,
+            )
+            for row in result
+        ]
+        return RespostaProximidadeQueimada(itens=itens, total=len(itens))
 
     # ------------------------------------------------------------------
     # Sobreposições com áreas especiais (contagem)
