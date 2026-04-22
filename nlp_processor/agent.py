@@ -36,6 +36,21 @@ logger = logging.getLogger(__name__)
 CONFIDENCE_THRESHOLD = 0.35
 
 
+def _extrair_feedback_contexto(historico: list[dict]) -> dict[str, int]:
+    for mensagem in reversed(historico):
+        if mensagem.get("role") != "assistant":
+            continue
+
+        feedback = mensagem.get("feedback")
+        if isinstance(feedback, dict):
+            feedback = feedback.get("avaliacao")
+
+        if feedback in (-1, 1):
+            return {"avaliacao": int(feedback)}
+
+    return {}
+
+
 async def _carregar_municipios_normalizados(session: AsyncSession) -> list[str]:
     stmt = select(Municipio.nome).where(Municipio.nome.is_not(None))
     result = await session.execute(stmt)
@@ -75,6 +90,7 @@ async def run_agent(
     inicio = perf_counter()
     classifier = get_classifier()
     embedder = get_embedder()
+    feedback_contexto = _extrair_feedback_contexto(historico)
 
     def _finalizar(
         texto_resposta: str,
@@ -195,6 +211,7 @@ async def run_agent(
         fontes=fontes,
         contexto_documental=contexto_documental,
         confianca=confianca,
+        feedback_contexto=feedback_contexto or None,
     )
 
     return {

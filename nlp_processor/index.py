@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.db_model import (
     Chat,
     ConsultaUsuario,
+    FeedbackResposta,
     IntencaoConsulta,
     RespostaSistema,
 )
@@ -97,8 +98,20 @@ async def _load_historico(
     session: AsyncSession, chat_id: UUID
 ) -> list[dict]:
     """Carrega os últimos N turnos de um chat como mensagens OpenAI."""
+    latest_feedback = (
+        select(FeedbackResposta.avaliacao)
+        .where(FeedbackResposta.resposta_sistema_id == RespostaSistema.id)
+        .order_by(FeedbackResposta.data_hora.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
     stmt = (
-        select(ConsultaUsuario, RespostaSistema)
+        select(
+            ConsultaUsuario,
+            RespostaSistema,
+            latest_feedback.label("feedback_avaliacao"),
+        )
         .join(
             RespostaSistema,
             RespostaSistema.consulta_usuario_id == ConsultaUsuario.id,
@@ -112,11 +125,17 @@ async def _load_historico(
     rows = list(reversed(rows))  # ordem cronológica
 
     historico: list[dict] = []
-    for consulta, resposta in rows:
+    for consulta, resposta, feedback_avaliacao in rows:
         if consulta.pergunta:
             historico.append({"role": "user", "content": consulta.pergunta})
         if resposta and resposta.texto_resposta:
-            historico.append({"role": "assistant", "content": resposta.texto_resposta})
+            mensagem_assistente = {
+                "role": "assistant",
+                "content": resposta.texto_resposta,
+            }
+            if feedback_avaliacao is not None:
+                mensagem_assistente["feedback"] = int(feedback_avaliacao)
+            historico.append(mensagem_assistente)
     return historico
 
 
