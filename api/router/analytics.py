@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.index import (
     RespostaAgrupada,
+    RespostaBuffer,
     RespostaProximidade,
     RespostaProximidadeQueimada,
     RespostaQueimadaDentroFora,
@@ -100,6 +101,21 @@ async def get_desmatamento_area_em_imoveis(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
     return BasicResponse(data=await AnalyticsService(session).desmatamento_area_em_imoveis())
+
+
+@router.get(
+    "/desmatamento/buffer-imoveis",
+    response_model=BasicResponse[RespostaBuffer],
+    summary="[RF-04] Área de influência (ST_Buffer) de alertas — imóveis dentro do raio",
+)
+async def get_desmatamento_buffer_imoveis(
+    raio_km: float = Query(5.0, description="Raio do buffer em km", ge=0.1, le=200.0),
+    limite: int = Query(100, description="Número máximo de resultados", ge=1, le=1000),
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[RespostaBuffer]:
+    return BasicResponse(
+        data=await AnalyticsService(session).desmatamento_buffer_imoveis(raio_km, limite)
+    )
 
 
 @router.get(

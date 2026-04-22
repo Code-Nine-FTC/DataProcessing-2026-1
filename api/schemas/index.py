@@ -74,6 +74,22 @@ class RespostaProximidade(BaseModel):
     total: int
 
 
+class BufferResultItem(BaseModel):
+    alerta_id: str
+    tipo_alerta: Optional[str]
+    municipio: Optional[str]
+    imovel_id: str
+    nome_imovel: Optional[str]
+    area_buffer_ha: float
+    buffer_geojson: Optional[str]
+
+
+class RespostaBuffer(BaseModel):
+    raio_km: float
+    itens: List[BufferResultItem]
+    total: int
+
+
 class ProximidadeQueimadaItem(BaseModel):
     imovel_id: str
     nome_imovel: Optional[str]
