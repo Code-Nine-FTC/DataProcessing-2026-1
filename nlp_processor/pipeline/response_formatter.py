@@ -5,6 +5,8 @@ Usa templates estruturados por intenção, citando as fontes.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from nlp_processor.pipeline.entity_extractor import Entidades
 
 # ---------------------------------------------------------------------------
@@ -115,6 +117,29 @@ def _fonte_principal(fontes: list[dict]) -> str:
     return fontes[0]["nome"] if fontes else "fonte desconhecida"
 
 
+def _aplicar_feedback_contexto(
+    texto: str,
+    feedback_contexto: dict[str, Any] | None,
+) -> str:
+    if not feedback_contexto:
+        return texto
+
+    avaliacao = feedback_contexto.get("avaliacao")
+    if avaliacao == -1:
+        return (
+            "Considerando que o feedback anterior foi negativo, vou reformular a "
+            "resposta de forma mais objetiva e com foco direto na nova solicitação.\n\n"
+            f"{texto}"
+        )
+    if avaliacao == 1:
+        return (
+            "Considerando que o feedback anterior foi positivo, vou manter a linha "
+            "de resposta e complementar o que foi pedido agora.\n\n"
+            f"{texto}"
+        )
+    return texto
+
+
 # ---------------------------------------------------------------------------
 # Função principal
 # ---------------------------------------------------------------------------
@@ -126,6 +151,7 @@ def formatar_resposta(
     fontes: list[dict],
     contexto_documental: str,
     confianca: float,
+    feedback_contexto: dict[str, Any] | None = None,
 ) -> str:
     """
     Gera o texto de resposta formatado em Markdown.
@@ -136,10 +162,13 @@ def formatar_resposta(
     # Sem dados
     if intencao != "fora_escopo" and intencao != "buscar_documentos" and total_features == 0:
         nomes = ", ".join(f["nome"] for f in fontes) if fontes else "fontes do sistema"
-        return _TEMPLATES["sem_dados"].format(fontes_citadas=nomes)
+        return _aplicar_feedback_contexto(
+            _TEMPLATES["sem_dados"].format(fontes_citadas=nomes),
+            feedback_contexto,
+        )
 
     if intencao == "fora_escopo":
-        return _TEMPLATES["fora_escopo"]
+        return _aplicar_feedback_contexto(_TEMPLATES["fora_escopo"], feedback_contexto)
 
     ctx_bloco = ""
     if contexto_documental:
@@ -148,7 +177,7 @@ def formatar_resposta(
     template = _TEMPLATES.get(intencao, _TEMPLATES["sem_dados"])
 
     try:
-        return template.format(
+        texto = template.format(
             total=total_features,
             escopo=escopo,
             fonte_principal=_fonte_principal(fontes),
@@ -170,7 +199,9 @@ def formatar_resposta(
                 else ""
             ),
         )
+        return _aplicar_feedback_contexto(texto, feedback_contexto)
     except KeyError:
-        return (
-            f"Foram encontrados {total_features} resultado(s){escopo}.\n\n{fontes_str}"
+        return _aplicar_feedback_contexto(
+            f"Foram encontrados {total_features} resultado(s){escopo}.\n\n{fontes_str}",
+            feedback_contexto,
         )
