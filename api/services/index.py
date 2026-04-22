@@ -3,11 +3,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.index import (
+    BufferResultItem,
     GrupoItem,
     ProximidadeItem,
     ProximidadeQueimadaItem,
     QueimadaDentroForaItem,
     RespostaAgrupada,
+    RespostaBuffer,
     RespostaProximidade,
     RespostaProximidadeQueimada,
     RespostaQueimadaDentroFora,
@@ -441,6 +443,55 @@ class AnalyticsService:
             for row in result
         ]
         return RespostaProximidade(itens=itens, total=len(itens))
+
+    # ------------------------------------------------------------------
+    # [RF-04] Área de influência (ST_Buffer) de alertas de desmatamento
+    # Cria buffer ao redor de cada alerta e retorna imóveis que caem dentro
+    # ------------------------------------------------------------------
+    async def desmatamento_buffer_imoveis(
+        self, raio_km: float = 5.0, limite: int = 100
+    ) -> RespostaBuffer:
+        result = await self._session.execute(
+            text("""
+                SELECT
+                    d.id::text          AS alerta_id,
+                    d.tipo_alerta,
+                    m.nome              AS municipio,
+                    i.id::text          AS imovel_id,
+                    i.nome_imovel,
+                    ROUND(
+                        (ST_Area(
+                            ST_Buffer(d.geom::geography, :raio_m)::geometry
+                        ) / 10000.0)::numeric, 2
+                    )::float            AS area_buffer_ha,
+                    ST_AsGeoJSON(
+                        ST_Buffer(d.geom::geography, :raio_m)::geometry
+                    )                   AS buffer_geojson
+                FROM desmatamento_alerta d
+                JOIN imovel_rural i
+                    ON ST_Intersects(
+                        ST_Buffer(d.geom::geography, :raio_m)::geometry,
+                        i.geom
+                    )
+                LEFT JOIN municipio m ON m.id = d.municipio_id
+                ORDER BY d.id, i.id
+                LIMIT :limite
+            """),
+            {"raio_m": raio_km * 1000, "limite": limite},
+        )
+        itens = [
+            BufferResultItem(
+                alerta_id=row.alerta_id,
+                tipo_alerta=row.tipo_alerta,
+                municipio=row.municipio,
+                imovel_id=row.imovel_id,
+                nome_imovel=row.nome_imovel,
+                area_buffer_ha=row.area_buffer_ha,
+                buffer_geojson=row.buffer_geojson,
+            )
+            for row in result
+        ]
+        return RespostaBuffer(raio_km=raio_km, itens=itens, total=len(itens))
 
     # ------------------------------------------------------------------
     # [RF-04] Distância (ST_Distance) entre imóveis e focos de queimada próximos
