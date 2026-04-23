@@ -11,8 +11,9 @@ from geoalchemy2.shape import from_shape
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+from api.config.settings import settings
 
-from db_model import Estado, Municipio
+from models.db_model import Estado, Municipio
 
 # ---------------------------------------------------------------------------
 # Normalização de nomes para comparação acento-insensível
@@ -31,7 +32,7 @@ def normalizar(texto: str) -> str:
 # ----------------------------------
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-_raw_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://codenine:sabotagem@localhost:5432/visiona-dev")
+_raw_url = settings.DATABASE_URL
 # Garante driver síncrono (psycopg2), não asyncpg
 DATABASE_URL = _raw_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
 
@@ -131,6 +132,7 @@ def transform(geojson, mapa_info):
 
         municipios.append({
             "nome": info["nome"],
+            "nome_normalizado": normalizar(info["nome"]),
             "codigo_ibge": codarea,
             "sigla_uf": info["uf"],
             "geometry": geom

@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
+from geoalchemy2.shape import to_shape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from api.schemas.chat import (
     ChatMensagemResponse,
     ChatResumo,
     FeatureCollection,
+    FeedbackInfo,
     FeedbackRequest,
     FonteCitada,
     MensagemHistorico,
@@ -63,9 +65,17 @@ class ChatService:
     # ------------------------------------------------------------------
 
     async def listar_chats(self, session: AsyncSession) -> list[ChatResumo]:
-        stmt = select(Chat).order_by(Chat.created_at.desc()).limit(50)
+        stmt = (
+            select(Chat)
+            .where(Chat.ativo == True)
+            .order_by(Chat.created_at.desc().nullslast())
+            .limit(50)
+        )
         rows = (await session.execute(stmt)).scalars().all()
-        return [ChatResumo(id=c.id, title=c.title) for c in rows]
+        return [
+            ChatResumo(id=c.id, title=c.title, created_at=c.created_at, ativo=c.ativo)
+            for c in rows
+        ]
 
     # ------------------------------------------------------------------
     # Histórico de um chat
@@ -80,10 +90,15 @@ class ChatService:
             raise HTTPException(status_code=404, detail="Chat não encontrado.")
 
         stmt = (
-            select(ConsultaUsuario, RespostaSistema)
+            select(ConsultaUsuario, RespostaSistema, FeedbackResposta)
             .join(
                 RespostaSistema,
                 RespostaSistema.consulta_usuario_id == ConsultaUsuario.id,
+                isouter=True,
+            )
+            .join(
+                FeedbackResposta,
+                FeedbackResposta.resposta_sistema_id == RespostaSistema.id,
                 isouter=True,
             )
             .where(ConsultaUsuario.chat_id == chat_id)
@@ -92,27 +107,70 @@ class ChatService:
         rows = (await session.execute(stmt)).all()
 
         mensagens = []
-        for consulta, resposta in rows:
+        for consulta, resposta, feedback in rows:
             fontes: list[FonteCitada] = []
             if resposta and resposta.fontes_utilizadas_json:
                 for f in resposta.fontes_utilizadas_json.get("fontes", []):
                     fontes.append(FonteCitada(**f))
 
+            feedback_info = None
+            if feedback:
+                feedback_info = FeedbackInfo(
+                    id=feedback.id,
+                    avaliacao=feedback.avaliacao,
+                )
+
             mensagens.append(
                 MensagemHistorico(
                     consulta_id=consulta.id,
+                    resposta_id=resposta.id if resposta else None,
                     pergunta=consulta.pergunta or "",
                     resposta=resposta.texto_resposta if resposta else None,
                     turno=consulta.turno or 0,
                     fontes=fontes,
+                    feedback=feedback_info,
                 )
             )
+
+        # Extrair mapa, bbox e status da última resposta
+        mapa = None
+        bbox = None
+        last_status = None
+        if rows:
+            last_resposta = rows[-1][1]
+            if last_resposta:
+                if last_resposta.mapa_geojson:
+                    mapa = FeatureCollection(**last_resposta.mapa_geojson)
+                if last_resposta.bbox_resultado is not None:
+                    shape = to_shape(last_resposta.bbox_resultado)
+                    bbox = list(shape.bounds)
+                last_status = last_resposta.status
 
         return ChatHistoricoResponse(
             chat_id=chat.id,
             title=chat.title,
+            created_at=chat.created_at,
             mensagens=mensagens,
+            mapa=mapa,
+            bbox=bbox,
+            status=last_status,
         )
+
+    # ------------------------------------------------------------------
+    # Desativar chat (soft delete)
+    # ------------------------------------------------------------------
+
+    async def desativar_chat(
+        self, chat_id: UUID, session: AsyncSession
+    ) -> dict:
+        chat = await session.get(Chat, chat_id)
+        if chat is None:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Chat não encontrado.")
+
+        chat.ativo = False
+        await session.commit()
+        return {"mensagem": "Chat desativado com sucesso."}
 
     # ------------------------------------------------------------------
     # Feedback
@@ -129,7 +187,6 @@ class ChatService:
         feedback = FeedbackResposta(
             resposta_sistema_id=req.resposta_sistema_id,
             avaliacao=req.avaliacao,
-            comentario=req.comentario,
         )
         session.add(feedback)
         await session.commit()

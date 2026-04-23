@@ -17,6 +17,7 @@ Tabelas afetadas:
 Executar APÓS todas as outras pipelines.
 """
 import logging
+import uuid
 from datetime import datetime
 
 from sqlalchemy import text
@@ -53,13 +54,22 @@ class SpatialRelationshipPostProcessor:
         Returns:
             Número de relacionamentos criados
         """
-        logger.info(
-            f"Computing {source_table} ↔ {target_table} relationships..."
-        )
+        logger.info(f"Computing {source_table} ↔ {target_table} relationships...")
 
         with self.engine.begin() as conn:
             # Limpar relacionamentos antigos
             conn.execute(text(f"DELETE FROM {relation_table} WHERE TRUE"))
+            conn.execute(text("SET LOCAL statement_timeout = '5min'"))
+
+            # Índices espaciais para melhorar desempenho do ST_Intersects.
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS idx_{source_table}_geom_gist "
+                f"ON {source_table} USING GIST (geom)"
+            ))
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS idx_{target_table}_geom_gist "
+                f"ON {target_table} USING GIST (geom)"
+            ))
 
             # Inserir novos relacionamentos
             cols = [
@@ -77,25 +87,24 @@ class SpatialRelationshipPostProcessor:
                     gen_random_uuid(),
                     source.id,
                     target.id,
-                    ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0
+                    ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0
                         as area_intersecao_ha,
                     CASE
                         WHEN source.area_ha > 0 THEN
-                            (ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0)
+                            (ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0)
                             / source.area_ha * 100
                         ELSE 0
                     END as percentual_sobreposicao
                 FROM {source_table} source
-                JOIN {target_table} target ON ST_Intersects(source.geom, target.geom)
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM {relation_table} rel
-                    WHERE rel.{source_table.rstrip('s')}_id = source.id
-                      AND rel.{target_table.rstrip('s')}_id = target.id
-                )
+                JOIN {target_table} target
+                  ON source.geom && target.geom
+                 AND ST_Intersects(ST_MakeValid(source.geom), ST_MakeValid(target.geom))
             """
 
-            result = conn.execute(text(query))
-            count = result.rowcount
+            conn.execute(text(query))
+            result = conn.execute(text(f"SELECT COUNT(*) FROM {relation_table}"))
+            count = result.scalar()
+
             logger.info(f"  → {count} relationships created")
             return count
 
@@ -106,6 +115,20 @@ class SpatialRelationshipPostProcessor:
         try:
             with self.engine.begin() as conn:
                 conn.execute(text("DELETE FROM rel_imovel_queimada WHERE TRUE"))
+                conn.execute(text("SET LOCAL statement_timeout = '5min'"))
+
+                # Índices espaciais para acelerar a junção por proximidade.
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_imovel_rural_geom_gist "
+                    "ON imovel_rural USING GIST (geom)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_queimada_evento_geom_gist "
+                    "ON queimada_evento USING GIST (geom)"
+                ))
+
+                # Aproximação em graus (~5km) para evitar dependência de geography/srid refs.
+                dist_deg = 5000.0 / 111320.0
 
                 query = text("""
                     INSERT INTO rel_imovel_queimada
@@ -115,20 +138,16 @@ class SpatialRelationshipPostProcessor:
                         gen_random_uuid(),
                         ir.id,
                         qe.id,
-                        ST_Distance(ir.geom::geography, qe.geom::geography) as distancia_m,
-                        ST_Contains(ir.geom, qe.geom) as dentro_imovel,
+                        ST_Distance(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom)) * 111320.0 as distancia_m,
+                        ST_Contains(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom)) as dentro_imovel,
                         :agora
-                    FROM imovel_rural ir
-                    CROSS JOIN queimada_evento qe
-                    WHERE ST_DWithin(ir.geom::geography, qe.geom::geography, 5000)
-                      AND NOT EXISTS (
-                        SELECT 1 FROM rel_imovel_queimada
-                        WHERE imovel_rural_id = ir.id
-                          AND queimada_evento_id = qe.id
-                      )
+                                        FROM queimada_evento qe
+                                        JOIN imovel_rural ir
+                                            ON ir.geom && ST_Expand(qe.geom, :dist_deg)
+                                         AND ST_DWithin(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom), :dist_deg)
                 """)
 
-                conn.execute(query, {"agora": datetime.now()})
+                conn.execute(query, {"agora": datetime.now(), "dist_deg": dist_deg})
                 result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_queimada"))
                 count = result.scalar()
                 logger.info(f"  → {count} relationships created")
@@ -207,6 +226,89 @@ class SpatialRelationshipPostProcessor:
             logger.warning(f"Failed to calculate imovel_quilombo relationships: {str(e)}")
             return 0
 
+    def populate_documentos_from_datasets(self) -> int:
+        """Sincroniza metadados dos Datasets para a tabela documento e documento_trecho."""
+        logger.info("Computing fallback: dataset -> documento_trecho (embeddings)...")
+        
+        try:
+            # Requer import do embedder do pipeline NLP
+            import sys
+            import os
+            # Adiciona a raiz do projeto no sys.path se não estiver
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+            if base_dir not in sys.path:
+                sys.path.append(base_dir)
+                
+            from nlp_processor.pipeline.embedder import get_embedder
+            embedder = get_embedder()
+            
+            with self.engine.begin() as conn:
+                # 1. Obter todos os datasets que ainda não viraram documento
+                query_datasets = text("""
+                    SELECT 
+                        d.id as dataset_id, 
+                        d.nome as dataset_nome, 
+                        d.descricao, 
+                        f.nome as fonte_nome, 
+                        f.orgao_responsavel
+                    FROM dataset d
+                    JOIN fonte_dado f ON d.fonte_dado_id = f.id
+                    WHERE d.id NOT IN (SELECT dataset_id FROM documento WHERE dataset_id IS NOT NULL)
+                """)
+                
+                datasets = conn.execute(query_datasets).fetchall()
+                if not datasets:
+                    return 0
+                
+                count = 0
+                for row in datasets:
+                    doc_id = str(uuid.uuid4())
+                    titulo = f"{row.fonte_nome} - {row.dataset_nome}"
+                    texto_integral = (
+                        f"Dataset: {row.dataset_nome}. "
+                        f"Fonte de Dados: {row.fonte_nome} ({row.orgao_responsavel}). "
+                        f"Descrição: {row.descricao or 'Não disponível'}."
+                    )
+                    
+                    # 2. Inserir Documento
+                    insert_doc = text("""
+                        INSERT INTO documento (id, dataset_id, titulo, tipo, data_criacao, texto_integral)
+                        VALUES (:id, :dataset_id, :titulo, 'metadata_dataset', :agora, :texto_integral)
+                    """)
+                    conn.execute(insert_doc, {
+                        "id": doc_id, 
+                        "dataset_id": row.dataset_id,
+                        "titulo": titulo,
+                        "agora": datetime.now(),
+                        "texto_integral": texto_integral
+                    })
+                    
+                    # 3. Gerar embedding e Inserir Documento Trecho
+                    vector_embedding = embedder.embed(texto_integral)
+                    embedding_str = f"[{','.join(str(f) for f in vector_embedding)}]"
+                    tokens_count = len(texto_integral.split())
+                    
+                    insert_trecho = text("""
+                        INSERT INTO documento_trecho (id, documento_id, texto, ordem, embedding, tokens_count)
+                        VALUES (:id, :documento_id, :texto, 1, CAST(:embedding AS vector), :tokens)
+                    """)
+                    conn.execute(insert_trecho, {
+                        "id": str(uuid.uuid4()),
+                        "documento_id": doc_id,
+                        "texto": texto_integral,
+                        "embedding": embedding_str,
+                        "tokens": tokens_count
+                    })
+                    
+                    count += 1
+                
+                logger.info(f"  → {count} documents and embeddings created")
+                return count
+                
+        except Exception as e:
+            logger.warning(f"Failed to populate documents and embeddings: {str(e)}")
+            return 0
+
     def calculate_imovel_bacia(self) -> int:
         """Calcula: Imóvel ↔ Bacia Hidrográfica."""
         logger.info("Computing imovel_rural ↔ bacia_hidrografica relationships...")
@@ -223,15 +325,15 @@ class SpatialRelationshipPostProcessor:
                         gen_random_uuid(),
                         ir.id,
                         bh.id,
-                        ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0 as area_intersecao_ha,
+                        ST_Area(ST_Intersection(ST_MakeValid(ir.geom), ST_MakeValid(bh.geom))) / 10000.0 as area_intersecao_ha,
                         CASE
                             WHEN ir.area_ha > 0 THEN
-                                (ST_Area(ST_Intersection(ir.geom, bh.geom)) / 10000.0)
+                                (ST_Area(ST_Intersection(ST_MakeValid(ir.geom), ST_MakeValid(bh.geom))) / 10000.0)
                                 / ir.area_ha * 100
                             ELSE 0
                         END as percentual_sobreposicao
                     FROM imovel_rural ir
-                    JOIN bacia_hidrografica bh ON ST_Intersects(ir.geom, bh.geom)
+                    JOIN bacia_hidrografica bh ON ST_Intersects(ST_MakeValid(ir.geom), ST_MakeValid(bh.geom))
                     WHERE NOT EXISTS (
                         SELECT 1 FROM rel_imovel_bacia
                         WHERE imovel_rural_id = ir.id
@@ -248,6 +350,85 @@ class SpatialRelationshipPostProcessor:
             logger.warning(f"Failed to calculate imovel_bacia relationships: {str(e)}")
             return 0
 
+    def link_camada_estadual_to_municipios(self) -> int:
+        """Relaciona camada_estadual_ambiental ao município mais aderente espacialmente.
+
+        Regra principal: município com maior área de interseção.
+        Fallback: município que contém um ponto interno da geometria.
+        """
+        logger.info("Linking camada_estadual_ambiental → municipio...")
+
+        try:
+            with self.engine.begin() as conn:
+                updated_total = 0
+                # Escolhe um único município por ativo com base na maior interseção.
+                r1 = conn.execute(text("""
+                    WITH ranked AS (
+                        SELECT
+                            cea.id AS camada_id,
+                            m.id AS municipio_id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY cea.id
+                                ORDER BY ST_Area(ST_Intersection(ST_MakeValid(cea.geom), m.geom)) DESC,
+                                         m.id
+                            ) AS rn
+                        FROM camada_estadual_ambiental cea
+                        JOIN municipio m ON ST_Intersects(ST_MakeValid(cea.geom), m.geom)
+                        WHERE cea.municipio_id IS NULL
+                    )
+                    UPDATE camada_estadual_ambiental cea
+                    SET municipio_id = ranked.municipio_id
+                    FROM ranked
+                    WHERE cea.id = ranked.camada_id
+                      AND ranked.rn = 1
+                    RETURNING cea.id
+                """))
+                updated_total += len(r1.fetchall())
+
+                # Fallback para geometrias que não intersectaram por ruído topológico.
+                r2 = conn.execute(text("""
+                                        UPDATE camada_estadual_ambiental cea
+                                        SET municipio_id = m.id
+                                        FROM municipio m
+                                        WHERE cea.municipio_id IS NULL
+                                            AND ST_Contains(m.geom, ST_PointOnSurface(ST_MakeValid(cea.geom)))
+                                        RETURNING cea.id
+                """))
+                updated_total += len(r2.fetchall())
+
+                # Último fallback: município mais próximo do ponto interno da geometria.
+                r3 = conn.execute(text("""
+                    WITH nearest AS (
+                        SELECT
+                            cea.id AS camada_id,
+                            m.id AS municipio_id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY cea.id
+                                ORDER BY ST_Distance(
+                                    ST_PointOnSurface(ST_MakeValid(cea.geom)),
+                                    ST_PointOnSurface(m.geom)
+                                ) ASC,
+                                m.id
+                            ) AS rn
+                        FROM camada_estadual_ambiental cea
+                        JOIN municipio m ON TRUE
+                        WHERE cea.municipio_id IS NULL
+                    )
+                    UPDATE camada_estadual_ambiental cea
+                    SET municipio_id = nearest.municipio_id
+                    FROM nearest
+                    WHERE cea.id = nearest.camada_id
+                      AND nearest.rn = 1
+                    RETURNING cea.id
+                """))
+                updated_total += len(r3.fetchall())
+
+            logger.info("  → %s registros de camada_estadual_ambiental vinculados a município", updated_total)
+            return updated_total
+        except Exception as e:
+            logger.warning("Failed to link camada_estadual_ambiental to municipio: %s", str(e))
+            return 0
+
     def run_all(self):
         """Executa todos os cálculos de relacionamentos."""
         logger.info("\n" + "="*70)
@@ -261,6 +442,8 @@ class SpatialRelationshipPostProcessor:
             logger.warning(
                 "Não foi possível atualizar municipio_id em queimada_evento: %s", e
             )
+
+        camada_municipio_updates = self.link_camada_estadual_to_municipios()
 
         with self.engine.connect() as conn:
             n_im = conn.execute(
@@ -280,12 +463,18 @@ class SpatialRelationshipPostProcessor:
             "assentamento": self.calculate_imovel_assentamento(),
             "quilombo": self.calculate_imovel_quilombo(),
             "bacia": self.calculate_imovel_bacia(),
+            "documentos_fallback": self.populate_documentos_from_datasets(),
         }
 
         logger.info("\n" + "="*70)
         logger.info("SUMMARY")
         logger.info("="*70)
         total = sum(results.values())
+        logger.info(
+            "  %-20s → %6s updates",
+            "camada->municipio",
+            camada_municipio_updates,
+        )
         for name, count in results.items():
             logger.info(f"  {name:20} → {count:6} relationships")
         logger.info(f"  {'TOTAL':20} → {total:6} relationships")

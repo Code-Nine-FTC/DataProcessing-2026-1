@@ -3,9 +3,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.index import (
+    BufferResultItem,
     GrupoItem,
+    ProximidadeItem,
+    ProximidadeQueimadaItem,
     QueimadaDentroForaItem,
     RespostaAgrupada,
+    RespostaBuffer,
+    RespostaProximidade,
+    RespostaProximidadeQueimada,
     RespostaQueimadaDentroFora,
     RespostaTemporalDesmatamento,
     RespostaTemporalQueimada,
@@ -22,7 +28,7 @@ class AnalyticsService:
         self._session = session
 
     # ------------------------------------------------------------------
-    # RF-07 #1 — Área total das propriedades por estado
+    # Área total das propriedades por estado
     # ------------------------------------------------------------------
     async def imoveis_area_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -41,7 +47,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
-    # RF-07 #1 — Área total das propriedades por município
+    # Área total das propriedades por município
     # ------------------------------------------------------------------
     async def imoveis_area_por_municipio(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -60,7 +66,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
-    # RF-07 #6 — Área desmatada (ha) por estado, com filtro de 12 meses
+    # Área desmatada (ha) por estado, com filtro de 12 meses
     # ------------------------------------------------------------------
     async def desmatamento_area_por_estado(self, ultimos_12_meses: bool = False) -> RespostaAgrupada:
         filtro = "AND d.data_ocorrencia >= CURRENT_DATE - INTERVAL '12 months'" if ultimos_12_meses else ""
@@ -80,7 +86,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
-    # RF-07 #6 — Desmatamento: série temporal por mês (área total ha)
+    # Desmatamento: série temporal por mês (área total ha)
     # ------------------------------------------------------------------
     async def desmatamento_area_por_mes(self) -> RespostaTemporalDesmatamento:
         result = await self._session.execute(
@@ -100,7 +106,7 @@ class AnalyticsService:
         )
 
     # ------------------------------------------------------------------
-    # RF-07 #7 — Alertas de desmatamento por tipo (contagem)
+    # Alertas de desmatamento por tipo (contagem)
     # ------------------------------------------------------------------
     async def desmatamento_alertas_por_tipo(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -116,7 +122,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #7 — Área de desmatamento sobreposta a imóveis rurais
+    # Área de desmatamento sobreposta a imóveis rurais
     # ------------------------------------------------------------------
     async def desmatamento_area_em_imoveis(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -136,7 +142,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Focos de incêndio por estado
+    # Focos de incêndio por estado
     # ------------------------------------------------------------------
     async def queimadas_focos_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -153,7 +159,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Focos de incêndio por município
+    # Focos de incêndio por município
     # ------------------------------------------------------------------
     async def queimadas_focos_por_municipio(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -171,7 +177,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Focos de incêndio por mês (série temporal)
+    # Focos de incêndio por mês (série temporal)
     # ------------------------------------------------------------------
     async def queimadas_focos_por_mes(self) -> RespostaTemporalQueimada:
         result = await self._session.execute(
@@ -188,7 +194,7 @@ class AnalyticsService:
         return RespostaTemporalQueimada(series=series, total=sum(s.total for s in series))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Focos por bioma
+    # Focos por bioma
     # ------------------------------------------------------------------
     async def queimadas_focos_por_bioma(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -204,7 +210,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Intensidade média (FRP) por bioma
+    # Intensidade média (FRP) por bioma
     # ------------------------------------------------------------------
     async def queimadas_intensidade_por_bioma(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -222,7 +228,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=total)
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Dias sem chuva médio por estado
+    # Dias sem chuva médio por estado
     # ------------------------------------------------------------------
     async def queimadas_dias_sem_chuva_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -242,7 +248,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=total)
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Risco médio de fogo por estado
+    # Risco médio de fogo por estado
     # ------------------------------------------------------------------
     async def queimadas_risco_medio_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -262,7 +268,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=total)
 
     # ------------------------------------------------------------------
-    # RF-07 #8 — Queimadas dentro vs. fora de imóveis rurais
+    # Queimadas dentro vs. fora de imóveis rurais
     # ------------------------------------------------------------------
     async def queimadas_dentro_fora_imoveis(self) -> RespostaQueimadaDentroFora:
         result = await self._session.execute(
@@ -277,7 +283,7 @@ class AnalyticsService:
         return RespostaQueimadaDentroFora(grupos=grupos, total=sum(g.total for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #9 — Data do último incêndio por estado
+    # Data do último incêndio por estado
     # ------------------------------------------------------------------
     async def queimadas_ultimo_incendio_por_estado(self) -> RespostaUltimoIncendio:
         result = await self._session.execute(
@@ -299,7 +305,7 @@ class AnalyticsService:
         return RespostaUltimoIncendio(estados=estados)
 
     # ------------------------------------------------------------------
-    # RF-07 #13 — Unidades de Conservação por grupo SNUC
+    # Unidades de Conservação por grupo SNUC
     # ------------------------------------------------------------------
     async def uc_por_grupo_snuc(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -315,7 +321,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #13 — Unidades de Conservação por esfera (federal/estadual/municipal)
+    # Unidades de Conservação por esfera (federal/estadual/municipal)
     # ------------------------------------------------------------------
     async def uc_por_esfera(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -331,7 +337,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #14 — Terras Indígenas por fase de demarcação
+    # Terras Indígenas por fase de demarcação
     # ------------------------------------------------------------------
     async def ti_por_fase(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -347,7 +353,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #18 — Assentamentos por modalidade
+    # Assentamentos por modalidade
     # ------------------------------------------------------------------
     async def assentamentos_por_modalidade(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -363,7 +369,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #18 — Famílias em assentamentos por estado
+    # Famílias em assentamentos por estado
     # ------------------------------------------------------------------
     async def assentamentos_familias_por_estado(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -382,7 +388,7 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #17 — Status do CAR
+    # Status do CAR
     # ------------------------------------------------------------------
     async def imoveis_por_status_car(self) -> RespostaAgrupada:
         result = await self._session.execute(
@@ -398,7 +404,138 @@ class AnalyticsService:
         return RespostaAgrupada(grupos=grupos, total=sum(g.valor for g in grupos))
 
     # ------------------------------------------------------------------
-    # RF-07 #13, #14, #15, #18 — Sobreposições com áreas especiais (contagem)
+    # [RF-04] Distância (ST_Distance) entre imóveis e alertas de desmatamento próximos
+    # Retorna pares (imóvel, alerta) que estão dentro do raio mas sem sobreposição
+    # ------------------------------------------------------------------
+    async def desmatamento_distancia_alertas(
+        self, raio_km: float = 10.0, limite: int = 100
+    ) -> RespostaProximidade:
+        result = await self._session.execute(
+            text("""
+                SELECT
+                    i.id::text   AS imovel_id,
+                    i.nome_imovel,
+                    m.nome       AS municipio,
+                    d.id::text   AS alerta_id,
+                    d.tipo_alerta,
+                    ROUND(
+                        ST_Distance(i.geom::geography, d.geom::geography)::numeric, 2
+                    )::float     AS distancia_m
+                FROM imovel_rural i
+                JOIN desmatamento_alerta d
+                    ON ST_DWithin(i.geom::geography, d.geom::geography, :raio_m)
+                   AND NOT ST_Intersects(i.geom, d.geom)
+                LEFT JOIN municipio m ON m.id = i.municipio_id
+                ORDER BY distancia_m
+                LIMIT :limite
+            """),
+            {"raio_m": raio_km * 1000, "limite": limite},
+        )
+        itens = [
+            ProximidadeItem(
+                imovel_id=row.imovel_id,
+                nome_imovel=row.nome_imovel,
+                municipio=row.municipio,
+                alerta_id=row.alerta_id,
+                tipo_alerta=row.tipo_alerta,
+                distancia_m=row.distancia_m,
+            )
+            for row in result
+        ]
+        return RespostaProximidade(itens=itens, total=len(itens))
+
+    # ------------------------------------------------------------------
+    # [RF-04] Área de influência (ST_Buffer) de alertas de desmatamento
+    # Cria buffer ao redor de cada alerta e retorna imóveis que caem dentro
+    # ------------------------------------------------------------------
+    async def desmatamento_buffer_imoveis(
+        self, raio_km: float = 5.0, limite: int = 100
+    ) -> RespostaBuffer:
+        result = await self._session.execute(
+            text("""
+                SELECT
+                    d.id::text          AS alerta_id,
+                    d.tipo_alerta,
+                    m.nome              AS municipio,
+                    i.id::text          AS imovel_id,
+                    i.nome_imovel,
+                    ROUND(
+                        (ST_Area(
+                            ST_Buffer(d.geom::geography, :raio_m)::geometry
+                        ) / 10000.0)::numeric, 2
+                    )::float            AS area_buffer_ha,
+                    ST_AsGeoJSON(
+                        ST_Buffer(d.geom::geography, :raio_m)::geometry
+                    )                   AS buffer_geojson
+                FROM desmatamento_alerta d
+                JOIN imovel_rural i
+                    ON ST_Intersects(
+                        ST_Buffer(d.geom::geography, :raio_m)::geometry,
+                        i.geom
+                    )
+                LEFT JOIN municipio m ON m.id = d.municipio_id
+                ORDER BY d.id, i.id
+                LIMIT :limite
+            """),
+            {"raio_m": raio_km * 1000, "limite": limite},
+        )
+        itens = [
+            BufferResultItem(
+                alerta_id=row.alerta_id,
+                tipo_alerta=row.tipo_alerta,
+                municipio=row.municipio,
+                imovel_id=row.imovel_id,
+                nome_imovel=row.nome_imovel,
+                area_buffer_ha=row.area_buffer_ha,
+                buffer_geojson=row.buffer_geojson,
+            )
+            for row in result
+        ]
+        return RespostaBuffer(raio_km=raio_km, itens=itens, total=len(itens))
+
+    # ------------------------------------------------------------------
+    # [RF-04] Distância (ST_Distance) entre imóveis e focos de queimada próximos
+    # Retorna pares (imóvel, queimada) que estão dentro do raio mas sem sobreposição
+    # ------------------------------------------------------------------
+    async def queimadas_distancia_imoveis(
+        self, raio_km: float = 10.0, limite: int = 100
+    ) -> RespostaProximidadeQueimada:
+        result = await self._session.execute(
+            text("""
+                SELECT
+                    i.id::text   AS imovel_id,
+                    i.nome_imovel,
+                    m.nome       AS municipio,
+                    q.id::text   AS queimada_id,
+                    q.bioma      AS bioma,
+                    ROUND(
+                        ST_Distance(i.geom::geography, q.geom::geography)::numeric, 2
+                    )::float     AS distancia_m
+                FROM imovel_rural i
+                JOIN queimada_evento q
+                    ON ST_DWithin(i.geom::geography, q.geom::geography, :raio_m)
+                   AND NOT ST_Intersects(i.geom, q.geom)
+                LEFT JOIN municipio m ON m.id = i.municipio_id
+                ORDER BY distancia_m
+                LIMIT :limite
+            """),
+            {"raio_m": raio_km * 1000, "limite": limite},
+        )
+        itens = [
+            ProximidadeQueimadaItem(
+                imovel_id=row.imovel_id,
+                nome_imovel=row.nome_imovel,
+                municipio=row.municipio,
+                queimada_id=row.queimada_id,
+                bioma=row.bioma,
+                distancia_m=row.distancia_m,
+            )
+            for row in result
+        ]
+        return RespostaProximidadeQueimada(itens=itens, total=len(itens))
+
+    # ------------------------------------------------------------------
+    # Sobreposições com áreas especiais (contagem)
     # ------------------------------------------------------------------
     async def resumo_sobreposicoes(self) -> ResumoSobreposicoes:
         result = await self._session.execute(

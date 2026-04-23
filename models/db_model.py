@@ -49,16 +49,6 @@ class Dataset(Base):
     caminho_arquivo: Mapped[Optional[str]] = mapped_column(TEXT)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSONB)
 
-class Processamento(Base):
-    __tablename__ = "processamento"
-    id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
-    dataset_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("dataset.id"))
-    tipo_processamento: Mapped[Optional[str]] = mapped_column(TEXT)
-    data_execucao: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    status: Mapped[Optional[str]] = mapped_column(TEXT)
-    log_execucao: Mapped[Optional[str]] = mapped_column(TEXT)
-    parametros_json: Mapped[Optional[dict]] = mapped_column(JSONB)
-
 # --- 2. BASE GEOGRÁFICA (ESTADOS, MUNICÍPIOS, BACIAS) ---
 
 class Estado(Base):
@@ -175,13 +165,6 @@ class Municipio(Base):
         return result.all()
 
 
-class GradeEspacial(Base):
-    __tablename__ = "grade_espacial"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    nome: Mapped[Optional[str]] = mapped_column(TEXT)
-    codigo: Mapped[Optional[str]] = mapped_column(TEXT)
-    geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
-
 class BaciaHidrografica(Base):
     __tablename__ = "bacia_hidrografica"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -204,6 +187,21 @@ class ImovelRural(Base):
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
     centroid: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+
+    @staticmethod
+    async def get_imoveis_intersecting_geometry(session: AsyncSession, geojson_geometry: str) -> list[Row]:
+        query = text("""
+            SELECT
+                id::text AS id,
+                nome_imovel AS nome,
+                area_ha,
+                ST_AsGeoJSON(geom)::json AS geom,
+                atributos_json
+            FROM imovel_rural
+            WHERE ST_Intersects(geom, ST_SetSRID(ST_GeomFromGeoJSON(:geojson_geometry), 4326))
+        """)
+        result = await session.execute(query, {"geojson_geometry": geojson_geometry})
+        return result.all()
 
 class QueimadaEvento(Base):
     __tablename__ = "queimada_evento"
@@ -401,7 +399,8 @@ class Chat(Base):
     __tablename__ = "chat"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
     title: Mapped[Optional[str]] = mapped_column(TEXT)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
 
 class IntencaoConsulta(Base): # Adicionado conforme melhorias
     __tablename__ = "intencao_consulta"
@@ -432,6 +431,7 @@ class RespostaSistema(Base):
     sql_executado: Mapped[Optional[str]] = mapped_column(TEXT)
     fontes_utilizadas_json: Mapped[Optional[dict]] = mapped_column(JSONB)
     bbox_resultado: Mapped[Optional[Any]] = mapped_column(Geometry("POLYGON", srid=4326), nullable=True)
+    mapa_geojson: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     tempo_resposta_ms: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(
         String, 
