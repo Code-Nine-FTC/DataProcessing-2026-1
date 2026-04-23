@@ -33,11 +33,16 @@ async def test_chat():
             print(f"{'='*70}")
 
             try:
-                texto, features, fontes, status = await run_agent(
+                resultado = await run_agent(
                     session=session,
                     pergunta=pergunta,
                     historico=[],
                 )
+
+                texto = resultado["texto_resposta"]
+                features = resultado["features"]
+                fontes = resultado["fontes"]
+                status = resultado["status"]
 
                 print(f"\nSTATUS: {status}")
                 print(f"RESPOSTA: {texto[:200]}...")

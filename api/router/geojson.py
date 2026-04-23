@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -40,6 +41,10 @@ _LAYER_QUERIES = {
             q.fonte_sensor AS nome,
             q.intensidade,
             q.data_ocorrencia::text AS data_ocorrencia,
+            q.bioma,
+            q.dias_sem_chuva,
+            q.precipitacao_mm,
+            q.risco_fogo,
             m.nome AS municipio,
             ST_AsGeoJSON(q.geom)::json AS geometry
         FROM queimada_evento q
@@ -133,7 +138,7 @@ async def get_layer_geojson(
             "properties": props,
         })
 
-    return JSONResponse(content={
+    return JSONResponse(content=jsonable_encoder({
         "type": "FeatureCollection",
         "features": features,
-    })
+    }))

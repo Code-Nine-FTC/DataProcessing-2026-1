@@ -12,7 +12,7 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 from shapely.geometry import Point, Polygon, MultiPolygon
-
+from shapely.validation import make_valid
 from core.models import ExtractedData, TransformedRecord
 from core.exceptions import TransformationException
 
@@ -81,14 +81,30 @@ class BaseTransformer(ABC):
 
     @staticmethod
     def ensure_multipolygon(geom) -> Optional[MultiPolygon]:
-        """Garante que a geometria é um MultiPolygon. Ignora geometrias não-poligonais."""
+        """Garante que a geometria é um MultiPolygon. Corrige polígonos inválidos e extrai de coleções."""
         if geom is None or (hasattr(geom, "is_empty") and geom.is_empty):
             return None
+            
+        if not getattr(geom, "is_valid", True):
+            geom = make_valid(geom)
+            
         geom_type = getattr(geom, "geom_type", None)
+        
         if geom_type == "Polygon":
             return MultiPolygon([geom])
-        if geom_type == "MultiPolygon":
+        elif geom_type == "MultiPolygon":
             return geom
+        elif geom_type == "GeometryCollection":
+            # Extrair apenas polígonos da coleção
+            polys = []
+            for g in geom.geoms:
+                if g.geom_type == "Polygon":
+                    polys.append(g)
+                elif g.geom_type == "MultiPolygon":
+                    polys.extend(g.geoms)
+            if polys:
+                return MultiPolygon(polys)
+                
         # Point, LineString, etc. não são válidos para colunas MULTIPOLYGON
         logger.warning(f"ensure_multipolygon: tipo não suportado ignorado: {geom_type}")
         return None

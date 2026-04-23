@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -13,7 +14,6 @@ class ChatMensagemRequest(BaseModel):
 class FeedbackRequest(BaseModel):
     resposta_sistema_id: UUID
     avaliacao: int = Field(..., ge=-1, le=1, description="-1 ruim, 0 neutro, 1 bom")
-    comentario: Optional[str] = Field(None, max_length=1000)
 
 class MapGeometry(BaseModel):
     type: str
@@ -30,6 +30,10 @@ class FeatureCollection(BaseModel):
     type: str = "FeatureCollection"
     features: List[MapFeature]
 
+
+class FeedbackInfo(BaseModel):
+    id: UUID
+    avaliacao: int = Field(description="-1 ruim, 0 neutro, 1 bom")
 
 class FonteCitada(BaseModel):
     nome: str
@@ -53,17 +57,28 @@ class ChatMensagemResponse(BaseModel):
 class ChatResumo(BaseModel):
     id: UUID
     title: Optional[str] = None
+    created_at: Optional[datetime] = None
+    ativo: bool = True
 
 
 class MensagemHistorico(BaseModel):
     consulta_id: UUID
+    resposta_id: Optional[UUID] = None
     pergunta: str
     resposta: Optional[str] = None
     turno: int
     fontes: List[FonteCitada] = []
+    feedback: Optional[FeedbackInfo] = None
 
 
 class ChatHistoricoResponse(BaseModel):
     chat_id: UUID
     title: Optional[str] = None
+    created_at: Optional[datetime] = None
     mensagens: List[MensagemHistorico]
+    mapa: Optional[FeatureCollection] = None
+    bbox: Optional[List[float]] = Field(
+        None,
+        description="Bounding box [minLng, minLat, maxLng, maxLat] da última consulta.",
+    )
+    status: Optional[str] = None
