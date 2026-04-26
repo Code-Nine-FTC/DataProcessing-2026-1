@@ -306,6 +306,7 @@ class RelImovelQueimada(Base):
     distancia_m: Mapped[Optional[float]] = mapped_column(Numeric) #
     dentro_imovel: Mapped[Optional[bool]] = mapped_column(Boolean) #
     data_calculo: Mapped[Optional[datetime]] = mapped_column(DateTime) #
+    geom = mapped_column(Geometry(geometry_type='GEOMETRY', srid=4326)) # coluna espacial para consultas
 
 class RelImovelDesmatamento(Base):
     __tablename__ = "rel_imovel_desmatamento"
