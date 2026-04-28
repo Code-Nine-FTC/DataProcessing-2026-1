@@ -159,6 +159,12 @@ def formatar_resposta(
     fontes_str = _formatar_fontes(fontes)
     escopo = _formatar_escopo(entidades)
 
+    if intencao == "buscar_assentamentos":
+        return _aplicar_feedback_contexto(
+            "A consulta de assentamentos rurais está desativada no momento, pois a fonte não está disponível.",
+            feedback_contexto,
+        )
+
     # Sem dados
     if intencao != "fora_escopo" and intencao != "buscar_documentos" and total_features == 0:
         nomes = ", ".join(f["nome"] for f in fontes) if fontes else "fontes do sistema"

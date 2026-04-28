@@ -111,6 +111,7 @@ class Entidades:
     sensor: Optional[str] = None
     grupo_snuc: Optional[str] = None       # 'PI' ou 'US'
     palavras_chave: list[str] = field(default_factory=list)
+    codigo_car: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -230,4 +231,26 @@ def extrair_entidades(
         sensor=_extrair_sensor(texto_norm),
         grupo_snuc=_extrair_grupo_snuc(texto_norm),
         palavras_chave=[w for w in texto_norm.split() if len(w) > 4],
+        codigo_car=_extrair_codigo_car(texto_norm),
     )
+
+
+# ---------------------------------------------------------------------------
+# Extrair código CAR simples
+# Padrões suportados:
+# - "código car SP000123456" ou "codigo car: SP000123456"
+# - "CAR SP000123456"
+# - qualquer token alfanumérico com prefixo de 2 letras seguido por 6+ dígitos
+# ---------------------------------------------------------------------------
+def _extrair_codigo_car(texto_norm: str) -> Optional[str]:
+    m = re.search(r"codigo\s+car[:\s]*([A-Za-z0-9\-]+)", texto_norm)
+    if m:
+        return m.group(1)
+    m = re.search(r"\bcar[:\s]*([A-Za-z0-9\-]+)\b", texto_norm)
+    if m:
+        return m.group(1)
+    # fallback: token like SP12345678 or BR-123456
+    m = re.search(r"\b([A-Za-z]{2,3}\d{6,})\b", texto_norm)
+    if m:
+        return m.group(1)
+    return None
