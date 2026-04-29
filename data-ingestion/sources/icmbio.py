@@ -54,6 +54,7 @@ _GRUPO = ("grupo", "GRUPO", "grupo_uc", "GRUPO_STATUS", "DS_GRUPO_STATUS")
 _ID_ORIG = ("id", "ID", "gid", "FID", "objectid", "cod_uc")
 _MUNICIPIO = ("municipio", "MUNICIPIO", "mun_nome", "nm_municipio")
 _UF_SIGLA = ("uf", "UF", "sigla_uf", "SIGLA_UF", "estado")
+_AREA_HA = ("area_ha", "AREA_HA", "area", "AREA", "area_km2", "AREA_KM2") # Não disponível nesta fonte, mas mantido para consistência
 
 
 def _pick(record: dict, candidates: tuple, default=None):
@@ -105,7 +106,6 @@ class ICMBioExtractor(WFSExtractor):
                 "Verifique conectividade com http://terrabrasilis.dpi.inpe.br"
             )
 
-        # Deduplicar por ID origem (mesma UC pode estar em múltiplos biomas)
         seen_ids = set()
         deduped = []
         skipped_none = 0
@@ -125,12 +125,15 @@ class ICMBioExtractor(WFSExtractor):
             f"UC deduplication: {len(all_features)} → {len(deduped)} "
             f"(removed {len(all_features) - len(deduped)})"
         )
-
-        return ExtractedData(
+        data = ExtractedData(
             source=ICMBIO_SOURCE,
             rows=deduped,
             metadata={"feature_count": len(deduped), "biome_layers": len(BIOME_LAYERS)},
         )
+
+        self.save_data(data=data, path="output")
+
+        return data
 
     def _create_wfs_request(self):
         """Cria request WFS para camada atual."""
@@ -139,15 +142,13 @@ class ICMBioExtractor(WFSExtractor):
             url=ICMBIO_SOURCE.url,
             layer=self.wfs_layer,
             wfs_version="1.1.0",
-            # WFS 1.1.0 do TerraBrasilis não suporta startIndex (retorna ExceptionReport);
-            # desabilitar paginação para buscar tudo em uma única requisição.
             paginate=False,
             batch_size=10000,
         )
 
 
 class ICMBioTransformer(GeometricTransformer):
-    """Transformador para dados de ICMBio."""
+    """Transformador para dados de ICMBio ajustado para calcular área e buscar município."""
 
     def __init__(self, municipio_repo: MunicipioRepository):
         super().__init__(table_name="unidade_conservacao")
@@ -161,23 +162,40 @@ class ICMBioTransformer(GeometricTransformer):
         uf = self.pick(props, _UF_SIGLA)
 
         geometry = feature.get("geometry")
+        
+        # 1. Tratamento da Geometria
         geom_wkt = None
+        area_calculada = 0.0
+        
         if geometry:
             from shapely.geometry import shape
+            import shapely.ops as ops
+            from functools import partial
+            import pyproj
+            
             geom = shape(geometry)
+            if not geom.is_valid:
+                geom = geom.buffer(0)
+            
             geom = self.ensure_multipolygon(geom)
             if geom:
                 geom_wkt = geom.wkt
-
-        municipio_nome = self.pick(props, _MUNICIPIO)
-        municipio_id = None
-        if municipio_nome and uf:
-            try:
-                municipio_id = self.municipio_repo.find_by_name_and_state(
-                    municipio_nome, uf
+                
+                # 2. CÁLCULO DA ÁREA (Já que não vem no GeoJSON)
+                # Projeta para um sistema métrico (Web Mercator) para calcular área em m2
+                proj_transform = partial(
+                    pyproj.Transformer.from_crs('EPSG:4326', 'EPSG:3857', always_xy=True).transform
                 )
+                geom_projetada = ops.transform(proj_transform, geom)
+                area_calculada = geom_projetada.area / 10000  # Converte m² para Hectares
+
+        # 3. BUSCA DO MUNICÍPIO POR GEOMETRIA
+        municipio_id = None
+        if geom_wkt:
+            try:
+                municipio_id = self.municipio_repo.find_by_geometry(geom_wkt)
             except Exception as e:
-                logger.warning(f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}")
+                logger.warning(f"Não foi possível encontrar município via espacial: {str(e)}")
 
         return TransformedRecord(
             id=str(uuid4()),
@@ -189,7 +207,7 @@ class ICMBioTransformer(GeometricTransformer):
                 "categoria": self.pick(props, _CATEGORIA),
                 "esfera": self.pick(props, _ESFERA),
                 "grupo_snuc": self.pick(props, _GRUPO),
-                "area_ha": None,  # Não disponível nesta fonte
+                "area_ha": area_calculada,  # Não disponível nesta fonte
                 "municipio_id": municipio_id,
                 "atributos_json": self.row_to_json(props),
             },
