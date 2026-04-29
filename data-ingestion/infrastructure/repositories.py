@@ -178,3 +178,16 @@ class MunicipioRepository:
                 return result[0] if result else None
         except Exception as e:
             raise LoadException(f"Failed to find Municipio: {str(e)}")
+
+
+    def find_by_geometry(self, geom_wkt: str):
+        """Encontra o ID do município que contém o centroide ou a maior parte da UC."""
+        query = text("""
+            SELECT id 
+            FROM municipios 
+            WHERE ST_Intersects(geom, ST_GeomFromText(:geom, 4326))
+            ORDER BY ST_Area(ST_Intersection(geom, ST_GeomFromText(:geom, 4326))) DESC
+            LIMIT 1
+        """)
+        result = self.engine.execute(query, {"geom": geom_wkt}).fetchone()
+        return result[0] if result else None

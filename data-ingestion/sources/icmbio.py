@@ -55,6 +55,7 @@ _GRUPO = ("grupo", "GRUPO", "grupo_uc", "GRUPO_STATUS", "DS_GRUPO_STATUS")
 _ID_ORIG = ("id", "ID", "gid", "FID", "objectid", "cod_uc")
 _MUNICIPIO = ("municipio", "MUNICIPIO", "mun_nome", "nm_municipio")
 _UF_SIGLA = ("uf", "UF", "sigla_uf", "SIGLA_UF", "estado")
+_AREA_HA = ("area_ha", "AREA_HA", "area", "AREA", "area_km2", "AREA_KM2") # Não disponível nesta fonte, mas mantido para consistência
 
 
 def _pick(record: dict, candidates: tuple, default=None):
@@ -106,7 +107,6 @@ class ICMBioExtractor(WFSExtractor):
                 "Verifique conectividade com http://terrabrasilis.dpi.inpe.br"
             )
 
-        # Deduplicar por ID origem (mesma UC pode estar em múltiplos biomas)
         seen_ids = set()
         deduped = []
         skipped_none = 0
@@ -147,6 +147,10 @@ class ICMBioExtractor(WFSExtractor):
             metadata={"feature_count": len(sp_features), "biome_layers": len(BIOME_LAYERS)},
         )
 
+        self.save_data(data=data, path="output")
+
+        return data
+
     def _create_wfs_request(self):
         """Cria request WFS para camada atual."""
         from infrastructure.wfs_client import WFSRequest
@@ -154,15 +158,13 @@ class ICMBioExtractor(WFSExtractor):
             url=ICMBIO_SOURCE.url,
             layer=self.wfs_layer,
             wfs_version="1.1.0",
-            # WFS 1.1.0 do TerraBrasilis não suporta startIndex (retorna ExceptionReport);
-            # desabilitar paginação para buscar tudo em uma única requisição.
             paginate=False,
             batch_size=10000,
         )
 
 
 class ICMBioTransformer(GeometricTransformer):
-    """Transformador para dados de ICMBio."""
+    """Transformador para dados de ICMBio ajustado para calcular área e buscar município."""
 
     def __init__(self, municipio_repo: MunicipioRepository):
         super().__init__(table_name="unidade_conservacao")
@@ -193,10 +195,15 @@ class ICMBioTransformer(GeometricTransformer):
         uf = self.pick(props, _UF_SIGLA)
 
         geometry = feature.get("geometry")
+        
+        # 1. Tratamento da Geometria
         geom_wkt = None
         area_ha = None
         if geometry:
             geom = shape(geometry)
+            if not geom.is_valid:
+                geom = geom.buffer(0)
+            
             geom = self.ensure_multipolygon(geom)
             if geom:
                 # filtro pra tirar tudo q não é de sp
