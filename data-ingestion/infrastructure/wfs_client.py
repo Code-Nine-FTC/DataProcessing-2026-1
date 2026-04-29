@@ -31,6 +31,7 @@ class WFSRequest:
     bbox: Optional[str] = None
     # Se False, faz apenas UMA requisição sem startIndex (para servidores que não suportam paginação)
     paginate: bool = True
+    cql_filter: Optional[str] = None
 
 
 class WFSClient:
@@ -82,6 +83,9 @@ class WFSClient:
                 )
                 if effective_bbox:
                     params["bbox"] = effective_bbox
+
+                if request.cql_filter:
+                    params["CQL_FILTER"] = request.cql_filter
 
                 logger.info(
                     f"Fetching {request.layer} ({start}–{start + request.batch_size})..."
@@ -149,6 +153,9 @@ class WFSClient:
             GeoDataFrame com todas as features
         """
         gdf = self.fetch(request)
+
+        if gdf.empty:
+            return gdf
 
         # Deduplicação se solicitada
         if deduplicate_by and deduplicate_by in gdf.columns:

@@ -8,6 +8,7 @@ Tabela: unidade_conservacao
 Implementação do padrão ETL com separação de responsabilidades.
 """
 import logging
+from typing import Optional
 from uuid import uuid4
 from datetime import date
 
@@ -125,10 +126,25 @@ class ICMBioExtractor(WFSExtractor):
             f"UC deduplication: {len(all_features)} → {len(deduped)} "
             f"(removed {len(all_features) - len(deduped)})"
         )
-        data = ExtractedData(
+
+        # tive que fazer um filtro com o bbox de sp porque é o unico jeito de pegar os itens de sp
+        from shapely.geometry import box as shapely_box
+        sp_box = shapely_box(-53.1, -25.3, -44.2, -19.8)
+        sp_features = []
+        for f in deduped:
+            geom = f.get("geometry")
+            if geom is not None:
+                try:
+                    if geom.intersects(sp_box):
+                        sp_features.append(f)
+                except Exception:
+                    pass
+        logger.info(f"Filtro espacial SP: {len(deduped)} → {len(sp_features)} UCs")
+
+        return ExtractedData(
             source=ICMBIO_SOURCE,
-            rows=deduped,
-            metadata={"feature_count": len(deduped), "biome_layers": len(BIOME_LAYERS)},
+            rows=sp_features,
+            metadata={"feature_count": len(sp_features), "biome_layers": len(BIOME_LAYERS)},
         )
 
         self.save_data(data=data, path="output")
@@ -153,49 +169,65 @@ class ICMBioTransformer(GeometricTransformer):
     def __init__(self, municipio_repo: MunicipioRepository):
         super().__init__(table_name="unidade_conservacao")
         self.municipio_repo = municipio_repo
+        self._sp_geom = self._load_sp_geometry()
 
-    def transform_feature(self, feature: dict) -> TransformedRecord:
-        """Transforma uma feature de UC."""
-        # GeoJSON pode vir como properties ou como fields diretos
+    def _load_sp_geometry(self):
+        """Carrega a geometria do estado de SP do banco para filtro espacial."""
+        from shapely import wkt as shapely_wkt
+        try:
+            with self.municipio_repo.engine.begin() as conn:
+                row = conn.execute(
+                    text("SELECT ST_AsText(geom) FROM estado WHERE UPPER(sigla) = 'SP'")
+                ).fetchone()
+            if row and row[0]:
+                return shapely_wkt.loads(row[0])
+        except Exception as e:
+            logger.warning(f"Não foi possível carregar geometria de SP: {e}")
+        return None
+
+    def transform_feature(self, feature: dict) -> Optional[TransformedRecord]:
+        """Transforma uma feature de UC, descartando as fora de SP."""
+        from shapely.geometry import shape
+        import pyproj
+        from shapely.ops import transform as shapely_transform
+
         props = feature.get("properties", feature)
-
         uf = self.pick(props, _UF_SIGLA)
 
         geometry = feature.get("geometry")
         
         # 1. Tratamento da Geometria
         geom_wkt = None
-        area_calculada = 0.0
-        
+        area_ha = None
         if geometry:
-            from shapely.geometry import shape
-            import shapely.ops as ops
-            from functools import partial
-            import pyproj
-            
             geom = shape(geometry)
             if not geom.is_valid:
                 geom = geom.buffer(0)
             
             geom = self.ensure_multipolygon(geom)
             if geom:
-                geom_wkt = geom.wkt
-                
-                # 2. CÁLCULO DA ÁREA (Já que não vem no GeoJSON)
-                # Projeta para um sistema métrico (Web Mercator) para calcular área em m2
-                proj_transform = partial(
-                    pyproj.Transformer.from_crs('EPSG:4326', 'EPSG:3857', always_xy=True).transform
-                )
-                geom_projetada = ops.transform(proj_transform, geom)
-                area_calculada = geom_projetada.area / 10000  # Converte m² para Hectares
+                # filtro pra tirar tudo q não é de sp
+                if self._sp_geom is not None and not geom.intersects(self._sp_geom):
+                    return None
 
-        # 3. BUSCA DO MUNICÍPIO POR GEOMETRIA
+                geom_wkt = geom.wkt
+                try:
+                    transformer = pyproj.Transformer.from_crs(
+                        "EPSG:4326", "EPSG:31983", always_xy=True
+                    )
+                    geom_proj = shapely_transform(transformer.transform, geom)
+                    area_ha = round(geom_proj.area / 10_000, 4)
+                except Exception as e:
+                    logger.warning(f"Failed to calculate area_ha: {e}")
+
+        municipio_nome = self.pick(props, _MUNICIPIO)
         municipio_id = None
-        if geom_wkt:
-            try:
-                municipio_id = self.municipio_repo.find_by_geometry(geom_wkt)
-            except Exception as e:
-                logger.warning(f"Não foi possível encontrar município via espacial: {str(e)}")
+        try:
+            municipio_id = self.municipio_repo.find_by_name_and_state(
+                municipio_nome or "", uf or "", geom_wkt
+            )
+        except Exception as e:
+            logger.warning(f"Failed to find municipio: {e}")
 
         return TransformedRecord(
             id=str(uuid4()),
@@ -207,7 +239,7 @@ class ICMBioTransformer(GeometricTransformer):
                 "categoria": self.pick(props, _CATEGORIA),
                 "esfera": self.pick(props, _ESFERA),
                 "grupo_snuc": self.pick(props, _GRUPO),
-                "area_ha": area_calculada,  # Não disponível nesta fonte
+                "area_ha": area_ha,
                 "municipio_id": municipio_id,
                 "atributos_json": self.row_to_json(props),
             },
