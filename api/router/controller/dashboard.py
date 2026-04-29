@@ -2,12 +2,11 @@
 from sqlalchemy import select, func, desc, cast, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
-from decimal import Decimal # Import necessário para verificação se precisar
 
 from models.db_model import (
     Estado, Municipio, QueimadaEvento, DesmatamentoAlerta, 
     TerraIndigena, TerritorioQuilombola, UnidadeConservacao, 
-    AssentamentoRural, ImovelRural
+    ImovelRural
 )
 from api.schemas.dashboard import DashboardCompleto, EstadoKpis, RankingItem
 from api.utils.log import Log
@@ -41,7 +40,6 @@ class DashboardHandler:
             )
 
     async def _assemble_dashboard(self, estado: Estado) -> DashboardCompleto:
-        # Buscando áreas (Casting manual para float para evitar erro de Decimal)
         area_uc = await self._get_area(UnidadeConservacao, estado.id)
         area_ti = await self._get_area(TerraIndigena, estado.id)
 
@@ -62,7 +60,6 @@ class DashboardHandler:
             "terras_indigenas": await self._fetch_top_15(TerraIndigena, "ha", estado.id),
             "quilombolas": await self._fetch_top_15(TerritorioQuilombola, "ha", estado.id),
             "unidades_conservacao": await self._fetch_top_15(UnidadeConservacao, "ha", estado.id),
-            "assentamentos": await self._fetch_top_15(AssentamentoRural, "ha", estado.id),
             "imoveis_rurais": await self._fetch_top_15(ImovelRural, "ha", estado.id)
         }
 
@@ -84,7 +81,6 @@ class DashboardHandler:
     async def _fetch_top_15(self, model, unit, estado_id, is_count=False):
         val_col = func.count(model.id) if is_count else func.sum(model.area_ha)
         
-        # Subquery de total do estado para o percentual
         total_query = select(val_col).join(Municipio).where(Municipio.estado_id == estado_id)
         total_res = await self._session.execute(total_query)
         total_st = float(total_res.scalar() or 1) 
