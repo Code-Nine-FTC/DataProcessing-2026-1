@@ -6,6 +6,7 @@ from api.router.chat import router as chat_router
 from api.router.geojson import router as geojson_router
 from api.router.municipal import router as municipal_router
 from api.router.spatial_validation import router as validation_router
+from api.router.dashboard import router as dashboard_router
 
 def define_routes(app: FastAPI) -> None:
     app.include_router(analytics_router)
@@ -13,3 +14,4 @@ def define_routes(app: FastAPI) -> None:
     app.include_router(geojson_router)
     app.include_router(municipal_router)
     app.include_router(validation_router)
+    app.include_router(dashboard_router)
