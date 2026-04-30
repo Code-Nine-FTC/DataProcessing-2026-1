@@ -1,9 +1,11 @@
 """
-Testes de integração para api/services/index.py (camada de serviço)
-Cobre: Serviços RF-04 completos (buffer, distância, proximidade)
+Testes de integração para api/services/index.py e api/router/analytics.py
+Cobre: Serviços RF-04 completos (buffer, distância, proximidade) + endpoints
 """
 import pytest
+from fastapi.testclient import TestClient
 from api.services import AnalyticsService
+from api.router.analytics import router
 
 
 @pytest.mark.asyncio
@@ -180,6 +182,141 @@ async def test_get_queimadas_distancia_imoveis_endpoint(session: AsyncSession):
     assert len(result.itens) == result.total
 
     # 5. Limpa dados de teste
+    await session.execute(text("DELETE FROM queimada_evento"))
+    await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_endpoint_desmatamento_buffer_imoveis(client: TestClient):
+    """
+    Teste de integração para endpoint real GET /analytics/desmatamento/buffer-imoveis
+    """
+    # 1. Limpa dados anteriores
+    await session.execute(text("DELETE FROM desmatamento_alerta"))
+    await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
+    await session.commit()
+
+    # 2. Insere dados de teste
+    await session.execute(text("""
+        INSERT INTO imovel_rural (nome_imovel, area_ha, geom, centroid, atributos_json)
+        VALUES (
+            'Teste Endpoint Buffer',
+            100.0,
+            ST_GeomFromText('POLYGON((-46.65 -23.55, -46.55 -23.55, -46.55 -23.45, -46.65 -23.45, -46.65 -23.55))', 4326),
+            ST_GeomFromText('POINT(-46.6 -23.5)', 4326),
+            '{"tipo": "rural"}'::jsonb
+        )
+    """))
+
+    await session.execute(text("""
+        INSERT INTO desmatamento_alerta (tipo_alerta, geom, municipio_id)
+        SELECT 'desmatamento', ST_GeomFromText('POINT(-46.62 -23.52)', 4326), id
+        FROM municipio WHERE nome LIKE '%São Paulo%' LIMIT 1
+    """))
+    await session.commit()
+
+    # 3. Testa endpoint HTTP
+    response = client.get("/analytics/desmatamento/buffer-imoveis?raio_km=5.0&limite=100")
+    
+    # 4. Valida resposta HTTP
+    assert response.status_code == 200
+    data = response.json()
+    assert "data" in data
+    assert "total" in data
+    assert "itens" in data
+    
+    # 5. Limpa dados
+    await session.execute(text("DELETE FROM desmatamento_alerta"))
+    await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_endpoint_desmatamento_distancia_alertas(client: TestClient):
+    """
+    Teste de integração para endpoint real GET /analytics/desmatamento/distancia-alertas-imoveis
+    """
+    # 1. Limpa dados anteriores
+    await session.execute(text("DELETE FROM desmatamento_alerta"))
+    await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
+    await session.commit()
+
+    # 2. Insere dados de teste
+    await session.execute(text("""
+        INSERT INTO imovel_rural (nome_imovel, area_ha, geom, centroid, atributos_json)
+        VALUES (
+            'Teste Endpoint Distância',
+            80.0,
+            ST_GeomFromText('POLYGON((-46.7 -23.6, -46.6 -23.6, -46.6 -23.5, -46.7 -23.5, -46.7 -23.6))', 4326),
+            ST_GeomFromText('POINT(-46.65 -23.55)', 4326),
+            '{"tipo": "rural"}'::jsonb
+        )
+    """))
+
+    await session.execute(text("""
+        INSERT INTO desmatamento_alerta (tipo_alerta, geom, municipio_id)
+        SELECT 'desmatamento', ST_GeomFromText('POINT(-46.5 -23.4)', 4326), id
+        FROM municipio WHERE nome LIKE '%São Paulo%' LIMIT 1
+    """))
+    await session.commit()
+
+    # 3. Testa endpoint HTTP
+    response = client.get("/analytics/desmatamento/distancia-alertas-imoveis?raio_km=10.0&limite=100")
+    
+    # 4. Valida resposta HTTP
+    assert response.status_code == 200
+    data = response.json()
+    assert "data" in data
+    assert "total" in data
+    assert "itens" in data
+    
+    # 5. Limpa dados
+    await session.execute(text("DELETE FROM desmatamento_alerta"))
+    await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_endpoint_queimadas_distancia_imoveis(client: TestClient):
+    """
+    Teste de integração para endpoint real GET /analytics/queimadas/distancia-imoveis
+    """
+    # 1. Limpa dados anteriores
+    await session.execute(text("DELETE FROM queimada_evento"))
+    await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
+    await session.commit()
+
+    # 2. Insere dados de teste
+    await session.execute(text("""
+        INSERT INTO imovel_rural (nome_imovel, area_ha, geom, centroid, atributos_json)
+        VALUES (
+            'Teste Endpoint Queimada',
+            120.0,
+            ST_GeomFromText('POLYGON((-46.8 -23.7, -46.7 -23.7, -46.7 -23.6, -46.8 -23.6, -46.8 -23.7))', 4326),
+            ST_GeomFromText('POINT(-46.75 -23.65)', 4326),
+            '{"tipo": "rural"}'::jsonb
+        )
+    """))
+
+    await session.execute(text("""
+        INSERT INTO queimada_evento (tipo_foco, geom, municipio_id)
+        SELECT 'fogo', ST_GeomFromText('POINT(-46.72 -23.62)', 4326), id
+        FROM municipio WHERE nome LIKE '%São Paulo%' LIMIT 1
+    """))
+    await session.commit()
+
+    # 3. Testa endpoint HTTP
+    response = client.get("/analytics/queimadas/distancia-imoveis?raio_km=10.0&limite=100")
+    
+    # 4. Valida resposta HTTP
+    assert response.status_code == 200
+    data = response.json()
+    assert "data" in data
+    assert "total" in data
+    assert "itens" in data
+    
+    # 5. Limpa dados
     await session.execute(text("DELETE FROM queimada_evento"))
     await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
     await session.commit()
