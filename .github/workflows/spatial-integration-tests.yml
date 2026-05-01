@@ -1,11 +1,12 @@
+---
 name: Spatial Integration Tests
 
 on:
   push:
-    branches: [ main, devops ]
+    branches: [main, devops]
   pull_request:
-    branches: [ main, devops ]
-  workflow_dispatch:  # Permite disparo manual
+    branches: [main, devops]
+  workflow_dispatch: true
 
 jobs:
   test:
@@ -20,70 +21,83 @@ jobs:
           POSTGRES_DB: test_db
         ports:
           - 5432:5432
-        options: --health-cmd "pg_isready -U test" --health-interval 10s --health-timeout 5s --health-retries 30
-        steps:
-          - run: apt-get update && apt-get install -y postgresql-16-pgvector && rm -rf /var/lib/apt/lists/*
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.13'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-        pip install pytest pytest-asyncio psycopg2-binary
-        # Instala pacotes de data-ingestion se houver requirements separado
-        if [ -f data-ingestion/requirements.txt ]; then
-          pip install -r data-ingestion/requirements.txt
-        fi
-
-    - name: Wait for PostGIS to be ready
-      run: |
-        for i in {1..30}; do
-          if pg_isready -h localhost -p 5432 -U test; then
-            echo "PostGIS is ready!"
-            exit 0
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio psycopg2-binary
+          # Instala pacotes de data-ingestion se houver requirements separado
+          if [ -f data-ingestion/requirements.txt ]; then
+            pip install -r data-ingestion/requirements.txt
           fi
-          echo "Waiting for PostGIS... attempt $i"
-          sleep 5
-        done
-        echo "PostGIS did not become ready in time"
-        exit 1
 
-    - name: Run Alembic migrations
-      env:
-        POSTGRES_USER: test
-        POSTGRES_PASSWORD: test
-        POSTGRES_DB: test_db
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
-      run: |
-        # Verifica se o Alembic está instalado
-        pip install alembic
-        # Executa migrações
-        alembic upgrade head
+      - name: Wait for PostGIS to be ready
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U test; then
+              echo "PostGIS is ready!"
+              exit 0
+            fi
+            echo "Waiting for PostGIS... attempt $i"
+            sleep 5
+          done
+          echo "PostGIS did not become ready in time"
+          exit 1
 
-    - name: Run Spatial Integration Tests
-      env:
-        POSTGRES_USER: test
-        POSTGRES_PASSWORD: test
-        POSTGRES_DB: test_db
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
-      run: |
-        pytest tests/integration/spatial/ -v --tb=short -m integration
+      - name: Install pgvector
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+        run: |
+          apt-get update
+          apt-get install -y postgresql-16-pgvector
 
-    - name: Upload test results (if failed)
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results
-        path: |
-          **/*.log
-          **/pytest*.log
-        retention-days: 7
+      - name: Run Alembic migrations
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+        run: |
+          # Verifica se o Alembic está instalado
+          pip install alembic
+          # Executa migrações
+          alembic upgrade head
+
+      - name: Run Spatial Integration Tests
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+        run: |
+          pytest tests/integration/spatial/ -v --tb=short -m integration
+
+      - name: Upload test results (if failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            **/*.log
+            **/pytest*.log
+          retention-days: 7
