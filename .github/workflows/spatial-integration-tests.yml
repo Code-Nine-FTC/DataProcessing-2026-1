@@ -58,16 +58,14 @@ jobs:
           echo "PostGIS did not become ready in time"
           exit 1
 
-      - name: Install pgvector
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test_db
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
+      - name: Install pgvector inside PostGIS container
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-16-pgvector
+          # Find the running PostGIS container ID
+          CONTAINER_ID=$(docker ps -q -f ancestor=postgis/postgis:16-3.4)
+          
+          # Install pgvector inside the container as root
+          docker exec -u root $CONTAINER_ID apt-get update
+          docker exec -u root $CONTAINER_ID apt-get install -y postgresql-16-pgvector
 
       - name: Run Alembic migrations
         env:
