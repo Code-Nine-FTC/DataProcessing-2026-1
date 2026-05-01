@@ -22,7 +22,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U test"
+          --health-cmd "pg_isready -U test -d test_db"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 30
@@ -48,7 +48,7 @@ jobs:
       - name: Wait for PostGIS to be ready
         run: |
           for i in {1..30}; do
-            if pg_isready -h localhost -p 5432 -U test; then
+            if pg_isready -h localhost -p 5432 -U test -d test_db; then
               echo "PostGIS is ready!"
               exit 0
             fi
@@ -66,8 +66,8 @@ jobs:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
         run: |
-          apt-get update
-          apt-get install -y postgresql-16-pgvector
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16-pgvector
 
       - name: Run Alembic migrations
         env:
