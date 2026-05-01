@@ -34,6 +34,7 @@ INTENCOES = [
     "buscar_camadas_estaduais",
     "buscar_imoveis_em_camadas",
     "buscar_passivos_imovel",
+    "buscar_focos_queimada_imovel",
     "buscar_documentos",
     "fora_escopo",
 ]

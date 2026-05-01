@@ -273,6 +273,88 @@ async def buscar_passivos_em_imovel(
         "sql_executado": None,
     }
 
+
+# ---------------------------------------------------------------------------
+# Ferramenta: focos de queimada em um imóvel por período
+# ---------------------------------------------------------------------------
+
+async def buscar_focos_queimada_imovel(
+    session: AsyncSession,
+    codigo_car: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    limite: int = 500,
+) -> dict:
+    if not codigo_car:
+        return {
+            "total": 0,
+            "descricao": "É necessário informar o código CAR do imóvel.",
+            "features": [],
+            "bbox": None,
+            "fontes": [],
+            "sql_executado": None,
+        }
+
+    stmt = (
+        select(
+            QueimadaEvento.id,
+            QueimadaEvento.data_ocorrencia,
+            QueimadaEvento.intensidade,
+            _geom_as_geojson(QueimadaEvento.geom).label("geom_json"),
+            ImovelRural.id.label("imovel_id"),
+            ImovelRural.codigo_car,
+            FonteDado.nome.label("fonte_nome"),
+            FonteDado.orgao_responsavel,
+            FonteDado.url_origem,
+        )
+        .join(RelImovelQueimada, RelImovelQueimada.queimada_evento_id == QueimadaEvento.id)
+        .join(ImovelRural, ImovelRural.id == RelImovelQueimada.imovel_rural_id)
+        .join(Dataset, QueimadaEvento.dataset_id == Dataset.id, isouter=True)
+        .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
+        .where(ImovelRural.codigo_car == codigo_car)
+    )
+
+    if data_inicio:
+        stmt = stmt.where(QueimadaEvento.data_ocorrencia >= datetime.fromisoformat(data_inicio))
+    if data_fim:
+        stmt = stmt.where(QueimadaEvento.data_ocorrencia <= datetime.fromisoformat(data_fim))
+
+    stmt = stmt.order_by(QueimadaEvento.data_ocorrencia.desc()).limit(limite)
+    sql_executado = _stmt_sql(stmt)
+
+    rows = (await session.execute(stmt)).all()
+
+    features: list[dict] = []
+    fontes: dict[str, dict] = {}
+    for row in rows:
+        if not row.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geom_json),
+            "properties": {
+                "tipo": "queimada",
+                "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
+                "intensidade": float(row.intensidade) if row.intensidade else None,
+                "codigo_car": row.codigo_car,
+            },
+        })
+        if row.fonte_nome:
+            fontes[row.fonte_nome] = {
+                "nome": row.fonte_nome,
+                "orgao": row.orgao_responsavel,
+                "url": row.url_origem,
+            }
+
+    return {
+        "total": len(features),
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": list(fontes.values()),
+        "descricao": f"Encontrados {len(features)} focos de queimada no imóvel {codigo_car}.",
+        "sql_executado": sql_executado,
+    }
+
 # ---------------------------------------------------------------------------
 # Helper interno
 # ---------------------------------------------------------------------------
@@ -1576,4 +1658,5 @@ TOOL_FUNCTIONS = {
     "buscar_camadas_estaduais": buscar_camadas_estaduais,
     "buscar_imoveis_com_camadas_estaduais": buscar_imoveis_com_camadas_estaduais,
     "buscar_passivos_em_imovel": buscar_passivos_em_imovel,
+    "buscar_focos_queimada_imovel": buscar_focos_queimada_imovel,
 }

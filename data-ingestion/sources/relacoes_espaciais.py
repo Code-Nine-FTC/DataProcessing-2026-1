@@ -173,16 +173,94 @@ class SpatialRelationshipPostProcessor:
     def calculate_imovel_uc(self) -> int:
         """Calcula: Imóvel ↔ Unidade de Conservação."""
         try:
-            return self._calculate_relation(
-                "rel_imovel_uc",
-                "imovel_rural",
-                "id",
-                "unidade_conservacao",
-                "id",
-            )
+            return self.calculate_imovel_uc_batched(batch_size=2000)
         except Exception as e:
             logger.warning(f"Failed to calculate imovel_uc relationships: {str(e)}")
             return 0
+
+    def calculate_imovel_uc_batched(
+        self,
+        batch_size: int = 2000,
+        max_batches: int | None = None,
+        statement_timeout: str = "5min",
+    ) -> int:
+        """Calcula: Imóvel ↔ Unidade de Conservação em lotes para evitar timeout."""
+        logger.info(
+            "Computing imovel_rural ↔ unidade_conservacao relationships (batched, size=%s)...",
+            batch_size,
+        )
+
+        last_id = "00000000-0000-0000-0000-000000000000"
+        batches = 0
+
+        with self.engine.begin() as conn:
+            conn.execute(text("DELETE FROM rel_imovel_uc WHERE TRUE"))
+            conn.execute(text(f"SET LOCAL statement_timeout = '{statement_timeout}'"))
+
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_imovel_rural_geom_gist "
+                "ON imovel_rural USING GIST (geom)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_unidade_conservacao_geom_gist "
+                "ON unidade_conservacao USING GIST (geom)"
+            ))
+
+            while True:
+                if max_batches is not None and batches >= max_batches:
+                    break
+
+                batch_ids = conn.execute(text("""
+                    SELECT id
+                    FROM imovel_rural
+                    WHERE id > :last_id
+                    ORDER BY id
+                    LIMIT :limit
+                """), {"last_id": last_id, "limit": batch_size}).fetchall()
+
+                if not batch_ids:
+                    break
+
+                last_id = batch_ids[-1][0]
+
+                query = text("""
+                    WITH batch AS (
+                        SELECT id, geom, area_ha
+                        FROM imovel_rural
+                        WHERE id > :last_id
+                        ORDER BY id
+                        LIMIT :limit
+                    )
+                    INSERT INTO rel_imovel_uc
+                        (id, imovel_rural_id, unidade_conservacao_id,
+                         area_intersecao_ha, percentual_sobreposicao)
+                    SELECT
+                        gen_random_uuid(),
+                        source.id,
+                        target.id,
+                        ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0
+                            as area_intersecao_ha,
+                        CASE
+                            WHEN source.area_ha > 0 THEN
+                                (ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0)
+                                / source.area_ha * 100
+                            ELSE 0
+                        END as percentual_sobreposicao
+                    FROM batch source
+                    JOIN unidade_conservacao target
+                      ON source.geom && target.geom
+                     AND ST_Intersects(ST_MakeValid(source.geom), ST_MakeValid(target.geom))
+                """)
+
+                conn.execute(query, {"last_id": last_id, "limit": batch_size})
+                batches += 1
+                logger.info("  → batch %s processed (last_id=%s)", batches, last_id)
+
+            result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_uc"))
+            count = result.scalar()
+
+        logger.info("  → %s relationships created (batched)", count)
+        return count
 
     def calculate_imovel_ti(self) -> int:
         """Calcula: Imóvel ↔ Terra Indígena."""

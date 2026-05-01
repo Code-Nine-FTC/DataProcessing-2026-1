@@ -32,6 +32,7 @@ _INTENT_MAP: dict[str, str] = {
     "buscar_camadas_estaduais": "buscar_camadas_estaduais",
     "buscar_imoveis_em_camadas": "buscar_imoveis_com_camadas_estaduais",
     "buscar_passivos_imovel": "buscar_passivos_em_imovel",
+    "buscar_focos_queimada_imovel": "buscar_focos_queimada_imovel",
 }
 
 
@@ -85,6 +86,14 @@ def _build_args(intencao: str, ent: Entidades) -> dict[str, Any]:
         # Se o extrator capturou um código CAR, envia-o como argumento
         if hasattr(ent, "codigo_car") and ent.codigo_car:
             base["codigo_car"] = ent.codigo_car
+
+    elif intencao == "buscar_focos_queimada_imovel":
+        if ent.codigo_car:
+            base["codigo_car"] = ent.codigo_car
+        if ent.data_inicio:
+            base["data_inicio"] = ent.data_inicio
+        if ent.data_fim:
+            base["data_fim"] = ent.data_fim
 
     return base
 

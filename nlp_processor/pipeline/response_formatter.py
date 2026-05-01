@@ -165,6 +165,22 @@ def formatar_resposta(
             feedback_contexto,
         )
 
+    if intencao == "buscar_focos_queimada_imovel":
+        periodo = ""
+        if entidades.data_inicio and entidades.data_fim:
+            periodo = f" no período entre {entidades.data_inicio} e {entidades.data_fim}"
+        elif entidades.data_inicio:
+            periodo = f" a partir de {entidades.data_inicio}"
+
+        codigo = entidades.codigo_car or "(codigo nao informado)"
+        texto = (
+            f"Na propriedade rural **{codigo}**, foram identificados "
+            f"**{total_features} focos de queimada**{periodo}."
+        )
+        if fontes_str:
+            texto = f"{texto}\n\n{fontes_str}"
+        return _aplicar_feedback_contexto(texto, feedback_contexto)
+
     # Sem dados
     if intencao != "fora_escopo" and intencao != "buscar_documentos" and total_features == 0:
         nomes = ", ".join(f["nome"] for f in fontes) if fontes else "fontes do sistema"
