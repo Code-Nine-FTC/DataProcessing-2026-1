@@ -60,12 +60,47 @@ jobs:
 
       - name: Install pgvector inside PostGIS container
         run: |
-          # Find the running PostGIS container ID
-          CONTAINER_ID=$(docker ps -q -f ancestor=postgis/postgis:16-3.4)
+          # Find the running PostGIS container ID (more robust search)
+          CONTAINER_ID=$(docker ps -a -q -f "ancestor=postgis/postgis:16-3.4" -f "status=running")
           
-          # Install pgvector inside the container as root
+          if [ -z "$CONTAINER_ID" ]; then
+            echo "No running PostGIS container found. Looking for any PostGIS container..."
+            CONTAINER_ID=$(docker ps -a -q -f "ancestor=postgis/postgis:16-3.4")
+            if [ -z "$CONTAINER_ID" ]; then
+              echo "ERROR: No PostGIS container found at all"
+              exit 1
+            fi
+            echo "Found container but not running. Starting it..."
+            docker start $CONTAINER_ID
+            sleep 10
+          fi
+          
+          echo "Found PostGIS container: $CONTAINER_ID"
+          
+          # Install PostgreSQL client tools and pgvector inside the container as root
           docker exec -u root $CONTAINER_ID apt-get update
-          docker exec -u root $CONTAINER_ID apt-get install -y postgresql-16-pgvector
+          docker exec -u root $CONTAINER_ID apt-get install -y \
+            postgresql-client \
+            postgresql-16-pgvector
+          
+          # Restart the container to ensure newly updated Postgres binaries are loaded
+          docker restart $CONTAINER_ID
+
+      - name: Wait for PostGIS to be ready after restart
+        run: |
+          # Wait a bit more for the container to restart completely
+          sleep 10
+
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U test -d test_db; then
+              echo "PostGIS is ready!"
+              exit 0
+            fi
+            echo "Waiting for PostGIS... attempt $i"
+            sleep 5
+          done
+          echo "PostGIS did not become ready in time"
+          exit 1
 
       - name: Run Alembic migrations
         env:
