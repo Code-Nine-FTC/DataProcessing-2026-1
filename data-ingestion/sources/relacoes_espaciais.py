@@ -131,20 +131,36 @@ class SpatialRelationshipPostProcessor:
                 dist_deg = 5000.0 / 111320.0
 
                 query = text("""
+                    WITH pares AS (
+                        SELECT
+                            ir.id AS imovel_rural_id,
+                            qe.id AS queimada_evento_id,
+                            ST_Distance(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom)) * 111320.0 AS distancia_m,
+                            ST_Contains(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom)) AS dentro_imovel
+                        FROM queimada_evento qe
+                        JOIN imovel_rural ir
+                          ON ir.geom && ST_Expand(qe.geom, :dist_deg)
+                         AND ST_DWithin(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom), :dist_deg)
+                    )
                     INSERT INTO rel_imovel_queimada
                         (id, imovel_rural_id, queimada_evento_id, distancia_m,
-                         dentro_imovel, data_calculo)
+                         dentro_imovel, nivel_risco_ambiental, data_calculo)
                     SELECT
                         gen_random_uuid(),
-                        ir.id,
-                        qe.id,
-                        ST_Distance(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom)) * 111320.0 as distancia_m,
-                        ST_Contains(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom)) as dentro_imovel,
+                        p.imovel_rural_id,
+                        p.queimada_evento_id,
+                        p.distancia_m,
+                        p.dentro_imovel,
+                        CASE
+                            WHEN p.dentro_imovel THEN 'muito alto'
+                            WHEN p.distancia_m <= 500 THEN 'muito alto'
+                            WHEN p.distancia_m <= 1500 THEN 'alto'
+                            WHEN p.distancia_m <= 3000 THEN 'médio'
+                            WHEN p.distancia_m <= 5000 THEN 'baixo'
+                            ELSE 'muito baixo'
+                        END AS nivel_risco_ambiental,
                         :agora
-                                        FROM queimada_evento qe
-                                        JOIN imovel_rural ir
-                                            ON ir.geom && ST_Expand(qe.geom, :dist_deg)
-                                         AND ST_DWithin(ST_MakeValid(ir.geom), ST_MakeValid(qe.geom), :dist_deg)
+                    FROM pares p
                 """)
 
                 conn.execute(query, {"agora": datetime.now(), "dist_deg": dist_deg})
