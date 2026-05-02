@@ -1,11 +1,27 @@
+
 import pytest
 import os
 import sys
+import importlib
 from typing import AsyncGenerator, Generator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 from dotenv import load_dotenv
+
+# Alias para permitir import data_ingestion mesmo com pasta data-ingestion
+try:
+    sys.modules['data_ingestion'] = importlib.import_module('data-ingestion')
+except ModuleNotFoundError:
+    pass
+
+from fastapi.testclient import TestClient
+from api.main import app
+
+@pytest.fixture(scope="session")
+def client() -> Generator[TestClient, None, None]:
+    with TestClient(app) as c:
+        yield c
 
 # Carrega variáveis de ambiente
 load_dotenv('.env.test')
@@ -28,7 +44,7 @@ TestingSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """Fixture para banco de teste"""
     async with TestingSessionLocal() as session:

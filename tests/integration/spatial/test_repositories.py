@@ -5,11 +5,27 @@ Cobre: ST_Within, ST_Intersects em repositórios
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import create_engine
+from sqlalchemy.engine.url import URL
 
 from data_ingestion.infrastructure.repositories import MunicipioRepository
 
 
+def _get_sync_engine(session):
+    """Cria uma engine síncrona (psycopg2) usando as variáveis de ambiente do workflow."""
+    import os
+    user = os.environ.get("POSTGRES_USER", "test")
+    password = os.environ.get("POSTGRES_PASSWORD", "test")
+    host = os.environ.get("POSTGRES_HOST", "localhost")  # Usa POSTGRES_HOST do workflow
+    port = os.environ.get("POSTGRES_PORT", "5432")
+    db = os.environ.get("POSTGRES_DB", "test_db")
+
+    sync_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+    return create_engine(sync_url)
+
+
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_find_municipio_by_geom_st_within(session: AsyncSession):
     """
     Teste para ST_Within em MunicipioRepository.find_by_name_and_state
@@ -21,10 +37,10 @@ async def test_find_municipio_by_geom_st_within(session: AsyncSession):
 
     # 2. Insere município de teste com geometria conhecida
     await session.execute(text("""
-        INSERT INTO municipio (nome, sigla_estado, geom)
+        INSERT INTO municipio (nome, estado_id, geom)
         SELECT
             'Teste Municipio ST_Within',
-            'SP',
+            (SELECT id FROM estado WHERE sigla = 'SP'),
             ST_GeomFromText('POLYGON((-46.7 -23.6, -46.6 -23.6, -46.6 -23.5, -46.7 -23.5, -46.7 -23.6))', 4326)
         WHERE NOT EXISTS (SELECT 1 FROM municipio WHERE nome = 'Teste Municipio ST_Within')
         RETURNING id
@@ -32,17 +48,18 @@ async def test_find_municipio_by_geom_st_within(session: AsyncSession):
     await session.commit()
 
     # 3. Obtém o repositório
-    repo = MunicipioRepository(session.bind)
+    sync_engine = _get_sync_engine(session)
+    repo = MunicipioRepository(sync_engine)
 
     # 4. Testa busca por nome (deve funcionar)
     municipio_id = repo.find_by_name_and_state("Teste Municipio ST_Within", "SP")
     assert municipio_id is not None, "Deveria encontrar município por nome"
 
     # 5. Testa busca por geometria (ST_Within)
-    # Ponto dentro do polígono do município de teste
+    # Ponto dentro do polígono do município de teste (centroide)
     geom_wkt = "POINT(-46.65 -23.55)"
     municipio_id_by_geom = repo.find_by_name_and_state(
-        "Qualquer Nome", "SP", geom_wkt=geom_wkt
+        "Teste Municipio ST_Within", "SP", geom_wkt=geom_wkt
     )
 
     # Deve retornar o município pois o ponto está dentro (ST_Within)
@@ -62,6 +79,7 @@ async def test_find_municipio_by_geom_st_within(session: AsyncSession):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_municipio_repository_st_intersects(session: AsyncSession):
     """
     Teste para ST_Intersects indireto via repositórios
@@ -72,10 +90,10 @@ async def test_municipio_repository_st_intersects(session: AsyncSession):
 
     # 2. Insere município de teste
     result = await session.execute(text("""
-        INSERT INTO municipio (nome, sigla_estado, geom)
+        INSERT INTO municipio (nome, estado_id, geom)
         SELECT
             'Teste Municipio Intersects',
-            'SP',
+            (SELECT id FROM estado WHERE sigla = 'SP'),
             ST_GeomFromText('POLYGON((-46.7 -23.6, -46.6 -23.6, -46.6 -23.5, -46.7 -23.5, -46.7 -23.6))', 4326)
         WHERE NOT EXISTS (SELECT 1 FROM municipio WHERE nome = 'Teste Municipio Intersects')
         RETURNING id
@@ -84,7 +102,8 @@ async def test_municipio_repository_st_intersects(session: AsyncSession):
     municipio_id = result.fetchone()[0]
 
     # 3. Verifica se o repositório consegue achar o município
-    repo = MunicipioRepository(session.bind)
+    sync_engine = _get_sync_engine(session)
+    repo = MunicipioRepository(sync_engine)
     found_id = repo.find_by_name_and_state("Teste Municipio Intersects", "SP")
 
     assert found_id is not None
@@ -96,6 +115,7 @@ async def test_municipio_repository_st_intersects(session: AsyncSession):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_find_by_geometry_st_intersects(session: AsyncSession):
     """
     Teste para a NOVA função find_by_geometry (adicionada no commit 5602ee8)
@@ -107,10 +127,10 @@ async def test_find_by_geometry_st_intersects(session: AsyncSession):
 
     # 2. Insere município de teste com geometria conhecida
     await session.execute(text("""
-        INSERT INTO municipio (nome, sigla_estado, geom)
+        INSERT INTO municipio (nome, estado_id, geom)
         SELECT
             'Teste Municipio FindByGeom',
-            'SP',
+            (SELECT id FROM estado WHERE sigla = 'SP'),
             ST_GeomFromText('POLYGON((-46.7 -23.6, -46.6 -23.6, -46.6 -23.5, -46.7 -23.5, -46.7 -23.6))', 4326)
         WHERE NOT EXISTS (SELECT 1 FROM municipio WHERE nome = 'Teste Municipio FindByGeom')
         RETURNING id
@@ -118,7 +138,8 @@ async def test_find_by_geometry_st_intersects(session: AsyncSession):
     await session.commit()
 
     # 3. Obtém o repositório
-    repo = MunicipioRepository(session.bind)
+    sync_engine = _get_sync_engine(session)
+    repo = MunicipioRepository(sync_engine)
 
     # 4. Testa a nova função com geometria que INTERSECTA (deve encontrar)
     geom_intersecta = "POLYGON((-46.75 -23.65, -46.55 -23.65, -46.55 -23.45, -46.75 -23.45, -46.75 -23.65))"
@@ -133,10 +154,10 @@ async def test_find_by_geometry_st_intersects(session: AsyncSession):
     # 6. Verifica se retorna o maior intersectante (ordenado por área de interseção)
     # Insere outro município que intersecta mais área
     await session.execute(text("""
-        INSERT INTO municipio (nome, sigla_estado, geom)
+        INSERT INTO municipio (nome, estado_id, geom)
         SELECT
             'Teste Municipio FindByGeom 2',
-            'SP',
+            (SELECT id FROM estado WHERE sigla = 'SP'),
             ST_GeomFromText('POLYGON((-46.72 -23.62, -46.58 -23.62, -46.58 -23.48, -46.72 -23.48, -46.72 -23.62))', 4326)
         WHERE NOT EXISTS (SELECT 1 FROM municipio WHERE nome = 'Teste Municipio FindByGeom 2')
         RETURNING id

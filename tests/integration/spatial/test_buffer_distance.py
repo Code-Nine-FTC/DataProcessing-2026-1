@@ -11,6 +11,7 @@ from api.services.index import AnalyticsService
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_desmatamento_buffer_imoveis(session: AsyncSession):
     """
     Teste para ST_Buffer em desmatamento_buffer_imoveis
@@ -40,7 +41,7 @@ async def test_desmatamento_buffer_imoveis(session: AsyncSession):
             (tipo_alerta, geom, municipio_id)
         SELECT
             'desmatamento',
-            ST_GeomFromText('POINT(-46.62 -23.52)', 4326),
+            ST_Multi(ST_Buffer(ST_GeomFromText('POINT(-46.62 -23.52)', 4326), 0.001)),
             id
         FROM municipio
         WHERE nome LIKE '%São Paulo%'
@@ -77,6 +78,7 @@ async def test_desmatamento_buffer_imoveis(session: AsyncSession):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_desmatamento_distancia_alertas(session: AsyncSession):
     """
     Teste para ST_Distance e ST_DWithin em desmatamento_distancia_alertas
@@ -95,7 +97,7 @@ async def test_desmatamento_distancia_alertas(session: AsyncSession):
             'Teste Imóvel SP 2',
             80.0,
             ST_GeomFromText('POLYGON((-46.7 -23.6, -46.6 -23.6, -46.6 -23.5, -46.7 -23.5, -46.7 -23.6))', 4326),
-            ST_GeomFromText('POINT(-46.65 -23.55)', 4326),
+            ST_GeomFromText('POINT(-46.59 -23.49)', 4326),
             '{"tipo": "rural"}'::jsonb
         )
     """))
@@ -106,7 +108,7 @@ async def test_desmatamento_distancia_alertas(session: AsyncSession):
             (tipo_alerta, geom, municipio_id)
         SELECT
             'desmatamento',
-            ST_GeomFromText('POINT(-46.5 -23.4)', 4326),
+            ST_Multi(ST_Buffer(ST_GeomFromText('POINT(-46.59 -23.49)', 4326), 0.001)),
             id
         FROM municipio
         WHERE nome LIKE '%São Paulo%'
@@ -137,6 +139,7 @@ async def test_desmatamento_distancia_alertas(session: AsyncSession):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_queimadas_distancia_imoveis(session: AsyncSession):
     """
     Teste para ST_Distance em queimadas_distancia_imoveis
@@ -154,7 +157,7 @@ async def test_queimadas_distancia_imoveis(session: AsyncSession):
             'Teste Imóvel Queimada',
             120.0,
             ST_GeomFromText('POLYGON((-46.8 -23.7, -46.7 -23.7, -46.7 -23.6, -46.8 -23.6, -46.8 -23.7))', 4326),
-            ST_GeomFromText('POINT(-46.75 -23.65)', 4326),
+            ST_GeomFromText('POINT(-46.69 -23.59)', 4326),
             '{"tipo": "rural"}'::jsonb
         )
     """))
@@ -162,10 +165,10 @@ async def test_queimadas_distancia_imoveis(session: AsyncSession):
     # 3. Insere foco de queimada próximo
     await session.execute(text("""
         INSERT INTO queimada_evento
-            (tipo_foco, geom, municipio_id)
+            (fonte_sensor, geom, municipio_id)
         SELECT
             'fogo',
-            ST_GeomFromText('POINT(-46.72 -23.62)', 4326),
+            ST_GeomFromText('POINT(-46.69 -23.59)', 4326),
             id
         FROM municipio
         WHERE nome LIKE '%São Paulo%'
@@ -179,11 +182,20 @@ async def test_queimadas_distancia_imoveis(session: AsyncSession):
 
     # 5. Validações
     assert result is not None
-    # Pode ou não encontrar (depende de dados existentes), mas não deve falhar
-    if result.total > 0:
-        for item in result.itens:
-            assert item.distancia_m < 10000, "Distância deveria ser < 10km"
-            assert item.distancia_m > 0
+    assert result.total >= 0
+    assert len(result.itens) == result.total
+
+    # Verifica se encontrou o imóvel de teste
+    nomes_imoveis = [item.nome_imovel for item in result.itens]
+    assert "Teste Imóvel Queimada" in nomes_imoveis, "Imóvel de teste deveria estar nos resultados"
+
+    # Valida distâncias e estrutura
+    for item in result.itens:
+        assert item.distancia_m < 10000, "Distância deveria ser < 10km"
+        assert item.distancia_m > 0
+        assert item.imovel_id is not None
+        assert item.queimada_id is not None
+        assert item.nome_imovel is not None
 
     # 6. Limpa dados de teste
     await session.execute(text("DELETE FROM queimada_evento"))
