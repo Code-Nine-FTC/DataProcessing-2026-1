@@ -36,6 +36,11 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Install PostgreSQL client (pg_isready)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
@@ -115,6 +120,14 @@ jobs:
           # Executa migrações
           alembic upgrade head
 
+
+      - name: Set PYTHONPATH
+        run: |
+          echo "PYTHONPATH antes: $PYTHONPATH"
+          export PYTHONPATH=$(pwd):$(pwd)/api:$(pwd)/data-ingestion:$(pwd)/nlp_processor
+          echo "PYTHONPATH depois: $PYTHONPATH"
+          echo "PYTHONPATH=$PYTHONPATH" >> $GITHUB_ENV
+
       - name: Run Spatial Integration Tests
         env:
           POSTGRES_USER: test
@@ -122,6 +135,7 @@ jobs:
           POSTGRES_DB: test_db
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
+          PYTHONPATH: ${{ env.PYTHONPATH }}
         run: |
           pytest tests/integration/spatial/ -v --tb=short -m integration
 

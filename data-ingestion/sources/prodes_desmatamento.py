@@ -53,20 +53,28 @@ def _link_desmatamento_to_municipios(engine, dataset_id: str | None = None) -> N
     params: dict = {}
     if dataset_id:
         ds_clause = " AND da.dataset_id = CAST(:ds AS uuid)"
-        params["ds"] = dataset_id
+        params["ds"] = str(dataset_id)
 
     with engine.begin() as conn:
         result = conn.execute(
             text(
                 f"""
-                WITH matched AS (
-                  SELECT DISTINCT ON (da.id) da.id AS da_id, m.id AS mun_id
+                WITH ranked AS (
+                  SELECT
+                    da.id AS da_id,
+                    m.id AS mun_id,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY da.id
+                      ORDER BY ST_Area(ST_Intersection(m.geom, da.geom)) DESC, m.nome ASC
+                    ) AS rn
                   FROM desmatamento_alerta da
                   INNER JOIN municipio m ON ST_Intersects(m.geom, da.geom)
                   INNER JOIN estado e ON e.id = m.estado_id AND UPPER(e.sigla) = 'SP'
                   WHERE da.municipio_id IS NULL
                   {ds_clause}
-                  ORDER BY da.id, ST_Area(ST_Intersection(m.geom, da.geom)) DESC
+                ),
+                matched AS (
+                  SELECT da_id, mun_id FROM ranked WHERE rn = 1
                 )
                 UPDATE desmatamento_alerta da
                 SET municipio_id = matched.mun_id
@@ -76,6 +84,7 @@ def _link_desmatamento_to_municipios(engine, dataset_id: str | None = None) -> N
             ),
             params,
         )
+
     logger.info(
         "desmatamento_alerta: municipio_id atualizados via spatial join — %s registros",
         getattr(result, "rowcount", -1),

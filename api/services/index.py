@@ -461,7 +461,7 @@ class AnalyticsService:
                     i.nome_imovel,
                     ROUND(
                         (ST_Area(
-                            ST_Buffer(d.geom::geography, :raio_m)::geometry
+                            ST_Buffer(d.geom::geography, :raio_m)
                         ) / 10000.0)::numeric, 2
                     )::float            AS area_buffer_ha,
                     ST_AsGeoJSON(
