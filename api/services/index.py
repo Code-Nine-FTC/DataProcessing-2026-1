@@ -7,6 +7,7 @@ from api.schemas.index import (
     GrupoItem,
     ProximidadeItem,
     ProximidadeQueimadaItem,
+    RespostaSobreposicoesAreas,
     QueimadaDentroForaItem,
     RespostaAgrupada,
     RespostaBuffer,
@@ -17,6 +18,8 @@ from api.schemas.index import (
     RespostaTemporalQueimada,
     RespostaUltimoIncendio,
     ResumoSobreposicoes,
+    SobreposicaoAreaItem,
+    TipoAreaSobreposicao,
     SerieTemporalAreaItem,
     SerieTemporalItem,
     UltimoIncendioItem,
@@ -556,3 +559,120 @@ class AnalyticsService:
             imoveis_com_sobreposicao_assentamento=row.qtd_assentamento,
             total_imoveis=row.total_imoveis,
         )
+
+    async def sobreposicoes_areas(
+        self,
+        tipo_area: TipoAreaSobreposicao = TipoAreaSobreposicao.todos,
+        limite: int = 100,
+    ) -> RespostaSobreposicoesAreas:
+        consultas = {
+            TipoAreaSobreposicao.uc.value: """
+                SELECT
+                    'uc'::text AS tipo_area,
+                    i.id::text AS imovel_id,
+                    i.codigo_car,
+                    i.nome_imovel,
+                    COALESCE(m.nome, 'Não informado') AS municipio,
+                    COALESCE(e.sigla, 'N/D') AS estado,
+                    u.id::text AS area_id,
+                    u.nome AS area_nome,
+                    i.area_ha AS area_imovel_ha,
+                    ru.area_intersecao_ha,
+                    ru.percentual_sobreposicao,
+                    ru.tipo_relacao
+                FROM rel_imovel_uc ru
+                JOIN imovel_rural i ON i.id = ru.imovel_rural_id
+                JOIN unidade_conservacao u ON u.id = ru.unidade_conservacao_id
+                LEFT JOIN municipio m ON m.id = i.municipio_id
+                LEFT JOIN estado e ON e.id = m.estado_id
+            """,
+            TipoAreaSobreposicao.ti.value: """
+                SELECT
+                    'ti'::text AS tipo_area,
+                    i.id::text AS imovel_id,
+                    i.codigo_car,
+                    i.nome_imovel,
+                    COALESCE(m.nome, 'Não informado') AS municipio,
+                    COALESCE(e.sigla, 'N/D') AS estado,
+                    t.id::text AS area_id,
+                    t.nome AS area_nome,
+                    i.area_ha AS area_imovel_ha,
+                    rt.area_intersecao_ha,
+                    rt.percentual_sobreposicao,
+                    rt.tipo_relacao
+                FROM rel_imovel_ti rt
+                JOIN imovel_rural i ON i.id = rt.imovel_rural_id
+                JOIN terra_indigena t ON t.id = rt.terra_indigena_id
+                LEFT JOIN municipio m ON m.id = i.municipio_id
+                LEFT JOIN estado e ON e.id = m.estado_id
+            """,
+            TipoAreaSobreposicao.quilombo.value: """
+                SELECT
+                    'quilombo'::text AS tipo_area,
+                    i.id::text AS imovel_id,
+                    i.codigo_car,
+                    i.nome_imovel,
+                    COALESCE(m.nome, 'Não informado') AS municipio,
+                    COALESCE(e.sigla, 'N/D') AS estado,
+                    q.id::text AS area_id,
+                    q.nome AS area_nome,
+                    i.area_ha AS area_imovel_ha,
+                    rq.area_intersecao_ha,
+                    rq.percentual_sobreposicao,
+                    rq.tipo_relacao
+                FROM rel_imovel_quilombo rq
+                JOIN imovel_rural i ON i.id = rq.imovel_rural_id
+                JOIN territorio_quilombola q ON q.id = rq.territorio_quilombola_id
+                LEFT JOIN municipio m ON m.id = i.municipio_id
+                LEFT JOIN estado e ON e.id = m.estado_id
+            """,
+            TipoAreaSobreposicao.assentamento.value: """
+                SELECT
+                    'assentamento'::text AS tipo_area,
+                    i.id::text AS imovel_id,
+                    i.codigo_car,
+                    i.nome_imovel,
+                    COALESCE(m.nome, 'Não informado') AS municipio,
+                    COALESCE(e.sigla, 'N/D') AS estado,
+                    a.id::text AS area_id,
+                    a.nome AS area_nome,
+                    i.area_ha AS area_imovel_ha,
+                    ra.area_intersecao_ha,
+                    ra.percentual_sobreposicao,
+                    ra.tipo_relacao
+                FROM rel_imovel_assentamento ra
+                JOIN imovel_rural i ON i.id = ra.imovel_rural_id
+                JOIN assentamento_rural a ON a.id = ra.assentamento_rural_id
+                LEFT JOIN municipio m ON m.id = i.municipio_id
+                LEFT JOIN estado e ON e.id = m.estado_id
+            """,
+        }
+
+        if tipo_area == TipoAreaSobreposicao.todos:
+            sql = "SELECT * FROM (" + " UNION ALL ".join(consultas.values()) + ") AS sobreposicoes "
+            sql += "ORDER BY COALESCE(percentual_sobreposicao, 0) DESC, COALESCE(area_intersecao_ha, 0) DESC, tipo_area ASC "
+            sql += "LIMIT :limite"
+        else:
+            sql = consultas[tipo_area.value] + " "
+            sql += "ORDER BY COALESCE(percentual_sobreposicao, 0) DESC, COALESCE(area_intersecao_ha, 0) DESC "
+            sql += "LIMIT :limite"
+
+        result = await self._session.execute(text(sql), {"limite": limite})
+        itens = [
+            SobreposicaoAreaItem(
+                tipo_area=row.tipo_area,
+                imovel_id=row.imovel_id,
+                codigo_car=row.codigo_car,
+                nome_imovel=row.nome_imovel,
+                municipio=row.municipio,
+                estado=row.estado,
+                area_id=row.area_id,
+                area_nome=row.area_nome,
+                area_imovel_ha=float(row.area_imovel_ha) if row.area_imovel_ha is not None else None,
+                area_intersecao_ha=float(row.area_intersecao_ha) if row.area_intersecao_ha is not None else None,
+                percentual_sobreposicao=float(row.percentual_sobreposicao) if row.percentual_sobreposicao is not None else None,
+                tipo_relacao=row.tipo_relacao,
+            )
+            for row in result
+        ]
+        return RespostaSobreposicoesAreas(tipo_area=tipo_area.value, itens=itens, total=len(itens))
