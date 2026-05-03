@@ -140,6 +140,12 @@ def _aplicar_feedback_contexto(
     return texto
 
 
+def _anexar_descricao(texto: str, descricao_consulta: str | None) -> str:
+    if not descricao_consulta:
+        return texto
+    return f"{texto}\n\n{descricao_consulta}"
+
+
 # ---------------------------------------------------------------------------
 # Função principal
 # ---------------------------------------------------------------------------
@@ -151,6 +157,7 @@ def formatar_resposta(
     fontes: list[dict],
     contexto_documental: str,
     confianca: float,
+    descricao_consulta: str | None = None,
     feedback_contexto: dict[str, Any] | None = None,
 ) -> str:
     """
@@ -158,6 +165,29 @@ def formatar_resposta(
     """
     fontes_str = _formatar_fontes(fontes)
     escopo = _formatar_escopo(entidades)
+
+    if intencao == "buscar_assentamentos":
+        return _aplicar_feedback_contexto(
+            "A consulta de assentamentos rurais está desativada no momento, pois a fonte não está disponível.",
+            feedback_contexto,
+        )
+
+    if intencao == "buscar_focos_queimada_imovel":
+        periodo = ""
+        if entidades.data_inicio and entidades.data_fim:
+            periodo = f" no período entre {entidades.data_inicio} e {entidades.data_fim}"
+        elif entidades.data_inicio:
+            periodo = f" a partir de {entidades.data_inicio}"
+
+        codigo = entidades.codigo_car or "(codigo nao informado)"
+        texto = (
+            f"Na propriedade rural **{codigo}**, foram identificados "
+            f"**{total_features} focos de queimada**{periodo}."
+        )
+        texto = _anexar_descricao(texto, descricao_consulta)
+        if fontes_str:
+            texto = f"{texto}\n\n{fontes_str}"
+        return _aplicar_feedback_contexto(texto, feedback_contexto)
 
     # Sem dados
     if intencao != "fora_escopo" and intencao != "buscar_documentos" and total_features == 0:
@@ -199,9 +229,9 @@ def formatar_resposta(
                 else ""
             ),
         )
+        texto = _anexar_descricao(texto, descricao_consulta)
         return _aplicar_feedback_contexto(texto, feedback_contexto)
     except KeyError:
-        return _aplicar_feedback_contexto(
-            f"Foram encontrados {total_features} resultado(s){escopo}.\n\n{fontes_str}",
-            feedback_contexto,
-        )
+        texto = f"Foram encontrados {total_features} resultado(s){escopo}.\n\n{fontes_str}"
+        texto = _anexar_descricao(texto, descricao_consulta)
+        return _aplicar_feedback_contexto(texto, feedback_contexto)

@@ -31,6 +31,7 @@ DEFAULT_PIPELINE_ORDER = [
     "datageo_sp",
     "car",
     "inpe",
+    "prodes_desmatamento",
 ]
 
 
@@ -82,6 +83,7 @@ def main():
         from sources.datageo_sp import create_pipeline as create_datageo_sp
         from sources.car import create_pipeline as create_car
         from sources.inpe import create_pipeline as create_inpe
+        from sources.prodes_desmatamento import create_pipeline as create_prodes_desmatamento
 
         orchestrator.register_pipeline("icmbio", create_icmbio)
         orchestrator.register_pipeline("funai", create_funai)
@@ -90,6 +92,7 @@ def main():
         orchestrator.register_pipeline("datageo_sp", create_datageo_sp)
         orchestrator.register_pipeline("car", create_car)
         orchestrator.register_pipeline("inpe", create_inpe)
+        orchestrator.register_pipeline("prodes_desmatamento", create_prodes_desmatamento)
 
     except ImportError as e:
         logger.error(f"Failed to import pipeline: {str(e)}")
