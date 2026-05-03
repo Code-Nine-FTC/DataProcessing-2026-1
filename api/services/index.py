@@ -24,6 +24,7 @@ from api.schemas.index import (
     SerieTemporalItem,
     UltimoIncendioItem,
 )
+from models.db_model import classificar_nivel_risco_ambiental
 
 
 class AnalyticsService:
@@ -532,6 +533,7 @@ class AnalyticsService:
                 queimada_id=row.queimada_id,
                 bioma=row.bioma,
                 distancia_m=row.distancia_m,
+                nivel_risco_ambiental=classificar_nivel_risco_ambiental(row.distancia_m),
             )
             for row in result
         ]

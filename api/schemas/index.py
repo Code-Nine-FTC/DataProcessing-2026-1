@@ -127,6 +127,7 @@ class ProximidadeQueimadaItem(BaseModel):
     queimada_id: str
     bioma: Optional[str]
     distancia_m: float
+    nivel_risco_ambiental: Optional[str] = None
 
 
 class RespostaProximidadeQueimada(BaseModel):
