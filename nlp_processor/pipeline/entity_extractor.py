@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from nlp_processor.pipeline.preprocessor import normalizar
@@ -111,6 +111,7 @@ class Entidades:
     sensor: Optional[str] = None
     grupo_snuc: Optional[str] = None       # 'PI' ou 'US'
     palavras_chave: list[str] = field(default_factory=list)
+    codigo_car: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +148,29 @@ def _extrair_datas(texto_norm: str) -> tuple[Optional[str], Optional[str]]:
     inicio = encontradas[0] if encontradas else None
     fim = encontradas[-1] if len(encontradas) > 1 else None
     return inicio, fim
+
+
+def _extrair_periodo_relativo(texto_norm: str) -> tuple[Optional[str], Optional[str]]:
+    hoje = datetime.utcnow().date()
+    if re.search(r"\bultim[oa]s?\s+semana(s)?\b", texto_norm) or re.search(
+        r"\bultim[oa]s?\s+7\s+dias\b", texto_norm
+    ):
+        inicio = hoje - timedelta(days=7)
+        return inicio.isoformat(), hoje.isoformat()
+
+    if re.search(r"\bultim[oa]s?\s+mes(es)?\b", texto_norm) or re.search(
+        r"\bultim[oa]s?\s+30\s+dias\b", texto_norm
+    ):
+        inicio = hoje - timedelta(days=30)
+        return inicio.isoformat(), hoje.isoformat()
+
+    if re.search(r"\bultim[oa]s?\s+ano(s)?\b", texto_norm) or re.search(
+        r"\bultim[oa]s?\s+12\s+meses\b", texto_norm
+    ):
+        inicio = hoje - timedelta(days=365)
+        return inicio.isoformat(), hoje.isoformat()
+
+    return None, None
 
 
 def _extrair_ano(texto_norm: str) -> Optional[int]:
@@ -220,6 +244,12 @@ def extrair_entidades(
         data_inicio = f"{ano}-01-01"
         data_fim = f"{ano}-12-31"
 
+    if not data_inicio and not data_fim:
+        periodo_inicio, periodo_fim = _extrair_periodo_relativo(texto_norm)
+        if periodo_inicio and periodo_fim:
+            data_inicio = periodo_inicio
+            data_fim = periodo_fim
+
     return Entidades(
         municipio=_extrair_municipio(texto_norm, municipios_extras),
         data_inicio=data_inicio,
@@ -230,4 +260,36 @@ def extrair_entidades(
         sensor=_extrair_sensor(texto_norm),
         grupo_snuc=_extrair_grupo_snuc(texto_norm),
         palavras_chave=[w for w in texto_norm.split() if len(w) > 4],
+        codigo_car=_extrair_codigo_car(texto_norm),
     )
+
+
+# ---------------------------------------------------------------------------
+# Extrair código CAR simples
+# Padrões suportados:
+# - "código car SP000123456" ou "codigo car: SP000123456"
+# - "CAR SP000123456"
+# - qualquer token alfanumérico com prefixo de 2 letras seguido por 6+ dígitos
+# ---------------------------------------------------------------------------
+def _extrair_codigo_car(texto_norm: str) -> Optional[str]:
+    def _valid(code: str) -> bool:
+        return len(code) >= 6 and any(ch.isdigit() for ch in code)
+
+    # Ex: SP-3500105-268208B9F3A84F508B9C79474EA557EC
+    m = re.search(r"\b([A-Za-z]{2}-\d{6,}-[A-Za-z0-9]+)\b", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+
+    m = re.search(r"codigo\s+car[:\s]*([A-Za-z0-9\-]+)", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+
+    m = re.search(r"\bcar[:\s]*([A-Za-z0-9\-]+)\b", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+
+    # fallback: token like BR01231SP or SP12345678
+    m = re.search(r"\b([A-Za-z]{2}\d{4,12}[A-Za-z]{0,2})\b", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+    return None

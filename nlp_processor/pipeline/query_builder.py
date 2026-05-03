@@ -24,9 +24,15 @@ _INTENT_MAP: dict[str, str] = {
     "buscar_desmatamentos": "buscar_desmatamentos",
     "buscar_unidades_conservacao": "buscar_unidades_conservacao",
     "buscar_terras_indigenas": "buscar_terras_indigenas",
-    "buscar_assentamentos": "buscar_assentamentos",
     "buscar_quilombolas": "buscar_territorios_quilombolas",
     "buscar_imoveis_rurais": "buscar_imoveis_rurais",
+    "buscar_imoveis_queimada": "buscar_imoveis_por_queimada",
+    "buscar_imoveis_ti": "buscar_imoveis_por_terra_indigena",
+    "buscar_imoveis_quilombo": "buscar_imoveis_por_quilombo",
+    "buscar_camadas_estaduais": "buscar_camadas_estaduais",
+    "buscar_imoveis_em_camadas": "buscar_imoveis_com_camadas_estaduais",
+    "buscar_passivos_imovel": "buscar_passivos_em_imovel",
+    "buscar_focos_queimada_imovel": "buscar_focos_queimada_imovel",
 }
 
 
@@ -67,6 +73,27 @@ def _build_args(intencao: str, ent: Entidades) -> dict[str, Any]:
 
     elif intencao == "buscar_imoveis_rurais":
         pass
+
+    elif intencao == "buscar_camadas_estaduais":
+        # Utiliza tema como filtro se disponível
+        pass
+
+    elif intencao == "buscar_imoveis_em_camadas":
+        # Utiliza tema como filtro se disponível
+        pass
+
+    elif intencao == "buscar_passivos_imovel":
+        # Se o extrator capturou um código CAR, envia-o como argumento
+        if hasattr(ent, "codigo_car") and ent.codigo_car:
+            base["codigo_car"] = ent.codigo_car
+
+    elif intencao == "buscar_focos_queimada_imovel":
+        if ent.codigo_car:
+            base["codigo_car"] = ent.codigo_car
+        if ent.data_inicio:
+            base["data_inicio"] = ent.data_inicio
+        if ent.data_fim:
+            base["data_fim"] = ent.data_fim
 
     return base
 

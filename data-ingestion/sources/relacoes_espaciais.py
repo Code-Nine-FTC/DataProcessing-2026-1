@@ -173,16 +173,450 @@ class SpatialRelationshipPostProcessor:
     def calculate_imovel_uc(self) -> int:
         """Calcula: Imóvel ↔ Unidade de Conservação."""
         try:
-            return self._calculate_relation(
-                "rel_imovel_uc",
-                "imovel_rural",
-                "id",
-                "unidade_conservacao",
-                "id",
-            )
+            return self.calculate_imovel_uc_by_uc_batches()
         except Exception as e:
             logger.warning(f"Failed to calculate imovel_uc relationships: {str(e)}")
             return 0
+
+    def calculate_imovel_uc_batched(
+        self,
+        batch_size: int = 2000,
+        max_batches: int | None = None,
+        statement_timeout: str = "5min",
+    ) -> int:
+        """Calcula: Imóvel ↔ Unidade de Conservação em lotes para evitar timeout."""
+        logger.info(
+            "Computing imovel_rural ↔ unidade_conservacao relationships (batched, size=%s)...",
+            batch_size,
+        )
+
+        last_id = "00000000-0000-0000-0000-000000000000"
+        batches = 0
+
+        with self.engine.begin() as conn:
+            conn.execute(text("DELETE FROM rel_imovel_uc WHERE TRUE"))
+            conn.execute(text(f"SET LOCAL statement_timeout = '{statement_timeout}'"))
+
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_imovel_rural_geom_gist "
+                "ON imovel_rural USING GIST (geom)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_unidade_conservacao_geom_gist "
+                "ON unidade_conservacao USING GIST (geom)"
+            ))
+
+            while True:
+                if max_batches is not None and batches >= max_batches:
+                    break
+
+                batch_ids = conn.execute(text("""
+                    SELECT id
+                    FROM imovel_rural
+                    WHERE id > :last_id
+                    ORDER BY id
+                    LIMIT :limit
+                """), {"last_id": last_id, "limit": batch_size}).fetchall()
+
+                if not batch_ids:
+                    break
+
+                last_id = batch_ids[-1][0]
+
+                query = text("""
+                    WITH batch AS (
+                        SELECT id, geom, area_ha
+                        FROM imovel_rural
+                        WHERE id > :last_id
+                        ORDER BY id
+                        LIMIT :limit
+                    )
+                    INSERT INTO rel_imovel_uc
+                        (id, imovel_rural_id, unidade_conservacao_id,
+                         area_intersecao_ha, percentual_sobreposicao)
+                    SELECT
+                        gen_random_uuid(),
+                        source.id,
+                        target.id,
+                        ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0
+                            as area_intersecao_ha,
+                        CASE
+                            WHEN source.area_ha > 0 THEN
+                                (ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0)
+                                / source.area_ha * 100
+                            ELSE 0
+                        END as percentual_sobreposicao
+                    FROM batch source
+                    JOIN unidade_conservacao target
+                      ON source.geom && target.geom
+                     AND ST_Intersects(ST_MakeValid(source.geom), ST_MakeValid(target.geom))
+                """)
+
+                conn.execute(query, {"last_id": last_id, "limit": batch_size})
+                batches += 1
+                logger.info("  → batch %s processed (last_id=%s)", batches, last_id)
+
+            result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_uc"))
+            count = result.scalar()
+
+        logger.info("  → %s relationships created (batched)", count)
+        return count
+
+    def calculate_imovel_uc_batched_tiles(
+        self,
+        tile_size_deg: float = 0.5,
+        margin_deg: float = 0.05,
+        max_tiles: int | None = None,
+        statement_timeout: str = "5min",
+    ) -> int:
+        """Calcula: Imóvel ↔ Unidade de Conservação em lotes por tiles espaciais."""
+        logger.info(
+            "Computing imovel_rural ↔ unidade_conservacao relationships (tiles=%s, margin=%s)...",
+            tile_size_deg,
+            margin_deg,
+        )
+
+        with self.engine.begin() as conn:
+            # Index creation can be slow; avoid timing out on DDL.
+            conn.execute(text("SET LOCAL statement_timeout = '0'"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_imovel_rural_geom_gist "
+                "ON imovel_rural USING GIST (geom)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_unidade_conservacao_geom_gist "
+                "ON unidade_conservacao USING GIST (geom)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_rel_imovel_uc_pair "
+                "ON rel_imovel_uc (imovel_rural_id, unidade_conservacao_id)"
+            ))
+
+            conn.execute(text("DELETE FROM rel_imovel_uc WHERE TRUE"))
+            conn.execute(text(f"SET LOCAL statement_timeout = '{statement_timeout}'"))
+
+            bounds = conn.execute(text("""
+                SELECT
+                    ST_XMin(ext) AS minx,
+                    ST_YMin(ext) AS miny,
+                    ST_XMax(ext) AS maxx,
+                    ST_YMax(ext) AS maxy
+                FROM (SELECT ST_Extent(geom) AS ext FROM imovel_rural) s
+            """)).fetchone()
+
+            if not bounds or bounds[0] is None:
+                logger.warning("No imovel_rural extent found for tiling.")
+                return 0
+
+            minx, miny, maxx, maxy = bounds
+            tile_count = 0
+
+            x = minx
+            while x < maxx:
+                y = miny
+                while y < maxy:
+                    if max_tiles is not None and tile_count >= max_tiles:
+                        break
+
+                    tile_minx = x
+                    tile_miny = y
+                    tile_maxx = min(x + tile_size_deg, maxx)
+                    tile_maxy = min(y + tile_size_deg, maxy)
+
+                    query = text("""
+                        WITH tile AS (
+                            SELECT ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326) AS geom
+                        ),
+                        tile_expanded AS (
+                            SELECT ST_Expand(geom, :margin) AS geom FROM tile
+                        )
+                        INSERT INTO rel_imovel_uc
+                            (id, imovel_rural_id, unidade_conservacao_id,
+                             area_intersecao_ha, percentual_sobreposicao)
+                        SELECT
+                            gen_random_uuid(),
+                            source.id,
+                            target.id,
+                            ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0
+                                as area_intersecao_ha,
+                            CASE
+                                WHEN source.area_ha > 0 THEN
+                                    (ST_Area(ST_Intersection(ST_MakeValid(source.geom), ST_MakeValid(target.geom))) / 10000.0)
+                                    / source.area_ha * 100
+                                ELSE 0
+                            END as percentual_sobreposicao
+                        FROM imovel_rural source
+                        JOIN unidade_conservacao target
+                          ON source.geom && target.geom
+                         AND ST_Intersects(ST_MakeValid(source.geom), ST_MakeValid(target.geom))
+                        WHERE source.geom && (SELECT geom FROM tile)
+                          AND ST_Intersects(ST_MakeValid(source.geom), (SELECT geom FROM tile))
+                          AND target.geom && (SELECT geom FROM tile_expanded)
+                          AND ST_Intersects(ST_MakeValid(target.geom), (SELECT geom FROM tile_expanded))
+                          AND NOT EXISTS (
+                              SELECT 1 FROM rel_imovel_uc r
+                              WHERE r.imovel_rural_id = source.id
+                                AND r.unidade_conservacao_id = target.id
+                          )
+                    """)
+
+                    conn.execute(query, {
+                        "minx": tile_minx,
+                        "miny": tile_miny,
+                        "maxx": tile_maxx,
+                        "maxy": tile_maxy,
+                        "margin": margin_deg,
+                    })
+
+                    tile_count += 1
+                    logger.info(
+                        "  → tile %s processed (%.4f, %.4f, %.4f, %.4f)",
+                        tile_count,
+                        tile_minx,
+                        tile_miny,
+                        tile_maxx,
+                        tile_maxy,
+                    )
+
+                    y += tile_size_deg
+                if max_tiles is not None and tile_count >= max_tiles:
+                    break
+                x += tile_size_deg
+
+            result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_uc"))
+            count = result.scalar()
+
+        logger.info("  → %s relationships created (tiles)", count)
+        return count
+
+    def calculate_imovel_uc_batched_tiles_optimized(
+        self,
+        tile_size_deg: float = 0.5,
+        margin_deg: float = 0.05,
+        max_tiles: int | None = None,
+        statement_timeout: str = "10min",
+        subdivide_max_vertices: int = 256,
+    ) -> int:
+        """Calcula: Imóvel ↔ Unidade de Conservação com tiles + subdivisão de UCs."""
+        logger.info(
+            "Computing imovel_rural ↔ unidade_conservacao relationships (tiles=%s, margin=%s, subdivide=%s)...",
+            tile_size_deg,
+            margin_deg,
+            subdivide_max_vertices,
+        )
+
+        with self.engine.begin() as conn:
+            conn.execute(text("DELETE FROM rel_imovel_uc WHERE TRUE"))
+            conn.execute(text(f"SET LOCAL statement_timeout = '{statement_timeout}'"))
+
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_imovel_rural_geom_gist "
+                "ON imovel_rural USING GIST (geom)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_unidade_conservacao_geom_gist "
+                "ON unidade_conservacao USING GIST (geom)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_rel_imovel_uc_pair "
+                "ON rel_imovel_uc (imovel_rural_id, unidade_conservacao_id)"
+            ))
+
+            # Subdivide UCs para acelerar o join espacial sem perda de precisão.
+            conn.execute(text("DROP TABLE IF EXISTS tmp_uc_subdivided"))
+            conn.execute(text("""
+                CREATE TEMP TABLE tmp_uc_subdivided AS
+                SELECT
+                    uc.id AS uc_id,
+                    (ST_Dump(ST_Subdivide(ST_MakeValid(uc.geom), :max_vertices))).geom AS geom
+                FROM unidade_conservacao uc
+            """), {"max_vertices": subdivide_max_vertices})
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_tmp_uc_subdivided_geom_gist "
+                "ON tmp_uc_subdivided USING GIST (geom)"
+            ))
+
+            bounds = conn.execute(text("""
+                SELECT
+                    ST_XMin(ext) AS minx,
+                    ST_YMin(ext) AS miny,
+                    ST_XMax(ext) AS maxx,
+                    ST_YMax(ext) AS maxy
+                FROM (SELECT ST_Extent(geom) AS ext FROM imovel_rural) s
+            """)).fetchone()
+
+            if not bounds or bounds[0] is None:
+                logger.warning("No imovel_rural extent found for tiling.")
+                return 0
+
+            minx, miny, maxx, maxy = bounds
+            tile_count = 0
+
+            x = minx
+            while x < maxx:
+                y = miny
+                while y < maxy:
+                    if max_tiles is not None and tile_count >= max_tiles:
+                        break
+
+                    tile_minx = x
+                    tile_miny = y
+                    tile_maxx = min(x + tile_size_deg, maxx)
+                    tile_maxy = min(y + tile_size_deg, maxy)
+
+                    query = text("""
+                        WITH tile AS (
+                            SELECT ST_MakeEnvelope(:minx, :miny, :maxx, :maxy, 4326) AS geom
+                        ),
+                        tile_expanded AS (
+                            SELECT ST_Expand(geom, :margin) AS geom FROM tile
+                        )
+                        INSERT INTO rel_imovel_uc
+                            (id, imovel_rural_id, unidade_conservacao_id,
+                             area_intersecao_ha, percentual_sobreposicao)
+                        SELECT
+                            gen_random_uuid(),
+                            source.id,
+                            target.uc_id,
+                            ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0
+                                as area_intersecao_ha,
+                            CASE
+                                WHEN source.area_ha > 0 THEN
+                                    (ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0)
+                                    / source.area_ha * 100
+                                ELSE 0
+                            END as percentual_sobreposicao
+                        FROM imovel_rural source
+                        JOIN tmp_uc_subdivided target
+                          ON source.geom && target.geom
+                         AND ST_Intersects(source.geom, target.geom)
+                        WHERE source.geom && (SELECT geom FROM tile)
+                          AND ST_Intersects(source.geom, (SELECT geom FROM tile))
+                          AND target.geom && (SELECT geom FROM tile_expanded)
+                          AND ST_Intersects(target.geom, (SELECT geom FROM tile_expanded))
+                          AND NOT EXISTS (
+                              SELECT 1 FROM rel_imovel_uc r
+                              WHERE r.imovel_rural_id = source.id
+                                AND r.unidade_conservacao_id = target.uc_id
+                          )
+                    """)
+
+                    conn.execute(query, {
+                        "minx": tile_minx,
+                        "miny": tile_miny,
+                        "maxx": tile_maxx,
+                        "maxy": tile_maxy,
+                        "margin": margin_deg,
+                    })
+
+                    tile_count += 1
+                    logger.info(
+                        "  → tile %s processed (%.4f, %.4f, %.4f, %.4f)",
+                        tile_count,
+                        tile_minx,
+                        tile_miny,
+                        tile_maxx,
+                        tile_maxy,
+                    )
+
+                    y += tile_size_deg
+                if max_tiles is not None and tile_count >= max_tiles:
+                    break
+                x += tile_size_deg
+
+            result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_uc"))
+            count = result.scalar()
+
+        logger.info("  → %s relationships created (tiles+subdivide)", count)
+        return count
+
+    def calculate_imovel_uc_by_uc_batches(
+        self,
+        batch_size: int = 10,
+        statement_timeout: str = "5min",
+    ) -> int:
+        """Calcula: Imóvel ↔ Unidade de Conservação em lotes por UC."""
+        logger.info(
+            "Computing imovel_rural ↔ unidade_conservacao relationships (uc_batches=%s)...",
+            batch_size,
+        )
+
+        total_inserted = 0
+
+        with self.engine.begin() as conn:
+            conn.execute(text("SET LOCAL statement_timeout = '0'"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_imovel_rural_geom_gist "
+                "ON imovel_rural USING GIST (geom)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_unidade_conservacao_geom_gist "
+                "ON unidade_conservacao USING GIST (geom)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_rel_imovel_uc_pair "
+                "ON rel_imovel_uc (imovel_rural_id, unidade_conservacao_id)"
+            ))
+
+            conn.execute(text("DELETE FROM rel_imovel_uc WHERE TRUE"))
+
+            uc_ids = [row[0] for row in conn.execute(
+                text("SELECT id FROM unidade_conservacao ORDER BY id")
+            ).fetchall()]
+
+            if not uc_ids:
+                logger.warning("No unidade_conservacao records found.")
+                return 0
+
+            for i in range(0, len(uc_ids), batch_size):
+                batch = uc_ids[i:i + batch_size]
+                conn.execute(text(f"SET LOCAL statement_timeout = '{statement_timeout}'"))
+
+                query = text("""
+                    INSERT INTO rel_imovel_uc
+                        (id, imovel_rural_id, unidade_conservacao_id,
+                         area_intersecao_ha, percentual_sobreposicao)
+                    SELECT
+                        gen_random_uuid(),
+                        source.id,
+                        target.id,
+                        ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0
+                            as area_intersecao_ha,
+                        CASE
+                            WHEN source.area_ha > 0 THEN
+                                (ST_Area(ST_Intersection(source.geom, target.geom)) / 10000.0)
+                                / source.area_ha * 100
+                            ELSE 0
+                        END as percentual_sobreposicao
+                    FROM unidade_conservacao target
+                    JOIN imovel_rural source
+                      ON source.geom && target.geom
+                     AND ST_Intersects(source.geom, target.geom)
+                    WHERE target.id = ANY(:uc_ids)
+                """)
+
+                conn.execute(query, {"uc_ids": batch})
+                batch_count = conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM rel_imovel_uc WHERE unidade_conservacao_id = ANY(:uc_ids)"
+                    ),
+                    {"uc_ids": batch},
+                ).scalar()
+
+                total_inserted += int(batch_count or 0)
+                logger.info(
+                    "  → batch %s/%s processed (ucs=%s, inserted=%s)",
+                    (i // batch_size) + 1,
+                    (len(uc_ids) + batch_size - 1) // batch_size,
+                    len(batch),
+                    batch_count,
+                )
+
+            result = conn.execute(text("SELECT COUNT(*) FROM rel_imovel_uc"))
+            count = result.scalar()
+
+        logger.info("  → %s relationships created (uc batches)", count)
+        return int(count or 0)
 
     def calculate_imovel_ti(self) -> int:
         """Calcula: Imóvel ↔ Terra Indígena."""

@@ -45,12 +45,26 @@ CAR_SOURCE = DataSource(
 )
 
 _NOME = ("nome_prop", "NOME_PROP", "property_name", "nome")
-_CODIGO_CAR = ("codigo_car", "CODIGO_CAR", "car_code", "id_car", "codigo")
-_AREA = ("area_hectare", "AREA_HECTARE", "area_ha", "area")
-_SITUACAO = ("situacao_imovel", "SITUACAO_IMOVEL", "status", "situacao")
+_CODIGO_CAR = (
+    "codigo_car",
+    "CODIGO_CAR",
+    "car_code",
+    "id_car",
+    "codigo",
+    "cod_imovel",
+)
+_AREA = ("area_hectare", "AREA_HECTARE", "area_ha", "area", "num_area")
+_SITUACAO = (
+    "situacao_imovel",
+    "SITUACAO_IMOVEL",
+    "status",
+    "situacao",
+    "ind_status",
+    "des_condic",
+)
 _MUNICIPIO = ("municipio", "MUNICIPIO", "mun_nome", "municipality")
-_UF = ("uf", "UF", "estado", "state")
-_ID_ORIG = ("gid", "GID", "id", "car_id", "cod_car")
+_UF = ("uf", "UF", "estado", "state", "cod_estado")
+_ID_ORIG = ("gid", "GID", "id", "car_id", "cod_car", "cod_imovel")
 CAR_LAYER = os.getenv("CAR_WFS_LAYER", "prodes-car:car_properties")
 
 
@@ -230,14 +244,22 @@ class CARTransformer(GeometricTransformer):
                     f"Failed to find municipio {municipio_nome}/{uf}: {str(e)}"
                 )
 
+        nome_imovel = self.pick(props, _NOME)
+        if nome_imovel and str(nome_imovel).strip().lower() == "area do imovel":
+            nome_imovel = None
+
+        codigo_car = self.pick(props, _CODIGO_CAR)
+        if codigo_car is not None:
+            codigo_car = str(codigo_car).upper()
+
         return TransformedRecord(
             id=str(uuid4()),
             id_origem=str(self.pick(props, _ID_ORIG)),
             table_name=self.table_name,
             geometry=geom_wkt,
             attributes={
-                "nome_imovel": self.pick(props, _NOME),
-                "codigo_car": self.pick(props, _CODIGO_CAR),
+                "nome_imovel": nome_imovel,
+                "codigo_car": codigo_car,
                 "area_ha": self.safe_float(self.pick(props, _AREA)),
                 "municipio_id": municipio_id,
                 "situacao_cadastral": self.pick(props, _SITUACAO),
