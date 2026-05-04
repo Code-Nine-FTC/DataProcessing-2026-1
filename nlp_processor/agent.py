@@ -147,9 +147,22 @@ async def run_agent(
     entidades_json = _serializar_entidades(entidades)
     filtros_json = _serializar_filtros(entidades_json)
 
+    texto_norm = normalizar(pergunta)
+    override_intencao = False
+    if entidades.codigo_car and any(
+        termo in texto_norm
+        for termo in ("foco", "focos", "queimada", "incendio", "incendios")
+    ):
+        intencao = "buscar_focos_queimada_imovel"
+        override_intencao = True
+        logger.info(
+            "Intent override para CAR detectado (%s) com termo de queimada/incendio.",
+            entidades.codigo_car,
+        )
+
     # Se confiança é baixa MAS extraímos um município, assume buscar_queimadas
     # (a consulta mais comum é por focos em um local)
-    if confianca < CONFIDENCE_THRESHOLD:
+    if not override_intencao and confianca < CONFIDENCE_THRESHOLD:
         if entidades.municipio:
             intencao = "buscar_queimadas"
             logger.info(
@@ -211,6 +224,7 @@ async def run_agent(
         fontes=fontes,
         contexto_documental=contexto_documental,
         confianca=confianca,
+        descricao_consulta=resultado.get("descricao"),
         feedback_contexto=feedback_contexto or None,
     )
 

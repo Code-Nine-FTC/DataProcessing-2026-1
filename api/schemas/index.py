@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -50,6 +51,35 @@ class ResumoSobreposicoes(BaseModel):
     total_imoveis: int
 
 
+class TipoAreaSobreposicao(str, Enum):
+    todos = "todos"
+    uc = "uc"
+    ti = "ti"
+    quilombo = "quilombo"
+    assentamento = "assentamento"
+
+
+class SobreposicaoAreaItem(BaseModel):
+    tipo_area: str
+    imovel_id: str
+    codigo_car: Optional[str]
+    nome_imovel: Optional[str]
+    municipio: Optional[str]
+    estado: Optional[str]
+    area_id: str
+    area_nome: Optional[str]
+    area_imovel_ha: Optional[float]
+    area_intersecao_ha: Optional[float]
+    percentual_sobreposicao: Optional[float]
+    tipo_relacao: Optional[str]
+
+
+class RespostaSobreposicoesAreas(BaseModel):
+    tipo_area: str
+    itens: List[SobreposicaoAreaItem]
+    total: int
+
+
 class QueimadaDentroForaItem(BaseModel):
     dentro_imovel: bool
     total: int
@@ -97,6 +127,7 @@ class ProximidadeQueimadaItem(BaseModel):
     queimada_id: str
     bioma: Optional[str]
     distancia_m: float
+    nivel_risco_ambiental: Optional[str] = None
 
 
 class RespostaProximidadeQueimada(BaseModel):
