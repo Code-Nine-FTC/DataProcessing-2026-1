@@ -306,7 +306,6 @@ async def buscar_focos_queimada_imovel(
             ImovelRural.codigo_car,
             RelImovelQueimada.distancia_m,
             RelImovelQueimada.dentro_imovel,
-            RelImovelQueimada.nivel_risco_ambiental,
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
@@ -336,7 +335,7 @@ async def buscar_focos_queimada_imovel(
         if not row.geom_json:
             continue
         distancia = float(row.distancia_m) if row.distancia_m is not None else None
-        risco = row.nivel_risco_ambiental or classificar_nivel_risco_ambiental(
+        risco = classificar_nivel_risco_ambiental(
             distancia,
             bool(row.dentro_imovel),
         )
