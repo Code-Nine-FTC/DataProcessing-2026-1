@@ -1,18 +1,15 @@
 """
-Testes de integração para api/services/index.py e api/router/analytics.py
+Testes de integração para endpoints de analytics (api/router/analytics.py)
 Cobre: Serviços RF-04 completos (buffer, distância, proximidade) + endpoints
 """
 import pytest
 from fastapi.testclient import TestClient
-from api.services.index import AnalyticsService
-from api.router.analytics import router
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_get_desmatamento_buffer_imoveis_endpoint(session: AsyncSession):
+async def test_endpoint_desmatamento_buffer_imoveis(client: TestClient, session: AsyncSession):
     """
     Teste de integração para o endpoint GET /desmatamento/buffer-imoveis
     Verifica se o endpoint RF-04 retorna dados corretos
@@ -78,18 +75,6 @@ async def test_get_desmatamento_buffer_imoveis_endpoint(session: AsyncSession):
     await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
     await session.commit()
 
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_get_desmatamento_distancia_alertas_endpoint(session: AsyncSession):
-    """
-    Teste de integração para o endpoint GET /desmatamento/distancia-alertas-imoveis
-    """
-    # 1. Limpa dados anteriores
-    await session.execute(text("DELETE FROM desmatamento_alerta"))
-    await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
-    await session.commit()
-
     # 2. Insere dados de teste
     await session.execute(text("""
         INSERT INTO imovel_rural
@@ -137,18 +122,6 @@ async def test_get_desmatamento_distancia_alertas_endpoint(session: AsyncSession
     await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
     await session.commit()
 
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_get_queimadas_distancia_imoveis_endpoint(session: AsyncSession):
-    """
-    Teste de integração para o endpoint GET /queimadas/distancia-imoveis
-    """
-    # 1. Limpa dados anteriores
-    await session.execute(text("DELETE FROM queimada_evento"))
-    await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
-    await session.commit()
-
     # 2. Insere dados de teste
     await session.execute(text("""
         INSERT INTO imovel_rural
@@ -189,7 +162,6 @@ async def test_get_queimadas_distancia_imoveis_endpoint(session: AsyncSession):
     await session.execute(text("DELETE FROM queimada_evento"))
     await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
     await session.commit()
-
 
 @pytest.mark.asyncio
 @pytest.mark.integration
@@ -244,7 +216,6 @@ async def test_endpoint_desmatamento_buffer_imoveis(client: TestClient, session:
     await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
     await session.commit()
 
-
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_endpoint_desmatamento_distancia_alertas(client: TestClient, session: AsyncSession):
@@ -295,7 +266,6 @@ async def test_endpoint_desmatamento_distancia_alertas(client: TestClient, sessi
     await session.execute(text("DELETE FROM desmatamento_alerta"))
     await session.execute(text("DELETE FROM imovel_rural WHERE nome_imovel LIKE 'Teste %'"))
     await session.commit()
-
 
 @pytest.mark.asyncio
 @pytest.mark.integration
