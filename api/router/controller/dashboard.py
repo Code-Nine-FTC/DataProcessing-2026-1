@@ -96,7 +96,7 @@ class DashboardHandler:
             .join(Estado, Municipio.estado_id == Estado.id)
             .where(Estado.id == estado_id)
             .group_by(Municipio.id, Estado.sigla)
-            .order_by(desc("v")).limit(15)
+            .order_by(desc("v")).limit(10)
         )
         res = await self._session.execute(query)
         return [
