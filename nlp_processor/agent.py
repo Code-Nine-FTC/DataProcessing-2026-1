@@ -160,6 +160,31 @@ async def run_agent(
             entidades.codigo_car,
         )
 
+    if not override_intencao and entidades.codigo_car and any(
+        termo in texto_norm
+        for termo in (
+            "passivo",
+            "passivos",
+            "sobreposicao",
+            "preservacao",
+            "area de preservacao",
+            "area protegida",
+            "unidade de conservacao",
+            "unidades de conservacao",
+            "terra indigena",
+            "terras indigenas",
+            "quilombo",
+            "quilombola",
+            "desmatamento",
+        )
+    ):
+        intencao = "buscar_passivos_imovel"
+        override_intencao = True
+        logger.info(
+            "Intent override para passivos com CAR detectado (%s).",
+            entidades.codigo_car,
+        )
+
     # Se confiança é baixa MAS extraímos um município, assume buscar_queimadas
     # (a consulta mais comum é por focos em um local)
     if not override_intencao and confianca < CONFIDENCE_THRESHOLD:

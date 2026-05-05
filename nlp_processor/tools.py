@@ -48,7 +48,9 @@ from models.db_model import (
     ImovelRural,
     Municipio,
     QueimadaEvento,
+    RelImovelDesmatamento,
     RelImovelQueimada,
+    RelImovelUC,
     RelImovelTI,
     RelImovelQuilombo,
     TerraIndigena,
@@ -303,6 +305,8 @@ async def buscar_focos_queimada_imovel(
             _geom_as_geojson(QueimadaEvento.geom).label("geom_json"),
             ImovelRural.id.label("imovel_id"),
             ImovelRural.codigo_car,
+            RelImovelQueimada.distancia_m,
+            RelImovelQueimada.dentro_imovel,
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
@@ -329,6 +333,14 @@ async def buscar_focos_queimada_imovel(
     for row in rows:
         if not row.geom_json:
             continue
+        distancia = float(row.distancia_m) if row.distancia_m is not None else None
+        risco = classificar_nivel_risco_ambiental(
+            distancia,
+            bool(row.dentro_imovel),
+        )
+        if distancia is not None:
+            distancias.append(distancia)
+        riscos.append(risco)
         features.append({
             "type": "Feature",
             "geometry": json.loads(row.geom_json),

@@ -181,6 +181,16 @@ def formatar_resposta(
             texto = f"{texto}\n\n{fontes_str}"
         return _aplicar_feedback_contexto(texto, feedback_contexto)
 
+    if intencao == "buscar_passivos_imovel":
+        codigo = entidades.codigo_car or "(codigo nao informado)"
+        texto = (
+            f"Passivos ambientais encontrados para a propriedade rural **{codigo}**."
+        )
+        texto = _anexar_descricao(texto, descricao_consulta)
+        if fontes_str:
+            texto = f"{texto}\n\n{fontes_str}"
+        return _aplicar_feedback_contexto(texto, feedback_contexto)
+
     # Sem dados
     if intencao != "fora_escopo" and intencao != "buscar_documentos" and total_features == 0:
         nomes = ", ".join(f["nome"] for f in fontes) if fontes else "fontes do sistema"
