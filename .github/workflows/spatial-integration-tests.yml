@@ -12,22 +12,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    services:
-      postgis:
-        image: postgis/postgis:16-3.4
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U test -d test_db"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 30
-
     steps:
+      - name: Set image name
+        run: |
+          echo "TEST_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/test-db" >> $GITHUB_ENV
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -36,115 +25,75 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Install PostgreSQL client (pg_isready)
+      - name: Build test database image
+        run: docker build -f Dockerfile.test -t ${{ env.TEST_IMAGE }}:latest .
+
+      - name: Start PostGIS container
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          docker run -d --name postgis-test \
+            -p 5432:5432 \
+            -e POSTGRES_USER=test \
+            -e POSTGRES_PASSWORD=test \
+            -e POSTGRES_DB=test_db \
+            ${{ env.TEST_IMAGE }}:latest
+          for i in {1..30}; do
+            if docker exec postgis-test pg_isready -U test -d test_db; then
+              echo "PostGIS ready"; exit 0
+            fi
+            sleep 5
+          done
+          exit 1
 
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio psycopg2-binary
-          # Instala pacotes de data-ingestion se houver requirements separado
-          if [ -f data-ingestion/requirements.txt ]; then
-            pip install -r data-ingestion/requirements.txt
-          fi
+          pip install pytest pytest-asyncio psycopg2-binary alembic
+          [ -f data-ingestion/requirements.txt ] && pip install -r data-ingestion/requirements.txt
 
-      - name: Wait for PostGIS to be ready
-        run: |
-          for i in {1..30}; do
-            if pg_isready -h localhost -p 5432 -U test -d test_db; then
-              echo "PostGIS is ready!"
-              exit 0
-            fi
-            echo "Waiting for PostGIS... attempt $i"
-            sleep 5
-          done
-          echo "PostGIS did not become ready in time"
-          exit 1
-
-      - name: Install pgvector inside PostGIS container
-        run: |
-          # Find the running PostGIS container ID (more robust search)
-          CONTAINER_ID=$(docker ps -a -q -f "ancestor=postgis/postgis:16-3.4" -f "status=running")
-          
-          if [ -z "$CONTAINER_ID" ]; then
-            echo "No running PostGIS container found. Looking for any PostGIS container..."
-            CONTAINER_ID=$(docker ps -a -q -f "ancestor=postgis/postgis:16-3.4")
-            if [ -z "$CONTAINER_ID" ]; then
-              echo "ERROR: No PostGIS container found at all"
-              exit 1
-            fi
-            echo "Found container but not running. Starting it..."
-            docker start $CONTAINER_ID
-            sleep 10
-          fi
-          
-          echo "Found PostGIS container: $CONTAINER_ID"
-          
-          # Install PostgreSQL client tools and pgvector inside the container as root
-          docker exec -u root $CONTAINER_ID apt-get update
-          docker exec -u root $CONTAINER_ID apt-get install -y \
-            postgresql-client \
-            postgresql-16-pgvector
-          
-          # Restart the container to ensure newly updated Postgres binaries are loaded
-          docker restart $CONTAINER_ID
-
-      - name: Wait for PostGIS to be ready after restart
-        run: |
-          # Wait a bit more for the container to restart completely
-          sleep 10
-
-          for i in {1..30}; do
-            if pg_isready -h localhost -p 5432 -U test -d test_db; then
-              echo "PostGIS is ready!"
-              exit 0
-            fi
-            echo "Waiting for PostGIS... attempt $i"
-            sleep 5
-          done
-          echo "PostGIS did not become ready in time"
-          exit 1
-
-      - name: Run Alembic migrations
+      - name: Run migrations
         env:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
           POSTGRES_DB: test_db
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
-        run: |
-          # Verifica se o Alembic está instalado
-          pip install alembic
-          # Executa migrações
-          alembic upgrade head
+        run: alembic upgrade head
 
-
-      - name: Set PYTHONPATH
-        run: |
-          echo "PYTHONPATH antes: $PYTHONPATH"
-          export PYTHONPATH=$(pwd):$(pwd)/api:$(pwd)/data-ingestion:$(pwd)/nlp_processor
-          echo "PYTHONPATH depois: $PYTHONPATH"
-          echo "PYTHONPATH=$PYTHONPATH" >> $GITHUB_ENV
-
-      - name: Run Spatial Integration Tests
+      - name: Run integration tests
         env:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
           POSTGRES_DB: test_db
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
-          PYTHONPATH: ${{ env.PYTHONPATH }}
-        run: |
-          pytest tests/integration/spatial/ -v --tb=short -m integration
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/api:${{ github.workspace }}/data-ingestion:${{ github.workspace }}/nlp_processor
+        run: pytest tests/integration/spatial/ -v --tb=short -m "integration and not performance"
 
-      - name: Upload test results (if failed)
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - name: Run performance tests
+        if: github.ref == 'refs/heads/main'
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/api:${{ github.workspace }}/data-ingestion:${{ github.workspace }}/nlp_processor
+        run: pytest tests/integration/spatial/ -v --tb=short -m performance
+
+      - name: Tag image with SHA
+        if: github.event_name == 'push'
+        run: docker tag ${{ env.TEST_IMAGE }}:latest ${{ env.TEST_IMAGE }}:${{ github.sha }}
+
+      - name: Login to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
         with:
-          name: test-results
-          path: |
-            **/*.log
-            **/pytest*.log
-          retention-days: 7
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        if: github.event_name == 'push'
+        run: |
+          docker push ${{ env.TEST_IMAGE }}:latest
+          docker push ${{ env.TEST_IMAGE }}:${{ github.sha }}
