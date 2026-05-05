@@ -185,7 +185,7 @@ async def buscar_passivos_em_imovel(
                 UnidadeConservacao.categoria,
                 _geom_as_geojson(UnidadeConservacao.geom).label("geom_json"),
             )
-            .join(RelImovelUC, RelImovelUC.imovel_rural_id == imovel_db.id)
+            .join(RelImovelUC, RelImovelUC.unidade_conservacao_id == UnidadeConservacao.id)
             .where(RelImovelUC.imovel_rural_id == imovel_db.id)
         )
         rows_uc = (await session.execute(stmt_uc)).all()
@@ -214,7 +214,7 @@ async def buscar_passivos_em_imovel(
                 TerraIndigena.nome,
                 _geom_as_geojson(TerraIndigena.geom).label("geom_json"),
             )
-            .join(RelImovelTI, RelImovelTI.imovel_rural_id == imovel_db.id)
+            .join(RelImovelTI, RelImovelTI.terra_indigena_id == TerraIndigena.id)
             .where(RelImovelTI.imovel_rural_id == imovel_db.id)
         )
         rows_ti = (await session.execute(stmt_ti)).all()
@@ -239,7 +239,7 @@ async def buscar_passivos_em_imovel(
                 TerritorioQuilombola.nome,
                 _geom_as_geojson(TerritorioQuilombola.geom).label("geom_json"),
             )
-            .join(RelImovelQuilombo, RelImovelQuilombo.imovel_rural_id == imovel_db.id)
+            .join(RelImovelQuilombo, RelImovelQuilombo.territorio_quilombola_id == TerritorioQuilombola.id)
             .where(RelImovelQuilombo.imovel_rural_id == imovel_db.id)
         )
         rows_qm = (await session.execute(stmt_qm)).all()
