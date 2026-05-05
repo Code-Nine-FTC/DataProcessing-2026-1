@@ -140,6 +140,12 @@ def _aplicar_feedback_contexto(
     return texto
 
 
+def _anexar_descricao(texto: str, descricao_consulta: str | None) -> str:
+    if not descricao_consulta:
+        return texto
+    return f"{texto}\n\n{descricao_consulta}"
+
+
 # ---------------------------------------------------------------------------
 # Função principal
 # ---------------------------------------------------------------------------
@@ -151,6 +157,7 @@ def formatar_resposta(
     fontes: list[dict],
     contexto_documental: str,
     confianca: float,
+    descricao_consulta: str | None = None,
     feedback_contexto: dict[str, Any] | None = None,
 ) -> str:
     """
@@ -177,6 +184,7 @@ def formatar_resposta(
             f"Na propriedade rural **{codigo}**, foram identificados "
             f"**{total_features} focos de queimada**{periodo}."
         )
+        texto = _anexar_descricao(texto, descricao_consulta)
         if fontes_str:
             texto = f"{texto}\n\n{fontes_str}"
         return _aplicar_feedback_contexto(texto, feedback_contexto)
@@ -231,9 +239,9 @@ def formatar_resposta(
                 else ""
             ),
         )
+        texto = _anexar_descricao(texto, descricao_consulta)
         return _aplicar_feedback_contexto(texto, feedback_contexto)
     except KeyError:
-        return _aplicar_feedback_contexto(
-            f"Foram encontrados {total_features} resultado(s){escopo}.\n\n{fontes_str}",
-            feedback_contexto,
-        )
+        texto = f"Foram encontrados {total_features} resultado(s){escopo}.\n\n{fontes_str}"
+        texto = _anexar_descricao(texto, descricao_consulta)
+        return _aplicar_feedback_contexto(texto, feedback_contexto)

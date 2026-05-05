@@ -249,6 +249,7 @@ async def run_agent(
         fontes=fontes,
         contexto_documental=contexto_documental,
         confianca=confianca,
+        descricao_consulta=resultado.get("descricao"),
         feedback_contexto=feedback_contexto or None,
     )
 

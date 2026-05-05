@@ -7,11 +7,13 @@ from api.schemas.index import (
     RespostaBuffer,
     RespostaProximidade,
     RespostaProximidadeQueimada,
+    RespostaSobreposicoesAreas,
     RespostaQueimadaDentroFora,
     RespostaTemporalDesmatamento,
     RespostaTemporalQueimada,
     RespostaUltimoIncendio,
     ResumoSobreposicoes,
+    TipoAreaSobreposicao,
 )
 from api.router.controller.analytics_controller import AnalyticsMunicipalHandler
 from api.services.index import AnalyticsService
@@ -306,6 +308,22 @@ async def get_assentamentos_familias_por_estado(
 
 
 # --- Sobreposições ---
+
+@router.get(
+    "/sobreposicoes/areas",
+    response_model=BasicResponse[RespostaSobreposicoesAreas],
+    summary="[RF-07 #13-15, #18] Detalhamento de imóveis com sobreposição em áreas especiais",
+)
+async def get_sobreposicoes_areas(
+    tipo_area: TipoAreaSobreposicao = Query(
+        TipoAreaSobreposicao.todos,
+        description="Filtra por tipo de área: uc, ti, quilombo, assentamento ou todos",
+    ),
+    limite: int = Query(100, description="Número máximo de resultados", ge=1, le=1000),
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[RespostaSobreposicoesAreas]:
+    return BasicResponse(data=await AnalyticsService(session).sobreposicoes_areas(tipo_area, limite))
+
 
 @router.get(
     "/sobreposicoes/resumo",

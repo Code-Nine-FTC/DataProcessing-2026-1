@@ -53,6 +53,7 @@ from models.db_model import (
     RelImovelUC,
     RelImovelTI,
     RelImovelQuilombo,
+    classificar_nivel_risco_ambiental,
     TerraIndigena,
     TerritorioQuilombola,
     UnidadeConservacao,
@@ -330,6 +331,8 @@ async def buscar_focos_queimada_imovel(
 
     features: list[dict] = []
     fontes: dict[str, dict] = {}
+    distancias: list[float] = []
+    riscos: list[str] = []
     for row in rows:
         if not row.geom_json:
             continue
@@ -349,6 +352,9 @@ async def buscar_focos_queimada_imovel(
                 "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
                 "intensidade": float(row.intensidade) if row.intensidade else None,
                 "codigo_car": row.codigo_car,
+                "distancia_m": distancia,
+                "dentro_imovel": bool(row.dentro_imovel) if row.dentro_imovel is not None else None,
+                "nivel_risco_ambiental": risco,
             },
         })
         if row.fonte_nome:
@@ -358,12 +364,30 @@ async def buscar_focos_queimada_imovel(
                 "url": row.url_origem,
             }
 
+    risco_prioridade = {
+        "muito alto": 4,
+        "alto": 3,
+        "médio": 2,
+        "baixo": 1,
+        "muito baixo": 0,
+        "não classificado": -1,
+    }
+    menor_distancia = min(distancias) if distancias else None
+    risco_predominante = max(riscos, key=lambda item: risco_prioridade.get(item, -1)) if riscos else "não classificado"
+
+    descricao = (
+        f"Encontrados {len(features)} focos de queimada no imóvel {codigo_car}."
+    )
+    if menor_distancia is not None:
+        descricao += f" Menor distância observada: {menor_distancia:.1f} m."
+    descricao += f" Nível de risco ambiental: {risco_predominante}."
+
     return {
         "total": len(features),
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} focos de queimada no imóvel {codigo_car}.",
+        "descricao": descricao,
         "sql_executado": sql_executado,
     }
 
@@ -1204,6 +1228,7 @@ async def buscar_imoveis_por_queimada(
             FonteDado.orgao_responsavel,
             func.count(RelImovelQueimada.id).label("num_queimadas"),
             func.avg(RelImovelQueimada.distancia_m).label("dist_media_m"),
+            func.min(RelImovelQueimada.distancia_m).label("dist_min_m"),
         )
         .join(RelImovelQueimada, ImovelRural.id == RelImovelQueimada.imovel_rural_id)
         .join(Municipio, ImovelRural.municipio_id == Municipio.id, isouter=True)
@@ -1258,6 +1283,8 @@ async def buscar_imoveis_por_queimada(
                 "municipio": row.municipio_nome,
                 "num_queimadas": int(row.num_queimadas) if row.num_queimadas else 0,
                 "dist_media_m": float(row.dist_media_m) if row.dist_media_m else None,
+                "dist_min_m": float(row.dist_min_m) if row.dist_min_m else None,
+                "nivel_risco_ambiental": classificar_nivel_risco_ambiental(row.dist_min_m),
             },
         })
         if row.fonte_nome:

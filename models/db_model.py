@@ -22,6 +22,28 @@ from pgvector.sqlalchemy import Vector
 class Base(AsyncAttrs, DeclarativeBase):
     pass
 
+
+def classificar_nivel_risco_ambiental(
+    distancia_m: Optional[float],
+    dentro_imovel: bool = False,
+) -> str:
+    """Classifica o risco ambiental pela proximidade de um foco de queimada."""
+    if dentro_imovel:
+        return "muito alto"
+    if distancia_m is None:
+        return "não classificado"
+
+    distancia = float(distancia_m)
+    if distancia <= 500:
+        return "muito alto"
+    if distancia <= 1500:
+        return "alto"
+    if distancia <= 3000:
+        return "médio"
+    if distancia <= 5000:
+        return "baixo"
+    return "muito baixo"
+
 # --- 1. INFRAESTRUTURA E GESTÃO DE DADOS ---
 
 class FonteDado(Base):
@@ -305,6 +327,7 @@ class RelImovelQueimada(Base):
     queimada_evento_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("queimada_evento.id")) #
     distancia_m: Mapped[Optional[float]] = mapped_column(Numeric) #
     dentro_imovel: Mapped[Optional[bool]] = mapped_column(Boolean) #
+    nivel_risco_ambiental: Mapped[Optional[str]] = mapped_column(TEXT) #
     data_calculo: Mapped[Optional[datetime]] = mapped_column(DateTime) #
 
 class RelImovelDesmatamento(Base):
