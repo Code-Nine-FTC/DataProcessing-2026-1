@@ -1261,6 +1261,14 @@ async def buscar_imoveis_por_queimada(
                 "sql_executado": municipio_sql,
             }
         stmt = stmt.where(Municipio.id == municipio_id)
+        # Restringe rels a queimadas que também ocorreram neste município —
+        # rel_imovel_queimada é construída por proximidade e pode ligar imóveis
+        # a focos de municípios vizinhos.
+        stmt = stmt.where(
+            RelImovelQueimada.queimada_evento_id.in_(
+                select(QueimadaEvento.id).where(QueimadaEvento.municipio_id == municipio_id)
+            )
+        )
         sql_partes.append(municipio_sql)
 
     stmt = stmt.order_by(func.count(RelImovelQueimada.id).desc()).limit(limite)
@@ -1321,6 +1329,8 @@ async def buscar_imoveis_por_queimada(
         .order_by(QueimadaEvento.data_ocorrencia.desc().nullslast())
         .limit(2000)
     )
+    if municipio_id is not None:
+        queimadas_stmt = queimadas_stmt.where(QueimadaEvento.municipio_id == municipio_id)
     queimadas_rows = (await session.execute(queimadas_stmt)).all()
     total_queimadas = 0
     for q in queimadas_rows:
@@ -1407,6 +1417,12 @@ async def buscar_imoveis_por_desmatamento(
                 "sql_executado": municipio_sql,
             }
         stmt = stmt.where(Municipio.id == municipio_id)
+        # Restringe rels a alertas que também ocorreram neste município.
+        stmt = stmt.where(
+            RelImovelDesmatamento.desmatamento_alerta_id.in_(
+                select(DesmatamentoAlerta.id).where(DesmatamentoAlerta.municipio_id == municipio_id)
+            )
+        )
         sql_partes.append(municipio_sql)
 
     stmt = stmt.order_by(func.count(RelImovelDesmatamento.id).desc()).limit(limite)
@@ -1466,6 +1482,8 @@ async def buscar_imoveis_por_desmatamento(
         .order_by(DesmatamentoAlerta.data_ocorrencia.desc().nullslast())
         .limit(2000)
     )
+    if municipio_id is not None:
+        alertas_stmt = alertas_stmt.where(DesmatamentoAlerta.municipio_id == municipio_id)
     alertas_rows = (await session.execute(alertas_stmt)).all()
     total_alertas = 0
     for a in alertas_rows:
@@ -1628,6 +1646,12 @@ async def buscar_imoveis_por_quilombo(
                 "sql_executado": municipio_sql,
             }
         stmt = stmt.where(Municipio.id == municipio_id)
+        # Restringe rels a territórios quilombolas que também estão neste município.
+        stmt = stmt.where(
+            RelImovelQuilombo.territorio_quilombola_id.in_(
+                select(TerritorioQuilombola.id).where(TerritorioQuilombola.municipio_id == municipio_id)
+            )
+        )
         sql_partes.append(municipio_sql)
 
     stmt = stmt.order_by(RelImovelQuilombo.percentual_sobreposicao.desc()).limit(limite)
@@ -1684,6 +1708,8 @@ async def buscar_imoveis_por_quilombo(
         .where(TerritorioQuilombola.id.in_(rel_subq))
         .limit(500)
     )
+    if municipio_id is not None:
+        quilombos_stmt = quilombos_stmt.where(TerritorioQuilombola.municipio_id == municipio_id)
     quilombos_rows = (await session.execute(quilombos_stmt)).all()
     total_quilombos = 0
     for q in quilombos_rows:
