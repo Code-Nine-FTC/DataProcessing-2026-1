@@ -59,7 +59,7 @@ class ChatService:
             mapa=mapa,
             bbox=result["bbox"],
             status=result["status"],
-            qgis=montar_integracao_qgis(),
+            qgis=montar_integracao_qgis(result["resposta_id"]),
         )
 
     # ------------------------------------------------------------------
@@ -136,7 +136,7 @@ class ChatService:
                     fontes=fontes,
                     feedback=feedback_info,
                     mapa=mapa_turno,
-                    qgis=montar_integracao_qgis() if resposta else None,
+                    qgis=montar_integracao_qgis(resposta.id) if resposta else None,
                 )
             )
 
@@ -163,6 +163,23 @@ class ChatService:
             bbox=bbox,
             status=last_status,
         )
+
+    # ------------------------------------------------------------------
+    # GeoJSON de uma resposta (QGIS via HTTP)
+    # ------------------------------------------------------------------
+
+    async def geojson_por_resposta(
+        self, resposta_id: UUID, session: AsyncSession
+    ) -> dict:
+        from fastapi import HTTPException
+
+        resposta = await session.get(RespostaSistema, resposta_id)
+        if resposta is None or not resposta.mapa_geojson:
+            raise HTTPException(
+                status_code=404,
+                detail="Resposta não encontrada ou sem GeoJSON armazenado.",
+            )
+        return resposta.mapa_geojson
 
     # ------------------------------------------------------------------
     # Desativar chat (soft delete)
