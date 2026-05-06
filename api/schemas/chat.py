@@ -41,6 +41,25 @@ class FonteCitada(BaseModel):
     url: Optional[str] = None
 
 
+class QgisIntegracao(BaseModel):
+    """Instruções para carregar no QGIS o GeoJSON desta resposta (HTTP ou arquivo a partir de «mapa»)."""
+
+    crs: str = Field(
+        "EPSG:4326",
+        description="CRS do GeoJSON em «mapa» (WGS 84).",
+    )
+    geojson_url_path: str = Field(
+        ...,
+        description=(
+            "Caminho GET relativo à raiz da API: mesmo conteúdo que «mapa», persistido em `resposta_sistema.mapa_geojson`."
+        ),
+    )
+    como_carregar_no_qgis: str = Field(
+        ...,
+        description="Como abrir no QGIS via URL (geojson_url_path) ou exportando «mapa» para .geojson.",
+    )
+
+
 class ChatMensagemResponse(BaseModel):
     chat_id: UUID
     consulta_id: UUID
@@ -53,6 +72,10 @@ class ChatMensagemResponse(BaseModel):
         description="Bounding box [minLng, minLat, maxLng, maxLat] para ajuste da câmera Leaflet.",
     )
     status: str = Field(description="sucesso | sem_resultado | fora_escopo | erro")
+    qgis: QgisIntegracao = Field(
+        ...,
+        description="Como usar o «mapa» desta resposta no QGIS.",
+    )
 
 class ChatResumo(BaseModel):
     id: UUID
@@ -69,6 +92,14 @@ class MensagemHistorico(BaseModel):
     turno: int
     fontes: List[FonteCitada] = []
     feedback: Optional[FeedbackInfo] = None
+    mapa: Optional[FeatureCollection] = Field(
+        None,
+        description="GeoJSON deste turno (`resposta_sistema.mapa_geojson`).",
+    )
+    qgis: Optional[QgisIntegracao] = Field(
+        None,
+        description="Presente quando há resposta persistida; uso do «mapa» no QGIS.",
+    )
 
 
 class ChatHistoricoResponse(BaseModel):
