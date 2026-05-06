@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Limiar mínimo de confiança para aceitar a intenção detectada.
 # Abaixo disso, cai para buscar_documentos (mais genérico).
 # Com 9 classes, probabilidades acima de 0.35 já indicam predição confiável.
-CONFIDENCE_THRESHOLD = 0.35
+CONFIDENCE_THRESHOLD = 0.20
 
 
 def _extrair_feedback_contexto(historico: list[dict]) -> dict[str, int]:

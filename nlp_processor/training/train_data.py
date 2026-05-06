@@ -254,6 +254,80 @@ TRAIN_DATA: list[tuple[str, str]] = [
     ("mapa propriedades rurais zonas protecao ambiental estado", "buscar_imoveis_em_camadas"),
     ("quais sao as propriedades em camadas ambientais estaduais", "buscar_imoveis_em_camadas"),
 
+    # ---- buscar_imoveis_queimada ----
+    # Imóveis rurais relacionados a focos de queimada (rel_imovel_queimada)
+    ("Imóveis rurais afetados por queimadas em Itapira", "buscar_imoveis_queimada"),
+    ("Quais propriedades rurais foram atingidas por queimadas no estado de São Paulo?", "buscar_imoveis_queimada"),
+    ("Queimadas que afetaram imóveis rurais em Ribeirão Preto", "buscar_imoveis_queimada"),
+    ("Fazendas atingidas por focos de incêndio em Sorocaba", "buscar_imoveis_queimada"),
+    ("Propriedades rurais com queimadas registradas em Campinas", "buscar_imoveis_queimada"),
+    ("Quais imóveis rurais tiveram queimadas próximas em SP?", "buscar_imoveis_queimada"),
+    ("Imóveis com focos de calor em Bauru", "buscar_imoveis_queimada"),
+    ("Mostre as fazendas afetadas por incêndio em Marília", "buscar_imoveis_queimada"),
+    ("Propriedades rurais que foram queimadas em Araçatuba", "buscar_imoveis_queimada"),
+    ("Quais propriedades CAR sofreram queimadas em Presidente Prudente?", "buscar_imoveis_queimada"),
+    ("Fazendas que pegaram fogo no estado de SP", "buscar_imoveis_queimada"),
+    ("Imóveis rurais com queimadas no município de Bauru", "buscar_imoveis_queimada"),
+    ("Propriedades atingidas por focos de incêndio no interior paulista", "buscar_imoveis_queimada"),
+    ("Imóveis afetados por queimadas no estado de São Paulo", "buscar_imoveis_queimada"),
+    ("Queimadas que atingiram propriedades rurais em Itapira", "buscar_imoveis_queimada"),
+    ("Quais fazendas tiveram foco de calor em Sorocaba?", "buscar_imoveis_queimada"),
+    # paráfrases sem acento
+    ("imovel rural queimado em itapira", "buscar_imoveis_queimada"),
+    ("fazendas com foco de calor em sp", "buscar_imoveis_queimada"),
+    ("queimada que afetou propriedade rural ribeirao", "buscar_imoveis_queimada"),
+    ("quais fazendas tiveram queimada em campinas", "buscar_imoveis_queimada"),
+    ("imoveis com queimadas registradas no estado de sp", "buscar_imoveis_queimada"),
+    ("propriedade rural atingida por incendio interior paulista", "buscar_imoveis_queimada"),
+    ("car com foco de queimada em itapira", "buscar_imoveis_queimada"),
+    ("fazenda atingida por queimada no municipio", "buscar_imoveis_queimada"),
+
+    # ---- buscar_imoveis_quilombo ----
+    # Imóveis rurais sobrepostos a territórios quilombolas (rel_imovel_quilombo)
+    ("Imóveis rurais sobrepostos a quilombolas no Vale do Ribeira", "buscar_imoveis_quilombo"),
+    ("Quais propriedades rurais estão em territórios quilombolas em SP?", "buscar_imoveis_quilombo"),
+    ("Fazendas dentro de áreas quilombolas no estado de São Paulo", "buscar_imoveis_quilombo"),
+    ("Imóveis rurais em comunidades quilombolas em Eldorado", "buscar_imoveis_quilombo"),
+    ("Propriedades CAR sobrepostas a quilombos em SP", "buscar_imoveis_quilombo"),
+    ("Quais imóveis rurais incidem em terras de quilombo no litoral paulista?", "buscar_imoveis_quilombo"),
+    ("Fazendas em sobreposição com quilombolas em Iguape", "buscar_imoveis_quilombo"),
+    ("Mostre os imóveis rurais em quilombos no estado", "buscar_imoveis_quilombo"),
+    ("Propriedades em territórios quilombolas paulistas", "buscar_imoveis_quilombo"),
+    ("Imóveis rurais sobrepostos a comunidades remanescentes de quilombo", "buscar_imoveis_quilombo"),
+    ("Quais fazendas estão em terras de quilombo em SP?", "buscar_imoveis_quilombo"),
+    ("Propriedades rurais que afetam quilombolas no Vale do Ribeira", "buscar_imoveis_quilombo"),
+    # paráfrases sem acento
+    ("imoveis rurais em territorio quilombola sp", "buscar_imoveis_quilombo"),
+    ("fazendas dentro de quilombo vale ribeira", "buscar_imoveis_quilombo"),
+    ("propriedades sobrepostas a quilombolas eldorado", "buscar_imoveis_quilombo"),
+    ("imovel rural em area quilombola litoral sul", "buscar_imoveis_quilombo"),
+    ("quais fazendas estao em quilombo em sp", "buscar_imoveis_quilombo"),
+    ("car de fazenda em terra de quilombo iguape", "buscar_imoveis_quilombo"),
+
+    # ---- buscar_imoveis_desmatamento ----
+    # Imóveis rurais com alertas de desmatamento (rel_imovel_desmatamento)
+    ("Imóveis rurais com alertas de desmatamento em SP", "buscar_imoveis_desmatamento"),
+    ("Quais propriedades sofreram desmatamento em Itapira?", "buscar_imoveis_desmatamento"),
+    ("Fazendas afetadas por desmatamento no estado de São Paulo", "buscar_imoveis_desmatamento"),
+    ("Propriedades rurais com supressão vegetal em Sorocaba", "buscar_imoveis_desmatamento"),
+    ("Imóveis rurais que tiveram desmatamento em Campinas", "buscar_imoveis_desmatamento"),
+    ("Desmatamento em propriedades rurais paulistas", "buscar_imoveis_desmatamento"),
+    ("Quais imóveis CAR estão sobrepostos a alertas de desmatamento?", "buscar_imoveis_desmatamento"),
+    ("Fazendas com alertas DETER em Ribeirão Preto", "buscar_imoveis_desmatamento"),
+    ("Propriedades rurais atingidas por desmatamento no Vale do Ribeira", "buscar_imoveis_desmatamento"),
+    ("Imóveis com supressão de vegetação em Bauru", "buscar_imoveis_desmatamento"),
+    ("Mostre os imóveis afetados por desmatamento no estado", "buscar_imoveis_desmatamento"),
+    ("Quais propriedades rurais foram desmatadas em SP?", "buscar_imoveis_desmatamento"),
+    ("Desmatamento que atingiu fazendas em Itapira", "buscar_imoveis_desmatamento"),
+    ("Imóveis rurais com sobreposição a alertas PRODES em SP", "buscar_imoveis_desmatamento"),
+    # paráfrases sem acento
+    ("imovel rural desmatado em itapira", "buscar_imoveis_desmatamento"),
+    ("fazenda com alerta deter sp", "buscar_imoveis_desmatamento"),
+    ("propriedades rurais com supressao vegetal estado", "buscar_imoveis_desmatamento"),
+    ("imovel com desmatamento campinas", "buscar_imoveis_desmatamento"),
+    ("car com alerta de desmatamento sp", "buscar_imoveis_desmatamento"),
+    ("fazenda atingida por desmatamento sorocaba", "buscar_imoveis_desmatamento"),
+
     # ---- buscar_documentos ----
 
     # ---- buscar_passivos_imovel ----
