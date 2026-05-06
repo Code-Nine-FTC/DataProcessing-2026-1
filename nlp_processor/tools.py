@@ -48,7 +48,9 @@ from models.db_model import (
     ImovelRural,
     Municipio,
     QueimadaEvento,
+    RelImovelDesmatamento,
     RelImovelQueimada,
+    RelImovelUC,
     RelImovelTI,
     RelImovelQuilombo,
     classificar_nivel_risco_ambiental,
@@ -183,7 +185,7 @@ async def buscar_passivos_em_imovel(
                 UnidadeConservacao.categoria,
                 _geom_as_geojson(UnidadeConservacao.geom).label("geom_json"),
             )
-            .join(RelImovelUC, RelImovelUC.imovel_rural_id == imovel_db.id)
+            .join(RelImovelUC, RelImovelUC.unidade_conservacao_id == UnidadeConservacao.id)
             .where(RelImovelUC.imovel_rural_id == imovel_db.id)
         )
         rows_uc = (await session.execute(stmt_uc)).all()
@@ -212,7 +214,7 @@ async def buscar_passivos_em_imovel(
                 TerraIndigena.nome,
                 _geom_as_geojson(TerraIndigena.geom).label("geom_json"),
             )
-            .join(RelImovelTI, RelImovelTI.imovel_rural_id == imovel_db.id)
+            .join(RelImovelTI, RelImovelTI.terra_indigena_id == TerraIndigena.id)
             .where(RelImovelTI.imovel_rural_id == imovel_db.id)
         )
         rows_ti = (await session.execute(stmt_ti)).all()
@@ -237,7 +239,7 @@ async def buscar_passivos_em_imovel(
                 TerritorioQuilombola.nome,
                 _geom_as_geojson(TerritorioQuilombola.geom).label("geom_json"),
             )
-            .join(RelImovelQuilombo, RelImovelQuilombo.imovel_rural_id == imovel_db.id)
+            .join(RelImovelQuilombo, RelImovelQuilombo.territorio_quilombola_id == TerritorioQuilombola.id)
             .where(RelImovelQuilombo.imovel_rural_id == imovel_db.id)
         )
         rows_qm = (await session.execute(stmt_qm)).all()
@@ -1214,6 +1216,7 @@ async def buscar_imoveis_por_queimada(
 ) -> dict:
     """Busca imóveis rurais relacionados a queimadas (via rel_imovel_queimada)."""
     sql_partes: list[str] = []
+    municipio_id: Optional[int] = None
     stmt = (
         select(
             ImovelRural.id,
@@ -1258,6 +1261,14 @@ async def buscar_imoveis_por_queimada(
                 "sql_executado": municipio_sql,
             }
         stmt = stmt.where(Municipio.id == municipio_id)
+        # Restringe rels a queimadas que também ocorreram neste município —
+        # rel_imovel_queimada é construída por proximidade e pode ligar imóveis
+        # a focos de municípios vizinhos.
+        stmt = stmt.where(
+            RelImovelQueimada.queimada_evento_id.in_(
+                select(QueimadaEvento.id).where(QueimadaEvento.municipio_id == municipio_id)
+            )
+        )
         sql_partes.append(municipio_sql)
 
     stmt = stmt.order_by(func.count(RelImovelQueimada.id).desc()).limit(limite)
@@ -1292,14 +1303,215 @@ async def buscar_imoveis_por_queimada(
                 "url": None,
             }
 
+    total_imoveis = len(features)
+
+    # Features adicionais: focos de queimada relacionados aos imóveis acima.
+    rel_subq = (
+        select(RelImovelQueimada.queimada_evento_id)
+        .join(ImovelRural, ImovelRural.id == RelImovelQueimada.imovel_rural_id)
+        .join(Municipio, ImovelRural.municipio_id == Municipio.id, isouter=True)
+        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
+        .where(Estado.sigla == "SP")
+    )
+    if municipio_id is not None:
+        rel_subq = rel_subq.where(Municipio.id == municipio_id)
+
+    queimadas_stmt = (
+        select(
+            QueimadaEvento.id,
+            QueimadaEvento.data_ocorrencia,
+            QueimadaEvento.fonte_sensor,
+            QueimadaEvento.intensidade,
+            QueimadaEvento.risco_fogo,
+            _geom_as_geojson(QueimadaEvento.geom).label("geom_json"),
+        )
+        .where(QueimadaEvento.id.in_(rel_subq))
+        .order_by(QueimadaEvento.data_ocorrencia.desc().nullslast())
+        .limit(2000)
+    )
+    if municipio_id is not None:
+        queimadas_stmt = queimadas_stmt.where(QueimadaEvento.municipio_id == municipio_id)
+    queimadas_rows = (await session.execute(queimadas_stmt)).all()
+    total_queimadas = 0
+    for q in queimadas_rows:
+        if not q.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(q.geom_json),
+            "properties": {
+                "tipo": "queimada_evento_relacionada",
+                "data_ocorrencia": q.data_ocorrencia.isoformat() if q.data_ocorrencia else None,
+                "sensor": q.fonte_sensor,
+                "intensidade": float(q.intensidade) if q.intensidade else None,
+                "risco_fogo": float(q.risco_fogo) if q.risco_fogo else None,
+            },
+        })
+        total_queimadas += 1
+
+    escopo_txt = f"no município de **{municipio}**" if municipio else "no estado de **São Paulo**"
     return {
-        "total": len(features),
+        "total": total_imoveis,
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} imóveis rurais relacionados a queimadas"
-        + (f" em {municipio}" if municipio else " no estado de SP")
-        + ".",
+        "descricao": (
+            f"Foram encontrados **{total_imoveis} imóveis rurais** afetados por "
+            f"**{total_queimadas} focos de queimada** {escopo_txt}. "
+            "O mapa exibe os imóveis (polígonos) e os focos de queimada relacionados (pontos)."
+        ),
+        "sql_executado": sql_executado,
+    }
+
+
+async def buscar_imoveis_por_desmatamento(
+    session: AsyncSession,
+    municipio: Optional[str] = None,
+    limite: int = 500,
+) -> dict:
+    """Busca imóveis rurais relacionados a alertas de desmatamento (via rel_imovel_desmatamento)."""
+    sql_partes: list[str] = []
+    municipio_id: Optional[int] = None
+    stmt = (
+        select(
+            ImovelRural.id,
+            ImovelRural.codigo_car,
+            ImovelRural.nome_imovel,
+            ImovelRural.area_ha,
+            Municipio.nome.label("municipio_nome"),
+            _geom_as_geojson(ImovelRural.geom).label("geom_json"),
+            FonteDado.nome.label("fonte_nome"),
+            FonteDado.orgao_responsavel,
+            func.count(RelImovelDesmatamento.id).label("num_alertas_desmatamento"),
+            func.sum(RelImovelDesmatamento.area_intersecao_ha).label("area_total_intersecao_ha"),
+            func.avg(RelImovelDesmatamento.percentual_sobreposicao).label("percentual_medio_sobreposicao"),
+            func.max(RelImovelDesmatamento.percentual_sobreposicao).label("percentual_max_sobreposicao"),
+        )
+        .join(RelImovelDesmatamento, ImovelRural.id == RelImovelDesmatamento.imovel_rural_id)
+        .join(Municipio, ImovelRural.municipio_id == Municipio.id, isouter=True)
+        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
+        .join(Dataset, ImovelRural.dataset_id == Dataset.id, isouter=True)
+        .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
+        .where(Estado.sigla == "SP")
+        .group_by(
+            ImovelRural.id,
+            ImovelRural.codigo_car,
+            ImovelRural.nome_imovel,
+            ImovelRural.area_ha,
+            Municipio.nome,
+            ImovelRural.geom,
+            FonteDado.nome,
+            FonteDado.orgao_responsavel,
+        )
+    )
+
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 imóveis relacionados a desmatamento em {municipio}.",
+                "sql_executado": municipio_sql,
+            }
+        stmt = stmt.where(Municipio.id == municipio_id)
+        # Restringe rels a alertas que também ocorreram neste município.
+        stmt = stmt.where(
+            RelImovelDesmatamento.desmatamento_alerta_id.in_(
+                select(DesmatamentoAlerta.id).where(DesmatamentoAlerta.municipio_id == municipio_id)
+            )
+        )
+        sql_partes.append(municipio_sql)
+
+    stmt = stmt.order_by(func.count(RelImovelDesmatamento.id).desc()).limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
+
+    rows = (await session.execute(stmt)).all()
+
+    features = []
+    fontes: dict[str, dict] = {}
+    for row in rows:
+        if not row.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geom_json),
+            "properties": {
+                "tipo": "imovel_rural_desmatamento",
+                "codigo_car": str(row.codigo_car) if row.codigo_car else None,
+                "nome_imovel": row.nome_imovel,
+                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "municipio": row.municipio_nome,
+                "num_alertas_desmatamento": int(row.num_alertas_desmatamento) if row.num_alertas_desmatamento else 0,
+                "area_total_intersecao_ha": float(row.area_total_intersecao_ha) if row.area_total_intersecao_ha else None,
+                "percentual_medio_sobreposicao": float(row.percentual_medio_sobreposicao) if row.percentual_medio_sobreposicao else None,
+                "percentual_max_sobreposicao": float(row.percentual_max_sobreposicao) if row.percentual_max_sobreposicao else None,
+            },
+        })
+        if row.fonte_nome:
+            fontes[row.fonte_nome] = {
+                "nome": row.fonte_nome,
+                "orgao": row.orgao_responsavel,
+                "url": None,
+            }
+
+    total_imoveis = len(features)
+
+    # Features adicionais: alertas de desmatamento relacionados aos imóveis acima.
+    rel_subq = (
+        select(RelImovelDesmatamento.desmatamento_alerta_id)
+        .join(ImovelRural, ImovelRural.id == RelImovelDesmatamento.imovel_rural_id)
+        .join(Municipio, ImovelRural.municipio_id == Municipio.id, isouter=True)
+        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
+        .where(Estado.sigla == "SP")
+    )
+    if municipio_id is not None:
+        rel_subq = rel_subq.where(Municipio.id == municipio_id)
+
+    alertas_stmt = (
+        select(
+            DesmatamentoAlerta.id,
+            DesmatamentoAlerta.data_ocorrencia,
+            DesmatamentoAlerta.tipo_alerta,
+            DesmatamentoAlerta.area_ha,
+            _geom_as_geojson(DesmatamentoAlerta.geom).label("geom_json"),
+        )
+        .where(DesmatamentoAlerta.id.in_(rel_subq))
+        .order_by(DesmatamentoAlerta.data_ocorrencia.desc().nullslast())
+        .limit(2000)
+    )
+    if municipio_id is not None:
+        alertas_stmt = alertas_stmt.where(DesmatamentoAlerta.municipio_id == municipio_id)
+    alertas_rows = (await session.execute(alertas_stmt)).all()
+    total_alertas = 0
+    for a in alertas_rows:
+        if not a.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(a.geom_json),
+            "properties": {
+                "tipo": "desmatamento_alerta_relacionado",
+                "data_ocorrencia": a.data_ocorrencia.isoformat() if a.data_ocorrencia else None,
+                "tipo_alerta": a.tipo_alerta,
+                "area_ha": float(a.area_ha) if a.area_ha else None,
+            },
+        })
+        total_alertas += 1
+
+    escopo_txt = f"no município de **{municipio}**" if municipio else "no estado de **São Paulo**"
+    return {
+        "total": total_imoveis,
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": list(fontes.values()),
+        "descricao": (
+            f"Foram encontrados **{total_imoveis} imóveis rurais** afetados por "
+            f"**{total_alertas} alertas de desmatamento** {escopo_txt}. "
+            "O mapa exibe os imóveis e os polígonos dos alertas relacionados."
+        ),
         "sql_executado": sql_executado,
     }
 
@@ -1398,6 +1610,7 @@ async def buscar_imoveis_por_quilombo(
 ) -> dict:
     """Busca imóveis rurais que sobrepõem territórios quilombolas."""
     sql_partes: list[str] = []
+    municipio_id: Optional[int] = None
     stmt = (
         select(
             ImovelRural.id,
@@ -1433,6 +1646,12 @@ async def buscar_imoveis_por_quilombo(
                 "sql_executado": municipio_sql,
             }
         stmt = stmt.where(Municipio.id == municipio_id)
+        # Restringe rels a territórios quilombolas que também estão neste município.
+        stmt = stmt.where(
+            RelImovelQuilombo.territorio_quilombola_id.in_(
+                select(TerritorioQuilombola.id).where(TerritorioQuilombola.municipio_id == municipio_id)
+            )
+        )
         sql_partes.append(municipio_sql)
 
     stmt = stmt.order_by(RelImovelQuilombo.percentual_sobreposicao.desc()).limit(limite)
@@ -1466,14 +1685,58 @@ async def buscar_imoveis_por_quilombo(
                 "url": None,
             }
 
+    total_imoveis = len(features)
+
+    # Features adicionais: territórios quilombolas relacionados aos imóveis acima.
+    rel_subq = (
+        select(RelImovelQuilombo.territorio_quilombola_id)
+        .join(ImovelRural, ImovelRural.id == RelImovelQuilombo.imovel_rural_id)
+        .join(Municipio, ImovelRural.municipio_id == Municipio.id, isouter=True)
+        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
+        .where(Estado.sigla == "SP")
+    )
+    if municipio_id is not None:
+        rel_subq = rel_subq.where(Municipio.id == municipio_id)
+
+    quilombos_stmt = (
+        select(
+            TerritorioQuilombola.id,
+            TerritorioQuilombola.nome,
+            TerritorioQuilombola.area_ha,
+            _geom_as_geojson(TerritorioQuilombola.geom).label("geom_json"),
+        )
+        .where(TerritorioQuilombola.id.in_(rel_subq))
+        .limit(500)
+    )
+    if municipio_id is not None:
+        quilombos_stmt = quilombos_stmt.where(TerritorioQuilombola.municipio_id == municipio_id)
+    quilombos_rows = (await session.execute(quilombos_stmt)).all()
+    total_quilombos = 0
+    for q in quilombos_rows:
+        if not q.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(q.geom_json),
+            "properties": {
+                "tipo": "territorio_quilombola_relacionado",
+                "nome": q.nome,
+                "area_ha": float(q.area_ha) if q.area_ha else None,
+            },
+        })
+        total_quilombos += 1
+
+    escopo_txt = f"no município de **{municipio}**" if municipio else "no estado de **São Paulo**"
     return {
-        "total": len(features),
+        "total": total_imoveis,
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} imóveis rurais em Territórios Quilombolas"
-        + (f" em {municipio}" if municipio else " no estado de SP")
-        + ".",
+        "descricao": (
+            f"Foram encontrados **{total_imoveis} imóveis rurais** sobrepostos a "
+            f"**{total_quilombos} territórios quilombolas** {escopo_txt}. "
+            "O mapa exibe os imóveis e os polígonos dos territórios relacionados."
+        ),
         "sql_executado": sql_executado,
     }
 
@@ -1690,6 +1953,7 @@ TOOL_FUNCTIONS = {
     "buscar_territorios_quilombolas": buscar_territorios_quilombolas,
     "buscar_imoveis_rurais": buscar_imoveis_rurais,
     "buscar_imoveis_por_queimada": buscar_imoveis_por_queimada,
+    "buscar_imoveis_por_desmatamento": buscar_imoveis_por_desmatamento,
     "buscar_imoveis_por_terra_indigena": buscar_imoveis_por_terra_indigena,
     "buscar_imoveis_por_quilombo": buscar_imoveis_por_quilombo,
     "buscar_camadas_estaduais": buscar_camadas_estaduais,
