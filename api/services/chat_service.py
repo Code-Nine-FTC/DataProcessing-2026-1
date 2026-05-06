@@ -20,6 +20,7 @@ from api.schemas.chat import (
     FonteCitada,
     MensagemHistorico,
 )
+from api.utils.qgis_integracao import montar_integracao_qgis
 from models.db_model import Chat, ConsultaUsuario, FeedbackResposta, RespostaSistema
 from nlp_processor.index import NLPProcessor
 
@@ -58,6 +59,7 @@ class ChatService:
             mapa=mapa,
             bbox=result["bbox"],
             status=result["status"],
+            qgis=montar_integracao_qgis(),
         )
 
     # ------------------------------------------------------------------
@@ -120,6 +122,10 @@ class ChatService:
                     avaliacao=feedback.avaliacao,
                 )
 
+            mapa_turno: Optional[FeatureCollection] = None
+            if resposta and resposta.mapa_geojson:
+                mapa_turno = FeatureCollection(**resposta.mapa_geojson)
+
             mensagens.append(
                 MensagemHistorico(
                     consulta_id=consulta.id,
@@ -129,6 +135,8 @@ class ChatService:
                     turno=consulta.turno or 0,
                     fontes=fontes,
                     feedback=feedback_info,
+                    mapa=mapa_turno,
+                    qgis=montar_integracao_qgis() if resposta else None,
                 )
             )
 
