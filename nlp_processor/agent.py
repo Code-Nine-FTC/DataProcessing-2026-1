@@ -185,6 +185,30 @@ async def run_agent(
             entidades.codigo_car,
         )
 
+    # Rebaixamento: se o classificador previu uma intent de relação imóvel × X
+    # mas o texto não cita imóveis/fazendas/propriedades/sítios, cair na intent
+    # base. Evita que perguntas curtas como "queimadas em Itapira" virem
+    # buscar_imoveis_queimada por overlap de vocabulário.
+    if not override_intencao:
+        rebaixamentos = {
+            "buscar_imoveis_queimada": "buscar_queimadas",
+            "buscar_imoveis_desmatamento": "buscar_desmatamentos",
+            "buscar_imoveis_quilombo": "buscar_quilombolas",
+            "buscar_imoveis_ti": "buscar_terras_indigenas",
+        }
+        tokens_imovel = (
+            "imovel", "imoveis", "fazenda", "fazendas",
+            "propriedade", "propriedades", "sitio", "sitios",
+        )
+        if intencao in rebaixamentos and not any(t in texto_norm for t in tokens_imovel):
+            nova = rebaixamentos[intencao]
+            logger.info(
+                "Rebaixando intent %s -> %s (texto sem token de imóvel/fazenda/propriedade).",
+                intencao, nova,
+            )
+            intencao = nova
+            override_intencao = True
+
     # Se confiança é baixa MAS extraímos um município, assume buscar_queimadas
     # (a consulta mais comum é por focos em um local)
     if not override_intencao and confianca < CONFIDENCE_THRESHOLD:
