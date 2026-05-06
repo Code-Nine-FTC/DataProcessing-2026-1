@@ -58,6 +58,10 @@ async def listar_chats(
     "/{chat_id}/historico",
     response_model=ChatHistoricoResponse,
     summary="Retorna o histórico de mensagens de um chat",
+    description=(
+        "Cada item em «mensagens» inclui «mapa» (GeoJSON vindo do banco) e «qgis» com "
+        "instruções para o QGIS. Não há rota HTTP separada só para GeoJSON."
+    ),
 )
 async def historico_chat(
     chat_id: UUID,
