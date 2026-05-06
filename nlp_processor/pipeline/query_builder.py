@@ -27,6 +27,7 @@ _INTENT_MAP: dict[str, str] = {
     "buscar_quilombolas": "buscar_territorios_quilombolas",
     "buscar_imoveis_rurais": "buscar_imoveis_rurais",
     "buscar_imoveis_queimada": "buscar_imoveis_por_queimada",
+    "buscar_imoveis_desmatamento": "buscar_imoveis_por_desmatamento",
     "buscar_imoveis_ti": "buscar_imoveis_por_terra_indigena",
     "buscar_imoveis_quilombo": "buscar_imoveis_por_quilombo",
     "buscar_camadas_estaduais": "buscar_camadas_estaduais",
