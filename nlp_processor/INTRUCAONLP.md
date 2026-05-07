@@ -54,11 +54,6 @@ Envia uma pergunta ao agente ambiental. Retorna resposta textual + GeoJSON para 
     }
   ],
   "bbox": [-47.5, -23.4, -46.8, -22.6],
-  "qgis": {
-    "crs": "EPSG:4326",
-    "geojson_url_path": "/chat/resposta/e5f6g7h8-1234-5678-abcd-ef1234567890/geojson",
-    "como_carregar_no_qgis": "No QGIS: Camada → Adicionar camada → Adicionar camada vetorial → em «Fonte» use a URI completa (URL base do servidor + caminho abaixo). Caminho: /chat/resposta/.... CRS da camada: WGS 84 / EPSG:4326."
-  },
   "mapa": {
     "type": "FeatureCollection",
     "features": [
@@ -89,12 +84,6 @@ Envia uma pergunta ao agente ambiental. Retorna resposta textual + GeoJSON para 
 | `sem_resultado` | Pergunta válida, mas sem dados nas fontes |
 | `fora_escopo` | Pergunta fora do tema ambiental/SP |
 | `erro` | Falha interna |
-
----
-
-### GET `/chat/resposta/{resposta_id}/geojson`
-
-Retorna o **mesmo GeoJSON** gravado em banco para aquela resposta (`resposta_sistema.mapa_geojson`). Use esta URL no QGIS (camada vetorial via HTTP) para não reprocessar o NLP. CRS: **EPSG:4326**. Se a resposta não existir: `404`.
 
 ---
 
@@ -131,11 +120,6 @@ Retorna todas as mensagens de um chat.
       "pergunta": "Quais foram os focos de queimada em Campinas em 2024?",
       "resposta": "Com base nos dados do **INPE BDQueimadas**...",
       "turno": 1,
-      "qgis": {
-        "crs": "EPSG:4326",
-        "geojson_url_path": "/chat/resposta/e5f6g7h8-1234-5678-abcd-ef1234567890/geojson",
-        "como_carregar_no_qgis": "No QGIS: use URI completa (URL base + geojson_url_path). CRS: WGS 84 / EPSG:4326."
-      },
       "fontes": [
         {
           "nome": "INPE BDQueimadas",
