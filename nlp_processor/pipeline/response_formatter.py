@@ -146,6 +146,121 @@ def _anexar_descricao(texto: str, descricao_consulta: str | None) -> str:
     return f"{texto}\n\n{descricao_consulta}"
 
 
+_TIPO_IMOVEL_POR_INTENCAO = {
+    "buscar_imoveis_queimada": "imovel_rural_queimada",
+    "buscar_imoveis_desmatamento": "imovel_rural_desmatamento",
+    "buscar_imoveis_quilombo": "imovel_rural_quilombo",
+    "buscar_imoveis_ti": "imovel_rural_ti",
+}
+
+
+def _detalhar_passivos_imovel(
+    features: list[dict] | None,
+    limite_por_tipo: int = 5,
+) -> str:
+    """Para `buscar_passivos_imovel`: lista nomes de UCs/TIs/quilombos com sobreposição."""
+    if not features:
+        return ""
+
+    grupos: list[tuple[str, str]] = [
+        ("unidade_conservacao", "Unidades de Conservação"),
+        ("terra_indigena", "Terras Indígenas"),
+        ("quilombo", "Territórios Quilombolas"),
+    ]
+
+    blocos: list[str] = []
+    for tipo, titulo in grupos:
+        items = [
+            f.get("properties", {})
+            for f in features
+            if f.get("properties", {}).get("tipo") == tipo
+        ]
+        if not items:
+            continue
+
+        cabecalho = (
+            f"**{titulo} ({len(items)}):**"
+            if len(items) <= limite_por_tipo
+            else f"**{titulo} (top {limite_por_tipo} de {len(items)}):**"
+        )
+        linhas = [cabecalho]
+        for prop in items[:limite_por_tipo]:
+            partes = [str(prop.get("nome") or "(sem nome)")]
+            categoria = prop.get("categoria")
+            if categoria:
+                partes.append(str(categoria))
+            pct = prop.get("percentual_sobreposicao")
+            if pct:
+                partes.append(f"{pct:.2f}% sobreposto")
+            area = prop.get("area_intersecao_ha")
+            if area:
+                partes.append(f"{area:.2f} ha intersectados")
+            linhas.append("- " + " — ".join(partes))
+        if len(items) > limite_por_tipo:
+            linhas.append(f"- … e mais {len(items) - limite_por_tipo} no mapa.")
+        blocos.append("\n".join(linhas))
+
+    return "\n\n".join(blocos)
+
+
+def _listar_imoveis_afetados(
+    features: list[dict] | None,
+    intencao: str,
+    limite: int = 10,
+) -> str:
+    """Gera bloco markdown com codigo_car dos imóveis retornados pela tool de relação."""
+    tipo_alvo = _TIPO_IMOVEL_POR_INTENCAO.get(intencao)
+    if not features or not tipo_alvo:
+        return ""
+
+    imoveis = [
+        f.get("properties", {})
+        for f in features
+        if f.get("properties", {}).get("tipo") == tipo_alvo
+    ]
+    if not imoveis:
+        return ""
+
+    titulo = (
+        f"**Imóveis afetados (top {min(len(imoveis), limite)} de {len(imoveis)}):**"
+        if len(imoveis) > limite
+        else f"**Imóveis afetados ({len(imoveis)}):**"
+    )
+    linhas = [titulo]
+    for prop in imoveis[:limite]:
+        codigo = prop.get("codigo_car") or "(sem CAR)"
+        partes = [f"`{codigo}`"]
+        nome = prop.get("nome_imovel")
+        if nome:
+            partes.append(str(nome))
+
+        if intencao == "buscar_imoveis_queimada":
+            n = prop.get("num_queimadas")
+            if n:
+                partes.append(f"{n} foco(s)")
+            risco = prop.get("nivel_risco_ambiental")
+            if risco:
+                partes.append(f"risco {risco}")
+        elif intencao == "buscar_imoveis_desmatamento":
+            n = prop.get("num_alertas_desmatamento")
+            if n:
+                partes.append(f"{n} alerta(s)")
+            area = prop.get("area_total_intersecao_ha")
+            if area:
+                partes.append(f"{area:.2f} ha intersectados")
+        elif intencao in ("buscar_imoveis_quilombo", "buscar_imoveis_ti"):
+            pct = prop.get("percentual_sobreposicao")
+            if pct:
+                partes.append(f"{pct:.1f}% sobreposto")
+
+        linhas.append("- " + " — ".join(partes))
+
+    if len(imoveis) > limite:
+        linhas.append(f"- … e mais {len(imoveis) - limite} imóvel(is) no mapa.")
+
+    return "\n".join(linhas)
+
+
 # ---------------------------------------------------------------------------
 # Função principal
 # ---------------------------------------------------------------------------
@@ -159,6 +274,7 @@ def formatar_resposta(
     confianca: float,
     descricao_consulta: str | None = None,
     feedback_contexto: dict[str, Any] | None = None,
+    features: list[dict] | None = None,
 ) -> str:
     """
     Gera o texto de resposta formatado em Markdown.
@@ -190,11 +306,19 @@ def formatar_resposta(
         return _aplicar_feedback_contexto(texto, feedback_contexto)
 
     if intencao == "buscar_passivos_imovel":
-        codigo = entidades.codigo_car or "(codigo nao informado)"
-        texto = (
-            f"Passivos ambientais encontrados para a propriedade rural **{codigo}**."
-        )
-        texto = _anexar_descricao(texto, descricao_consulta)
+        # A tool já monta um cabeçalho com nome/CAR/município/área e a lista
+        # de passivos. Se faltar (caso de erro/imóvel não encontrado), cai num
+        # texto mínimo com o código.
+        if descricao_consulta:
+            texto = descricao_consulta
+        else:
+            codigo = entidades.codigo_car or "(codigo nao informado)"
+            texto = (
+                f"Passivos ambientais encontrados para a propriedade rural **{codigo}**."
+            )
+        detalhamento = _detalhar_passivos_imovel(features)
+        if detalhamento:
+            texto = f"{texto}\n\n{detalhamento}"
         if fontes_str:
             texto = f"{texto}\n\n{fontes_str}"
         return _aplicar_feedback_contexto(texto, feedback_contexto)
@@ -210,6 +334,9 @@ def formatar_resposta(
         texto = descricao_consulta or (
             f"Foram encontrados {total_features} resultados{escopo}."
         )
+        listagem_imoveis = _listar_imoveis_afetados(features, intencao)
+        if listagem_imoveis:
+            texto = f"{texto}\n\n{listagem_imoveis}"
         if fontes_str:
             texto = f"{texto}\n\n{fontes_str}"
         return _aplicar_feedback_contexto(texto, feedback_contexto)

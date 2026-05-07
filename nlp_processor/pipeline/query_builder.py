@@ -73,7 +73,8 @@ def _build_args(intencao: str, ent: Entidades) -> dict[str, Any]:
         pass
 
     elif intencao == "buscar_imoveis_rurais":
-        pass
+        if ent.codigo_car:
+            base["codigo_car"] = ent.codigo_car
 
     elif intencao == "buscar_camadas_estaduais":
         # Utiliza tema como filtro se disponível

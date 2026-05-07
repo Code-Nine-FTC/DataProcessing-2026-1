@@ -118,7 +118,6 @@ async def run_agent(
             "tempo_resposta_ms": int((perf_counter() - inicio) * 1000),
         }
 
-    # 1. Classificação de intenção
     if not classifier.is_ready():
         logger.error("Modelo de intenções não treinado. Execute nlp_processor.training.train")
         return _finalizar(
@@ -136,7 +135,6 @@ async def run_agent(
     intencao, confianca = classifier.predict(pergunta)
     logger.info("Intenção detectada: %s (%.2f)", intencao, confianca)
 
-    # 2. Extração de entidades (fazer ANTES de decidir sobre fallback)
     municipios_extras: list[str] = []
     try:
         municipios_extras = await _carregar_municipios_normalizados(session)
@@ -185,10 +183,51 @@ async def run_agent(
             entidades.codigo_car,
         )
 
-    # Rebaixamento: se o classificador previu uma intent de relação imóvel × X
-    # mas o texto não cita imóveis/fazendas/propriedades/sítios, cair na intent
-    # base. Evita que perguntas curtas como "queimadas em Itapira" virem
-    # buscar_imoveis_queimada por overlap de vocabulário.
+    if not override_intencao and entidades.codigo_car:
+        intencao = "buscar_passivos_imovel"
+        override_intencao = True
+        logger.info(
+            "Intent override para buscar_passivos_imovel (CAR %s sem termo específico).",
+            entidades.codigo_car,
+        )
+
+    tokens_imovel = (
+        "imovel", "imoveis", "fazenda", "fazendas",
+        "propriedade", "propriedades", "sitio", "sitios",
+    )
+
+    if not override_intencao and any(t in texto_norm for t in tokens_imovel):
+        promocoes: list[tuple[tuple[str, ...], str]] = [
+            (
+                ("queimada", "queimadas", "incendio", "incendios", "foco", "focos"),
+                "buscar_imoveis_queimada",
+            ),
+            (
+                (
+                    "desmatamento", "desmatamentos", "desmatado", "desmatada",
+                    "supressao", "deter", "prodes",
+                ),
+                "buscar_imoveis_desmatamento",
+            ),
+            (
+                ("quilombo", "quilombos", "quilombola", "quilombolas"),
+                "buscar_imoveis_quilombo",
+            ),
+            (
+                ("terra indigena", "terras indigenas", "indigena", "indigenas"),
+                "buscar_imoveis_ti",
+            ),
+        ]
+        for tokens, alvo in promocoes:
+            if intencao != alvo and any(t in texto_norm for t in tokens):
+                logger.info(
+                    "Promovendo intent %s -> %s (texto cita imóvel + %s).",
+                    intencao, alvo, tokens[0],
+                )
+                intencao = alvo
+                override_intencao = True
+                break
+
     if not override_intencao:
         rebaixamentos = {
             "buscar_imoveis_queimada": "buscar_queimadas",
@@ -196,10 +235,6 @@ async def run_agent(
             "buscar_imoveis_quilombo": "buscar_quilombolas",
             "buscar_imoveis_ti": "buscar_terras_indigenas",
         }
-        tokens_imovel = (
-            "imovel", "imoveis", "fazenda", "fazendas",
-            "propriedade", "propriedades", "sitio", "sitios",
-        )
         if intencao in rebaixamentos and not any(t in texto_norm for t in tokens_imovel):
             nova = rebaixamentos[intencao]
             logger.info(
@@ -209,10 +244,51 @@ async def run_agent(
             intencao = nova
             override_intencao = True
 
-    # Se confiança é baixa MAS extraímos um município, assume buscar_queimadas
-    # (a consulta mais comum é por focos em um local)
     if not override_intencao and confianca < CONFIDENCE_THRESHOLD:
-        if entidades.municipio:
+        fallbacks_por_token: list[tuple[tuple[str, ...], str]] = [
+            (tokens_imovel, "buscar_imoveis_rurais"),
+            (
+                ("queimada", "queimadas", "incendio", "incendios", "foco", "focos"),
+                "buscar_queimadas",
+            ),
+            (
+                (
+                    "desmatamento", "desmatamentos", "desmatado", "desmatada",
+                    "supressao", "deter", "prodes",
+                ),
+                "buscar_desmatamentos",
+            ),
+            (
+                ("quilombo", "quilombos", "quilombola", "quilombolas"),
+                "buscar_quilombolas",
+            ),
+            (
+                ("terra indigena", "terras indigenas", "indigena", "indigenas"),
+                "buscar_terras_indigenas",
+            ),
+            (
+                (
+                    "unidade de conservacao", "unidades de conservacao",
+                    "parque", "apa", "resex", "rebio", "estacao ecologica",
+                    "flona", "rppn",
+                ),
+                "buscar_unidades_conservacao",
+            ),
+        ]
+
+        intent_inferida: str | None = None
+        for tokens, alvo in fallbacks_por_token:
+            if any(t in texto_norm for t in tokens):
+                intent_inferida = alvo
+                break
+
+        if intent_inferida:
+            logger.info(
+                "Confiança baixa (%.2f) — inferindo intent %s pelo vocabulário.",
+                confianca, intent_inferida,
+            )
+            intencao = intent_inferida
+        elif entidades.municipio:
             intencao = "buscar_queimadas"
             logger.info(
                 "Confiança baixa (%.2f) mas município detectado (%s) — "
@@ -275,6 +351,7 @@ async def run_agent(
         confianca=confianca,
         descricao_consulta=resultado.get("descricao"),
         feedback_contexto=feedback_contexto or None,
+        features=features,
     )
 
     return {
