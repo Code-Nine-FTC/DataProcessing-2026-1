@@ -83,11 +83,17 @@ async def buscar_passivos_em_imovel(
         }
 
     # Localiza o imóvel
-    stmt_imovel = select(
-        ImovelRural.id,
-        ImovelRural.codigo_car,
-        ImovelRural.nome_imovel,
-        _geom_as_geojson(ImovelRural.geom).label("geom_json"),
+    stmt_imovel = (
+        select(
+            ImovelRural.id,
+            ImovelRural.codigo_car,
+            ImovelRural.nome_imovel,
+            ImovelRural.area_ha,
+            ImovelRural.situacao_cadastral,
+            Municipio.nome.label("municipio_nome"),
+            _geom_as_geojson(ImovelRural.geom).label("geom_json"),
+        )
+        .join(Municipio, ImovelRural.municipio_id == Municipio.id, isouter=True)
     )
     if codigo_car:
         stmt_imovel = stmt_imovel.where(ImovelRural.codigo_car == codigo_car)
@@ -109,6 +115,23 @@ async def buscar_passivos_em_imovel(
 
     detalhes: dict[str, Any] = {}
     features: list[dict] = []
+
+    # Inclui o polígono do próprio imóvel no mapa, para servir de contexto
+    # visual aos passivos sobrepostos/contidos.
+    if imovel_geom_json:
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(imovel_geom_json),
+            "properties": {
+                "tipo": "imovel_rural",
+                "codigo_car": imovel_db.codigo_car,
+                "nome_imovel": imovel_db.nome_imovel,
+                "area_ha": float(imovel_db.area_ha) if imovel_db.area_ha else None,
+                "municipio": imovel_db.municipio_nome,
+                "situacao_cadastral": imovel_db.situacao_cadastral,
+                "imovel_id": str(imovel_db.id),
+            },
+        })
 
     # Queimadas via rel_imovel_queimada
     stmt_q = (
@@ -183,6 +206,8 @@ async def buscar_passivos_em_imovel(
                 UnidadeConservacao.id,
                 UnidadeConservacao.nome,
                 UnidadeConservacao.categoria,
+                RelImovelUC.area_intersecao_ha,
+                RelImovelUC.percentual_sobreposicao,
                 _geom_as_geojson(UnidadeConservacao.geom).label("geom_json"),
             )
             .join(RelImovelUC, RelImovelUC.unidade_conservacao_id == UnidadeConservacao.id)
@@ -190,16 +215,27 @@ async def buscar_passivos_em_imovel(
         )
         rows_uc = (await session.execute(stmt_uc)).all()
         for r in rows_uc:
+            area_int = float(r.area_intersecao_ha) if r.area_intersecao_ha else None
+            pct_sob = float(r.percentual_sobreposicao) if r.percentual_sobreposicao else None
             detalhes["unidades_conservacao"]["items"].append({
                 "id": str(r.id),
                 "nome": r.nome,
                 "categoria": r.categoria,
+                "area_intersecao_ha": area_int,
+                "percentual_sobreposicao": pct_sob,
             })
             if r.geom_json:
                 features.append({
                     "type": "Feature",
                     "geometry": json.loads(r.geom_json),
-                    "properties": {"tipo": "unidade_conservacao", "imovel_id": str(imovel_db.id)},
+                    "properties": {
+                        "tipo": "unidade_conservacao",
+                        "nome": r.nome,
+                        "categoria": r.categoria,
+                        "area_intersecao_ha": area_int,
+                        "percentual_sobreposicao": pct_sob,
+                        "imovel_id": str(imovel_db.id),
+                    },
                 })
         detalhes["unidades_conservacao"]["total"] = len(rows_uc)
     except Exception:
@@ -212,6 +248,8 @@ async def buscar_passivos_em_imovel(
             select(
                 TerraIndigena.id,
                 TerraIndigena.nome,
+                RelImovelTI.area_intersecao_ha,
+                RelImovelTI.percentual_sobreposicao,
                 _geom_as_geojson(TerraIndigena.geom).label("geom_json"),
             )
             .join(RelImovelTI, RelImovelTI.terra_indigena_id == TerraIndigena.id)
@@ -219,12 +257,25 @@ async def buscar_passivos_em_imovel(
         )
         rows_ti = (await session.execute(stmt_ti)).all()
         for r in rows_ti:
-            detalhes["terras_indigenas"]["items"].append({"id": str(r.id), "nome": r.nome})
+            area_int = float(r.area_intersecao_ha) if r.area_intersecao_ha else None
+            pct_sob = float(r.percentual_sobreposicao) if r.percentual_sobreposicao else None
+            detalhes["terras_indigenas"]["items"].append({
+                "id": str(r.id),
+                "nome": r.nome,
+                "area_intersecao_ha": area_int,
+                "percentual_sobreposicao": pct_sob,
+            })
             if r.geom_json:
                 features.append({
                     "type": "Feature",
                     "geometry": json.loads(r.geom_json),
-                    "properties": {"tipo": "terra_indigena", "imovel_id": str(imovel_db.id)},
+                    "properties": {
+                        "tipo": "terra_indigena",
+                        "nome": r.nome,
+                        "area_intersecao_ha": area_int,
+                        "percentual_sobreposicao": pct_sob,
+                        "imovel_id": str(imovel_db.id),
+                    },
                 })
         detalhes["terras_indigenas"]["total"] = len(rows_ti)
     except Exception:
@@ -237,6 +288,8 @@ async def buscar_passivos_em_imovel(
             select(
                 TerritorioQuilombola.id,
                 TerritorioQuilombola.nome,
+                RelImovelQuilombo.area_intersecao_ha,
+                RelImovelQuilombo.percentual_sobreposicao,
                 _geom_as_geojson(TerritorioQuilombola.geom).label("geom_json"),
             )
             .join(RelImovelQuilombo, RelImovelQuilombo.territorio_quilombola_id == TerritorioQuilombola.id)
@@ -244,21 +297,50 @@ async def buscar_passivos_em_imovel(
         )
         rows_qm = (await session.execute(stmt_qm)).all()
         for r in rows_qm:
-            detalhes["quilombolas"]["items"].append({"id": str(r.id), "nome": r.nome})
+            area_int = float(r.area_intersecao_ha) if r.area_intersecao_ha else None
+            pct_sob = float(r.percentual_sobreposicao) if r.percentual_sobreposicao else None
+            detalhes["quilombolas"]["items"].append({
+                "id": str(r.id),
+                "nome": r.nome,
+                "area_intersecao_ha": area_int,
+                "percentual_sobreposicao": pct_sob,
+            })
             if r.geom_json:
                 features.append({
                     "type": "Feature",
                     "geometry": json.loads(r.geom_json),
-                    "properties": {"tipo": "quilombo", "imovel_id": str(imovel_db.id)},
+                    "properties": {
+                        "tipo": "quilombo",
+                        "nome": r.nome,
+                        "area_intersecao_ha": area_int,
+                        "percentual_sobreposicao": pct_sob,
+                        "imovel_id": str(imovel_db.id),
+                    },
                 })
         detalhes["quilombolas"]["total"] = len(rows_qm)
     except Exception:
         pass
 
+    area_str = (
+        f"{float(imovel_db.area_ha):,.2f} ha".replace(",", "X").replace(".", ",").replace("X", ".")
+        if imovel_db.area_ha
+        else "área não informada"
+    )
+    cabecalho = (
+        f"**Imóvel** {imovel_db.nome_imovel or imovel_db.codigo_car} "
+        f"(`{imovel_db.codigo_car}`)"
+    )
+    if imovel_db.municipio_nome:
+        cabecalho += f" — município de **{imovel_db.municipio_nome}**"
+    cabecalho += f" — área: **{area_str}**."
+
     descricao = (
-        f"Passivos encontrados para o imóvel {imovel_db.nome_imovel or imovel_db.codigo_car}: "
-        f"{detalhes['queimadas']['total']} queimadas, {detalhes['desmatamento']['total']} desmatamentos, "
-        f"{detalhes['unidades_conservacao']['total']} UCs, {detalhes['terras_indigenas']['total']} TIs, "
+        f"{cabecalho}\n\n"
+        f"**Passivos identificados:** "
+        f"{detalhes['queimadas']['total']} queimadas, "
+        f"{detalhes['desmatamento']['total']} desmatamentos, "
+        f"{detalhes['unidades_conservacao']['total']} UCs, "
+        f"{detalhes['terras_indigenas']['total']} TIs, "
         f"{detalhes['quilombolas']['total']} quilombolas."
     )
 
@@ -1237,6 +1319,7 @@ async def buscar_imoveis_por_queimada(
         .join(Dataset, ImovelRural.dataset_id == Dataset.id, isouter=True)
         .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
         .where(Estado.sigla == "SP")
+        .where(RelImovelQueimada.dentro_imovel.is_(True))
         .group_by(
             ImovelRural.id,
             ImovelRural.codigo_car,
@@ -1257,7 +1340,7 @@ async def buscar_imoveis_por_queimada(
                 "features": [],
                 "bbox": None,
                 "fontes": [],
-                "descricao": f"Encontrados 0 imóveis relacionados a queimadas em {municipio}.",
+                "descricao": f"Encontrados 0 imóveis com focos de queimada dentro da propriedade em {municipio}.",
                 "sql_executado": municipio_sql,
             }
         stmt = stmt.where(Municipio.id == municipio_id)
@@ -1306,12 +1389,15 @@ async def buscar_imoveis_por_queimada(
     total_imoveis = len(features)
 
     # Features adicionais: focos de queimada relacionados aos imóveis acima.
+    # Mesmo filtro `dentro_imovel = True` para que o mapa só exiba focos que
+    # efetivamente caíram dentro de algum imóvel (não focos só próximos).
     rel_subq = (
         select(RelImovelQueimada.queimada_evento_id)
         .join(ImovelRural, ImovelRural.id == RelImovelQueimada.imovel_rural_id)
         .join(Municipio, ImovelRural.municipio_id == Municipio.id, isouter=True)
         .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
         .where(Estado.sigla == "SP")
+        .where(RelImovelQueimada.dentro_imovel.is_(True))
     )
     if municipio_id is not None:
         rel_subq = rel_subq.where(Municipio.id == municipio_id)
@@ -1356,9 +1442,9 @@ async def buscar_imoveis_por_queimada(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": (
-            f"Foram encontrados **{total_imoveis} imóveis rurais** afetados por "
-            f"**{total_queimadas} focos de queimada** {escopo_txt}. "
-            "O mapa exibe os imóveis (polígonos) e os focos de queimada relacionados (pontos)."
+            f"Foram encontrados **{total_imoveis} imóveis rurais** com "
+            f"**{total_queimadas} focos de queimada dentro da propriedade** {escopo_txt}. "
+            "O mapa exibe os imóveis (polígonos) e os focos contidos neles (pontos)."
         ),
         "sql_executado": sql_executado,
     }
