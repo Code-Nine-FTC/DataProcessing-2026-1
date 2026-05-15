@@ -118,6 +118,7 @@ async def executar_consulta(
     contexto_documental = ""
     sql_partes: list[str] = []
     mensagens_erro: list[str] = []
+    bbox = None
 
     # --- consulta geoespacial ---
     tool_name = _INTENT_MAP.get(intencao)
@@ -128,6 +129,8 @@ async def executar_consulta(
             try:
                 result = await fn(session, **args)
                 features.extend(result.get("features", []))
+                if result.get("bbox"):
+                    bbox = result["bbox"]
                 for f in result.get("fontes", []):
                     fontes[f["nome"]] = f
                 descricao_partes.append(result.get("descricao", ""))
@@ -152,6 +155,7 @@ async def executar_consulta(
 
     return {
         "features": features,
+        "bbox": bbox,
         "fontes": list(fontes.values()),
         "descricao": " ".join(descricao_partes),
         "contexto_documental": contexto_documental,

@@ -183,14 +183,6 @@ async def run_agent(
             entidades.codigo_car,
         )
 
-    if not override_intencao and entidades.codigo_car:
-        intencao = "buscar_passivos_imovel"
-        override_intencao = True
-        logger.info(
-            "Intent override para buscar_passivos_imovel (CAR %s sem termo específico).",
-            entidades.codigo_car,
-        )
-
     tokens_imovel = (
         "imovel", "imoveis", "fazenda", "fazendas",
         "propriedade", "propriedades", "sitio", "sitios",
@@ -227,6 +219,44 @@ async def run_agent(
                 intencao = alvo
                 override_intencao = True
                 break
+
+    if not override_intencao and entidades.codigo_car and any(
+        termo in texto_norm
+        for termo in (
+            "imovel",
+            "imoveis",
+            "fazenda",
+            "fazendas",
+            "propriedade",
+            "propriedades",
+            "sitio",
+            "sitios",
+            "sicar",
+            "mapa",
+            "geografia",
+            "geometria",
+            "localize",
+            "localizar",
+            "mostre",
+            "mostrar",
+            "exibir",
+            "exiba",
+        )
+    ):
+        intencao = "buscar_imoveis_rurais"
+        override_intencao = True
+        logger.info(
+            "Intent override para buscar_imoveis_rurais (CAR %s com pedido de localização).",
+            entidades.codigo_car,
+        )
+
+    if not override_intencao and entidades.codigo_car:
+        intencao = "buscar_imoveis_rurais"
+        override_intencao = True
+        logger.info(
+            "Intent override para buscar_imoveis_rurais (CAR %s sem termo específico).",
+            entidades.codigo_car,
+        )
 
     if not override_intencao:
         rebaixamentos = {
@@ -357,6 +387,7 @@ async def run_agent(
     return {
         "texto_resposta": texto,
         "features": features,
+        "bbox": resultado.get("bbox"),
         "fontes": fontes,
         "status": status,
         "intencao": intencao,
@@ -367,4 +398,3 @@ async def run_agent(
         "mensagem_erro": resultado.get("mensagem_erro"),
         "tempo_resposta_ms": int((perf_counter() - inicio) * 1000),
     }
-
