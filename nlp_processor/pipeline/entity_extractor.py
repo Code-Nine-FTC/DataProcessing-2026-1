@@ -185,6 +185,11 @@ def _extrair_municipio(
     gazetteer = MUNICIPIOS_SP_BASE + (municipios_extras or [])
     # Ordena do maior para menor para evitar match parcial
     for municipio in sorted(gazetteer, key=len, reverse=True):
+        if municipio == "sao paulo" and re.search(
+            r"\b(estado|uf)\s+(?:de\s+)?sao\s+paulo\b|\bsao\s+paulo\s+(?:estado|uf)\b",
+            texto_norm,
+        ):
+            continue
         if municipio in texto_norm:
             return municipio.title()
     return None

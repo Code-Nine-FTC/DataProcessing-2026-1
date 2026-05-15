@@ -149,17 +149,6 @@ async def run_agent(
     override_intencao = False
     if entidades.codigo_car and any(
         termo in texto_norm
-        for termo in ("foco", "focos", "queimada", "incendio", "incendios")
-    ):
-        intencao = "buscar_focos_queimada_imovel"
-        override_intencao = True
-        logger.info(
-            "Intent override para CAR detectado (%s) com termo de queimada/incendio.",
-            entidades.codigo_car,
-        )
-
-    if not override_intencao and entidades.codigo_car and any(
-        termo in texto_norm
         for termo in (
             "passivo",
             "passivos",
@@ -180,6 +169,17 @@ async def run_agent(
         override_intencao = True
         logger.info(
             "Intent override para passivos com CAR detectado (%s).",
+            entidades.codigo_car,
+        )
+
+    if not override_intencao and entidades.codigo_car and any(
+        termo in texto_norm
+        for termo in ("foco", "focos", "queimada", "incendio", "incendios")
+    ):
+        intencao = "buscar_focos_queimada_imovel"
+        override_intencao = True
+        logger.info(
+            "Intent override para CAR detectado (%s) com termo de queimada/incendio.",
             entidades.codigo_car,
         )
 
@@ -366,6 +366,8 @@ async def run_agent(
     # 5. Determinar status
     if intencao == "fora_escopo":
         status = "fora_escopo"
+    elif intencao != "buscar_documentos" and not features:
+        status = "sem_resultado"
     elif not features and not contexto_documental:
         status = "sem_resultado"
     else:

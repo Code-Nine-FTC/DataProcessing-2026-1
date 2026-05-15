@@ -19,6 +19,8 @@ from nlp_processor.pipeline.preprocessor import normalizar
 
 logger = logging.getLogger(__name__)
 
+COMPLEX_POLYGON_TOLERANCE = 0.0002
+
 
 def _stmt_sql(stmt: Any) -> str:
     try:
@@ -210,7 +212,7 @@ async def buscar_passivos_em_imovel(
                 UnidadeConservacao.categoria,
                 RelImovelUC.area_intersecao_ha,
                 RelImovelUC.percentual_sobreposicao,
-                _geom_as_geojson(UnidadeConservacao.geom).label("geom_json"),
+                _geom_as_geojson(UnidadeConservacao.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
             )
             .join(RelImovelUC, RelImovelUC.unidade_conservacao_id == UnidadeConservacao.id)
             .where(RelImovelUC.imovel_rural_id == imovel_db.id)
@@ -252,7 +254,7 @@ async def buscar_passivos_em_imovel(
                 TerraIndigena.nome,
                 RelImovelTI.area_intersecao_ha,
                 RelImovelTI.percentual_sobreposicao,
-                _geom_as_geojson(TerraIndigena.geom).label("geom_json"),
+                _geom_as_geojson(TerraIndigena.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
             )
             .join(RelImovelTI, RelImovelTI.terra_indigena_id == TerraIndigena.id)
             .where(RelImovelTI.imovel_rural_id == imovel_db.id)
@@ -292,7 +294,7 @@ async def buscar_passivos_em_imovel(
                 TerritorioQuilombola.nome,
                 RelImovelQuilombo.area_intersecao_ha,
                 RelImovelQuilombo.percentual_sobreposicao,
-                _geom_as_geojson(TerritorioQuilombola.geom).label("geom_json"),
+                _geom_as_geojson(TerritorioQuilombola.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
             )
             .join(RelImovelQuilombo, RelImovelQuilombo.territorio_quilombola_id == TerritorioQuilombola.id)
             .where(RelImovelQuilombo.imovel_rural_id == imovel_db.id)
@@ -345,7 +347,6 @@ async def buscar_passivos_em_imovel(
         f"{detalhes['terras_indigenas']['total']} TIs, "
         f"{detalhes['quilombolas']['total']} quilombolas."
     )
-
     return {
         "total": sum([
             detalhes["queimadas"]["total"],
@@ -518,9 +519,12 @@ async def buscar_focos_queimada_imovel(
 # Helper interno
 # ---------------------------------------------------------------------------
 
-def _geom_as_geojson(geom_col: Any) -> Any:
+def _geom_as_geojson(geom_col: Any, simplify_tolerance: Optional[float] = None) -> Any:
     """Converte coluna de geometria para texto GeoJSON via PostGIS."""
-    return cast(func.ST_AsGeoJSON(func.ST_Transform(geom_col, 4326)), Text)
+    geom = func.ST_Transform(geom_col, 4326)
+    if simplify_tolerance is not None:
+        geom = func.ST_SimplifyPreserveTopology(geom, simplify_tolerance)
+    return cast(func.ST_AsGeoJSON(geom, 6), Text)
 
 
 def _source_dict(fonte: FonteDado) -> dict:
@@ -716,8 +720,12 @@ async def buscar_desmatamentos(
         .join(Dataset, DesmatamentoAlerta.dataset_id == Dataset.id, isouter=True)
         .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
         .join(Municipio, DesmatamentoAlerta.municipio_id == Municipio.id, isouter=True)
-        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
-        .where(Estado.sigla == "SP")
+        .where(
+            func.ST_Intersects(
+                DesmatamentoAlerta.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
     )
 
     if municipio:
@@ -731,7 +739,12 @@ async def buscar_desmatamentos(
                 "descricao": f"Encontrados 0 alertas de desmatamento em {municipio}.",
                 "sql_executado": municipio_sql,
             }
-        stmt = stmt.where(Municipio.id == municipio_id)
+        _mun_geom = (
+            select(Municipio.geom)
+            .where(Municipio.id == municipio_id)
+            .scalar_subquery()
+        )
+        stmt = stmt.where(func.ST_Intersects(DesmatamentoAlerta.geom, _mun_geom))
         sql_partes.append(municipio_sql)
     if data_inicio:
         stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
@@ -758,7 +771,7 @@ async def buscar_desmatamentos(
                 "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
                 "tipo_alerta": row.tipo_alerta,
                 "area_ha": float(row.area_ha) if row.area_ha else None,
-                "municipio": row.municipio_nome,
+                "municipio": row.municipio_nome or municipio,
             },
         })
         if row.fonte_nome:
@@ -801,7 +814,7 @@ async def buscar_unidades_conservacao(
             UnidadeConservacao.grupo_snuc,
             UnidadeConservacao.area_ha,
             Municipio.nome.label("municipio_nome"),
-            _geom_as_geojson(UnidadeConservacao.geom).label("geom_json"),
+            _geom_as_geojson(UnidadeConservacao.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
@@ -899,7 +912,7 @@ async def buscar_terras_indigenas(
             TerraIndigena.fase,
             TerraIndigena.area_ha,
             Municipio.nome.label("municipio_nome"),
-            _geom_as_geojson(TerraIndigena.geom).label("geom_json"),
+            _geom_as_geojson(TerraIndigena.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
@@ -1087,7 +1100,7 @@ async def buscar_territorios_quilombolas(
             TerritorioQuilombola.nome,
             TerritorioQuilombola.area_ha,
             Municipio.nome.label("municipio_nome"),
-            _geom_as_geojson(TerritorioQuilombola.geom).label("geom_json"),
+            _geom_as_geojson(TerritorioQuilombola.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
@@ -1220,6 +1233,19 @@ async def buscar_imoveis_rurais(
     stmt = stmt.limit(limite)
     sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
     rows = (await session.execute(stmt)).all()
+
+    if codigo_car and not rows:
+        return {
+            "total": 0,
+            "features": [],
+            "bbox": None,
+            "fontes": [],
+            "descricao": (
+                f"Imóvel rural com código CAR {codigo_car} não encontrado "
+                "na base SICAR/CAR carregada."
+            ),
+            "sql_executado": sql_executado,
+        }
 
     features = []
     fontes: dict[str, dict] = {}
@@ -1830,7 +1856,7 @@ async def buscar_imoveis_por_quilombo(
             TerritorioQuilombola.id,
             TerritorioQuilombola.nome,
             TerritorioQuilombola.area_ha,
-            _geom_as_geojson(TerritorioQuilombola.geom).label("geom_json"),
+            _geom_as_geojson(TerritorioQuilombola.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
         )
         .where(TerritorioQuilombola.id.in_(rel_subq))
         .limit(500)
@@ -1887,7 +1913,7 @@ async def buscar_camadas_estaduais(
             CamadaEstadualAmbiental.tema,
             CamadaEstadualAmbiental.subtipo,
             Municipio.nome.label("municipio_nome"),
-            _geom_as_geojson(CamadaEstadualAmbiental.geom).label("geom_json"),
+            _geom_as_geojson(CamadaEstadualAmbiental.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
