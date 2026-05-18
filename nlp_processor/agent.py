@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import logging
 from time import perf_counter
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,7 +78,8 @@ def _serializar_filtros(entidades_json: dict[str, Any]) -> dict[str, Any]:
 async def run_agent(
     session: AsyncSession,
     pergunta: str,
-    historico: list[dict],  # mantido para compatibilidade com index.py
+    historico: list[dict],
+    municipio: Optional[str] = None,  # injetado do filtro do frontend
 ) -> dict[str, Any]:
     """
     Executa o pipeline NLP local.
@@ -142,6 +143,12 @@ async def run_agent(
         logger.warning("Não foi possível carregar municípios do banco; usando gazetteer estático.")
 
     entidades = extrair_entidades(pergunta, municipios_extras)
+
+    # Injeta município do filtro se não foi detectado na pergunta
+    if municipio and not entidades.municipio:
+        logger.info("Injetando município do filtro: %s", municipio)
+        entidades.municipio = municipio
+
     entidades_json = _serializar_entidades(entidades)
     filtros_json = _serializar_filtros(entidades_json)
 
