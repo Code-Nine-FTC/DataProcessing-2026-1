@@ -21,13 +21,6 @@ class ResponseImovelRuralIntersection(BaseModel):
     atributos_json: Optional[Dict]
 
 
-class ResponseMunicipioSearch(BaseModel):
-    id: int
-    nome: str
-    codigo_ibge: str
-    estado_sigla: str
-
-
 class ResponseMunicipal(BaseModel):
     id: int
     nome: str
