@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from typing import Optional
 
 from models.database import SessionConnection
 
@@ -34,6 +35,7 @@ _LAYER_QUERIES = {
             ST_AsGeoJSON(d.geom)::json AS geometry
         FROM desmatamento_alerta d
         LEFT JOIN municipio m ON d.municipio_id = m.id
+        {filter_clause}
     """,
     "queimadas": """
         SELECT
@@ -49,6 +51,7 @@ _LAYER_QUERIES = {
             ST_AsGeoJSON(q.geom)::json AS geometry
         FROM queimada_evento q
         LEFT JOIN municipio m ON q.municipio_id = m.id
+        {filter_clause}
     """,
     "terras_indigenas": """
         SELECT
@@ -60,6 +63,7 @@ _LAYER_QUERIES = {
             ST_AsGeoJSON(t.geom)::json AS geometry
         FROM terra_indigena t
         LEFT JOIN municipio m ON t.municipio_id = m.id
+        {filter_clause}
     """,
     "unidades_conservacao": """
         SELECT
@@ -72,6 +76,7 @@ _LAYER_QUERIES = {
             ST_AsGeoJSON(u.geom)::json AS geometry
         FROM unidade_conservacao u
         LEFT JOIN municipio m ON u.municipio_id = m.id
+        {filter_clause}
     """,
     "assentamentos": """
         SELECT
@@ -83,6 +88,7 @@ _LAYER_QUERIES = {
             ST_AsGeoJSON(a.geom)::json AS geometry
         FROM assentamento_rural a
         LEFT JOIN municipio m ON a.municipio_id = m.id
+        {filter_clause}
     """,
     "quilombolas": """
         SELECT
@@ -93,6 +99,7 @@ _LAYER_QUERIES = {
             ST_AsGeoJSON(q.geom)::json AS geometry
         FROM territorio_quilombola q
         LEFT JOIN municipio m ON q.municipio_id = m.id
+        {filter_clause}
     """,
     "imoveis_rurais": """
         SELECT
@@ -105,6 +112,7 @@ _LAYER_QUERIES = {
             ST_AsGeoJSON(i.geom)::json AS geometry
         FROM imovel_rural i
         LEFT JOIN municipio m ON i.municipio_id = m.id
+        {filter_clause}
     """,
 }
 
@@ -114,17 +122,39 @@ async def list_layers():
     return {"layers": list(_LAYER_QUERIES.keys())}
 
 
+_LAYER_ALIASES: dict[str, str] = {
+    "alertas_desmatamento": "d",
+    "queimadas": "q",
+    "terras_indigenas": "t",
+    "unidades_conservacao": "u",
+    "assentamentos": "a",
+    "quilombolas": "q",
+    "imoveis_rurais": "i",
+}
+
+
 @router.get("/{layer_name}")
 async def get_layer_geojson(
     layer_name: str,
+    municipio_id: Optional[int] = Query(None, description="Filtrar features por município"),
     session: AsyncSession = Depends(SessionConnection.session),
 ):
-    query = _LAYER_QUERIES.get(layer_name)
-    if query is None:
+    raw_query = _LAYER_QUERIES.get(layer_name)
+    if raw_query is None:
         raise HTTPException(
             status_code=404,
             detail=f"Layer '{layer_name}' not found. Available: {list(_LAYER_QUERIES.keys())}",
         )
+
+    if municipio_id is not None:
+        if layer_name == "municipios":
+            query = raw_query + f" AND m.id = {municipio_id}"
+        else:
+            alias = _LAYER_ALIASES.get(layer_name, "m")
+            filter_clause = f"WHERE {alias}.municipio_id = {municipio_id}"
+            query = raw_query.format(filter_clause=filter_clause)
+    else:
+        query = raw_query.replace("{filter_clause}", "")
 
     result = await session.execute(text(query))
     rows = result.mappings().all()
