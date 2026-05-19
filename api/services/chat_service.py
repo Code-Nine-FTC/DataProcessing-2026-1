@@ -42,6 +42,7 @@ class ChatService:
             session=session,
             pergunta=req.pergunta,
             chat_id=req.chat_id,
+            municipio=req.municipio,
         )
 
         mapa_raw = result["mapa"]

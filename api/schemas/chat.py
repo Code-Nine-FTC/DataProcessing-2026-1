@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class ChatMensagemRequest(BaseModel):
     pergunta: str = Field(..., min_length=3, max_length=2000, description="Pergunta do usuário")
     chat_id: Optional[UUID] = Field(None, description="ID do chat existente. Null para iniciar novo.")
+    municipio: Optional[str] = Field(None, description="Município selecionado no filtro, para ser injetado como contexto no NLP.")
 
 
 class FeedbackRequest(BaseModel):
