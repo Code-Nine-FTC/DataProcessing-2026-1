@@ -172,6 +172,7 @@ class NLPProcessor:
         session: AsyncSession,
         pergunta: str,
         chat_id: Optional[UUID] = None,
+        municipio: Optional[str] = None,
     ) -> dict:
         """
         Processa uma pergunta e retorna a resposta estruturada para o frontend.
@@ -201,6 +202,7 @@ class NLPProcessor:
                 session=session,
                 pergunta=pergunta,
                 historico=historico,
+                municipio=municipio,
             )
             texto = resultado["texto_resposta"]
             features = resultado["features"]
