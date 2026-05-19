@@ -133,6 +133,18 @@ _LAYER_ALIASES: dict[str, str] = {
 }
 
 
+def _municipio_filter_clause(alias: str) -> str:
+    return f"""
+        WHERE (
+            {alias}.municipio_id = :municipio_id
+            OR ST_Intersects(
+                {alias}.geom,
+                (SELECT geom FROM municipio WHERE id = :municipio_id)
+            )
+        )
+    """
+
+
 @router.get("/{layer_name}")
 async def get_layer_geojson(
     layer_name: str,
@@ -146,17 +158,19 @@ async def get_layer_geojson(
             detail=f"Layer '{layer_name}' not found. Available: {list(_LAYER_QUERIES.keys())}",
         )
 
+    params = {}
     if municipio_id is not None:
+        params["municipio_id"] = municipio_id
         if layer_name == "municipios":
-            query = raw_query + f" AND m.id = {municipio_id}"
+            query = raw_query + " AND m.id = :municipio_id"
         else:
             alias = _LAYER_ALIASES.get(layer_name, "m")
-            filter_clause = f"WHERE {alias}.municipio_id = {municipio_id}"
+            filter_clause = _municipio_filter_clause(alias)
             query = raw_query.format(filter_clause=filter_clause)
     else:
-        query = raw_query.replace("{filter_clause}", "")
+        query = raw_query.format(filter_clause="") if "{filter_clause}" in raw_query else raw_query
 
-    result = await session.execute(text(query))
+    result = await session.execute(text(query), params)
     rows = result.mappings().all()
 
     features = []

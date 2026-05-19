@@ -40,8 +40,13 @@ _INTENT_MAP: dict[str, str] = {
 def _build_args(intencao: str, ent: Entidades) -> dict[str, Any]:
     """Constrói os kwargs para a função de consulta a partir das entidades."""
     base: dict[str, Any] = {}
+    car_scoped_intents = {
+        "buscar_imoveis_rurais",
+        "buscar_passivos_imovel",
+        "buscar_focos_queimada_imovel",
+    }
 
-    if ent.municipio:
+    if ent.municipio and not (ent.codigo_car and intencao in car_scoped_intents):
         base["municipio"] = ent.municipio
 
     if intencao == "buscar_queimadas":
