@@ -463,7 +463,7 @@ class RespostaSistema(Base):
     )
     mensagem_erro: Mapped[Optional[str]] = mapped_column(String)
     __table_args__ = (
-        CheckConstraint(status.in_(['sucesso', 'erro', 'fallback', 'sem_resultado']), name="check_status_resposta"),
+        CheckConstraint(status.in_(['sucesso', 'erro', 'fallback', 'sem_resultado', 'fora_escopo']), name="check_status_resposta"),
     )
 
 class FeedbackResposta(Base):

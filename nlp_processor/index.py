@@ -244,8 +244,10 @@ class NLPProcessor:
         session.add(consulta)
         await session.flush()
 
-        # 7. Calcular bbox
-        bbox = _compute_bbox(features)
+        # 7. Calcular bbox. Algumas ferramentas retornam um bbox de foco
+        # (ex.: polígono do imóvel consultado) mesmo quando o mapa inclui
+        # passivos próximos que não devem deslocar a câmera principal.
+        bbox = resultado.get("bbox") or _compute_bbox(features)
 
         # 8. Montar GeoJSON da resposta
         mapa = _features_to_geojson(features)
