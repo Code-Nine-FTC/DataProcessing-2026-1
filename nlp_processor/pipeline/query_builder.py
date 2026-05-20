@@ -40,8 +40,13 @@ _INTENT_MAP: dict[str, str] = {
 def _build_args(intencao: str, ent: Entidades) -> dict[str, Any]:
     """Constrói os kwargs para a função de consulta a partir das entidades."""
     base: dict[str, Any] = {}
+    car_scoped_intents = {
+        "buscar_imoveis_rurais",
+        "buscar_passivos_imovel",
+        "buscar_focos_queimada_imovel",
+    }
 
-    if ent.municipio:
+    if ent.municipio and not (ent.codigo_car and intencao in car_scoped_intents):
         base["municipio"] = ent.municipio
 
     if intencao == "buscar_queimadas":
@@ -118,6 +123,7 @@ async def executar_consulta(
     contexto_documental = ""
     sql_partes: list[str] = []
     mensagens_erro: list[str] = []
+    bbox = None
 
     # --- consulta geoespacial ---
     tool_name = _INTENT_MAP.get(intencao)
@@ -128,6 +134,8 @@ async def executar_consulta(
             try:
                 result = await fn(session, **args)
                 features.extend(result.get("features", []))
+                if result.get("bbox"):
+                    bbox = result["bbox"]
                 for f in result.get("fontes", []):
                     fontes[f["nome"]] = f
                 descricao_partes.append(result.get("descricao", ""))
@@ -152,6 +160,7 @@ async def executar_consulta(
 
     return {
         "features": features,
+        "bbox": bbox,
         "fontes": list(fontes.values()),
         "descricao": " ".join(descricao_partes),
         "contexto_documental": contexto_documental,
