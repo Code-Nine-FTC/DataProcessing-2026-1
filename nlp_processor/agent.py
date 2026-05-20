@@ -35,6 +35,22 @@ logger = logging.getLogger(__name__)
 # Com 9 classes, probabilidades acima de 0.35 já indicam predição confiável.
 CONFIDENCE_THRESHOLD = 0.20
 
+_ESCOPO_AMBIENTAL_TOKENS = (
+    "ambiental", "ambientais", "meio ambiente",
+    "queimada", "queimadas", "incendio", "incendios", "foco", "focos", "fogo",
+    "desmatamento", "desmatamentos", "desmatado", "desmatada", "supressao",
+    "prodes", "deter",
+    "sicar", "car", "imovel", "imoveis", "propriedade", "propriedades",
+    "fazenda", "fazendas", "sitio", "sitios", "rural", "rurais",
+    "mapa", "geografia", "geometria", "coordenada", "localizacao",
+    "quilombo", "quilombos", "quilombola", "quilombolas",
+    "terra indigena", "terras indigenas", "indigena", "indigenas",
+    "unidade de conservacao", "unidades de conservacao", "uc", "ucs",
+    "parque", "apa", "resex", "rebio", "estacao ecologica", "flona", "rppn",
+    "assentamento", "assentamentos", "bacia", "risco", "camada", "camadas",
+    "municipio", "municipios", "cidade", "estado de sao paulo", "sao paulo",
+)
+
 
 def _extrair_feedback_contexto(historico: list[dict]) -> dict[str, int]:
     for mensagem in reversed(historico):
@@ -73,6 +89,12 @@ def _serializar_filtros(entidades_json: dict[str, Any]) -> dict[str, Any]:
         for chave, valor in entidades_json.items()
         if chave != "palavras_chave" and valor is not None
     }
+
+
+def _fora_escopo_sem_sinal_geografico(texto_norm: str, entidades) -> bool:
+    if entidades.codigo_car or entidades.municipio:
+        return False
+    return not any(token in texto_norm for token in _ESCOPO_AMBIENTAL_TOKENS)
 
 
 async def run_agent(
@@ -143,29 +165,25 @@ async def run_agent(
         logger.warning("Não foi possível carregar municípios do banco; usando gazetteer estático.")
 
     entidades = extrair_entidades(pergunta, municipios_extras)
+    texto_norm = normalizar(pergunta)
+    fora_escopo_sem_sinal = _fora_escopo_sem_sinal_geografico(texto_norm, entidades)
 
-    # Injeta município do filtro se não foi detectado na pergunta
-    if municipio and not entidades.municipio:
+    # Injeta município do filtro apenas em perguntas abertas. Consultas por CAR
+    # devem ser resolvidas pelo identificador do imóvel, sem herdar o filtro visual.
+    if municipio and not entidades.municipio and not entidades.codigo_car and not fora_escopo_sem_sinal:
         logger.info("Injetando município do filtro: %s", municipio)
         entidades.municipio = municipio
 
     entidades_json = _serializar_entidades(entidades)
     filtros_json = _serializar_filtros(entidades_json)
 
-    texto_norm = normalizar(pergunta)
     override_intencao = False
-    if entidades.codigo_car and any(
-        termo in texto_norm
-        for termo in ("foco", "focos", "queimada", "incendio", "incendios")
-    ):
-        intencao = "buscar_focos_queimada_imovel"
+    if fora_escopo_sem_sinal:
+        intencao = "fora_escopo"
         override_intencao = True
-        logger.info(
-            "Intent override para CAR detectado (%s) com termo de queimada/incendio.",
-            entidades.codigo_car,
-        )
+        logger.info("Pergunta marcada como fora_escopo por ausência de sinais ambientais/geográficos.")
 
-    if not override_intencao and entidades.codigo_car and any(
+    if entidades.codigo_car and any(
         termo in texto_norm
         for termo in (
             "passivo",
@@ -190,11 +208,14 @@ async def run_agent(
             entidades.codigo_car,
         )
 
-    if not override_intencao and entidades.codigo_car:
-        intencao = "buscar_passivos_imovel"
+    if not override_intencao and entidades.codigo_car and any(
+        termo in texto_norm
+        for termo in ("foco", "focos", "queimada", "incendio", "incendios")
+    ):
+        intencao = "buscar_focos_queimada_imovel"
         override_intencao = True
         logger.info(
-            "Intent override para buscar_passivos_imovel (CAR %s sem termo específico).",
+            "Intent override para CAR detectado (%s) com termo de queimada/incendio.",
             entidades.codigo_car,
         )
 
@@ -234,6 +255,44 @@ async def run_agent(
                 intencao = alvo
                 override_intencao = True
                 break
+
+    if not override_intencao and entidades.codigo_car and any(
+        termo in texto_norm
+        for termo in (
+            "imovel",
+            "imoveis",
+            "fazenda",
+            "fazendas",
+            "propriedade",
+            "propriedades",
+            "sitio",
+            "sitios",
+            "sicar",
+            "mapa",
+            "geografia",
+            "geometria",
+            "localize",
+            "localizar",
+            "mostre",
+            "mostrar",
+            "exibir",
+            "exiba",
+        )
+    ):
+        intencao = "buscar_imoveis_rurais"
+        override_intencao = True
+        logger.info(
+            "Intent override para buscar_imoveis_rurais (CAR %s com pedido de localização).",
+            entidades.codigo_car,
+        )
+
+    if not override_intencao and entidades.codigo_car:
+        intencao = "buscar_imoveis_rurais"
+        override_intencao = True
+        logger.info(
+            "Intent override para buscar_imoveis_rurais (CAR %s sem termo específico).",
+            entidades.codigo_car,
+        )
 
     if not override_intencao:
         rebaixamentos = {
@@ -343,6 +402,8 @@ async def run_agent(
     # 5. Determinar status
     if intencao == "fora_escopo":
         status = "fora_escopo"
+    elif intencao != "buscar_documentos" and not features:
+        status = "sem_resultado"
     elif not features and not contexto_documental:
         status = "sem_resultado"
     else:
@@ -364,6 +425,7 @@ async def run_agent(
     return {
         "texto_resposta": texto,
         "features": features,
+        "bbox": resultado.get("bbox"),
         "fontes": fontes,
         "status": status,
         "intencao": intencao,
@@ -374,4 +436,3 @@ async def run_agent(
         "mensagem_erro": resultado.get("mensagem_erro"),
         "tempo_resposta_ms": int((perf_counter() - inicio) * 1000),
     }
-

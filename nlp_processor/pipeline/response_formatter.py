@@ -296,9 +296,16 @@ def formatar_resposta(
             periodo = f" a partir de {entidades.data_inicio}"
 
         codigo = entidades.codigo_car or "(codigo nao informado)"
+        total_focos = sum(
+            1
+            for feature in (features or [])
+            if feature.get("properties", {}).get("tipo") == "queimada"
+        )
+        if not features:
+            total_focos = total_features
         texto = (
             f"Na propriedade rural **{codigo}**, foram identificados "
-            f"**{total_features} focos de queimada**{periodo}."
+            f"**{total_focos} focos de queimada**{periodo}."
         )
         texto = _anexar_descricao(texto, descricao_consulta)
         if fontes_str:
@@ -343,6 +350,9 @@ def formatar_resposta(
 
     # Sem dados
     if intencao != "fora_escopo" and intencao != "buscar_documentos" and total_features == 0:
+        if descricao_consulta:
+            return _aplicar_feedback_contexto(descricao_consulta, feedback_contexto)
+
         nomes = ", ".join(f["nome"] for f in fontes) if fontes else "fontes do sistema"
         return _aplicar_feedback_contexto(
             _TEMPLATES["sem_dados"].format(fontes_citadas=nomes),
