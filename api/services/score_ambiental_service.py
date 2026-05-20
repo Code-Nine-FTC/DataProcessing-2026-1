@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import unicodedata
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -16,6 +17,11 @@ from api.schemas.index import (
     ScoreImovel,
 )
 
+# Cap interno pra evitar OOM no top-N: pegamos até este número de imóveis
+# do banco, calculamos o score em Python e ordenamos. Para `limite` maior
+# que o cap, expandimos pra atender o pedido do usuário.
+_INTERNAL_FETCH_CAP = 2000
+
 
 def _classificar_score(score: float) -> str:
     if score >= 80:
@@ -29,17 +35,25 @@ def _classificar_score(score: float) -> str:
     return "E"
 
 
-def _score_governanca_car(situacao: Optional[str]) -> float:
+def _normalizar_situacao(situacao: Optional[str]) -> str:
     if not situacao:
+        return ""
+    s = unicodedata.normalize("NFD", situacao.strip())
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return s.upper()
+
+
+def _score_governanca_car(situacao: Optional[str]) -> float:
+    s = _normalizar_situacao(situacao)
+    if not s:
         return 30.0
-    s = situacao.strip().upper()
-    if s in {"ATIVO", "AT", "CADASTRO ATIVO", "CA", "ANALISADO", "VALIDADO"}:
+    if any(tok in s for tok in ("ATIVO", "ANALISADO", "VALIDADO")) or s == "AT":
         return 100.0
-    if s in {"PENDENTE", "PE", "CADASTRO PENDENTE", "AGUARDANDO"}:
+    if any(tok in s for tok in ("PENDENTE", "AGUARDANDO")) or s == "PE":
         return 70.0
-    if s in {"SUSPENSO", "SU", "CADASTRO SUSPENSO"}:
+    if "SUSPENSO" in s or s == "SU":
         return 40.0
-    if s in {"CANCELADO", "CA_CANCELADO"}:
+    if "CANCELADO" in s:
         return 10.0
     return 50.0
 
@@ -88,14 +102,14 @@ def _score_social_assentamento(perc_uc: float, perc_ti: float) -> float:
     return max(0.0, round(100.0 - penalidade, 2))
 
 
-def _score_governanca_assentamento(
+def _completude_assentamento(
     tem_modalidade: bool,
     tem_familias: bool,
     tem_area: bool,
-) -> tuple[float, float]:
+) -> float:
+    """% de campos descritivos preenchidos. Também usado como score de governança."""
     flags = [tem_modalidade, tem_familias, tem_area]
-    completude = round(sum(flags) / len(flags) * 100.0, 2)
-    return completude, completude
+    return round(sum(flags) / len(flags) * 100.0, 2)
 
 
 class ScoreAmbientalService:
@@ -107,15 +121,20 @@ class ScoreAmbientalService:
         estado_sigla: Optional[str] = None,
         municipio_id: Optional[int] = None,
         limite: int = 100,
+        _random_sample: bool = False,
     ) -> RespostaScoreImoveis:
+        # Pra retornar top-N por score, buscamos mais que `limite` quando possível
+        # e ordenamos em Python (a fórmula de score é complexa pra traduzir em SQL).
+        fetch_limit = limite if _random_sample else max(limite, _INTERNAL_FETCH_CAP)
         params = {
-            "estado_sigla": estado_sigla,
+            "estado_sigla": estado_sigla.upper() if estado_sigla else None,
             "municipio_id": municipio_id,
-            "limite": limite,
+            "limite": fetch_limit,
         }
+        order_clause = "ORDER BY random()" if _random_sample else "ORDER BY i.id"
         result = await self._session.execute(
             text(
-                """
+                f"""
                 SELECT
                     i.id::text AS imovel_id,
                     i.codigo_car,
@@ -168,7 +187,7 @@ class ScoreAmbientalService:
                 LEFT JOIN estado e ON e.id = m.estado_id
                 WHERE (CAST(:estado_sigla AS TEXT) IS NULL OR e.sigla = CAST(:estado_sigla AS TEXT))
                   AND (CAST(:municipio_id AS INTEGER) IS NULL OR m.id = CAST(:municipio_id AS INTEGER))
-                ORDER BY i.id
+                {order_clause}
                 LIMIT :limite
                 """
             ),
@@ -214,7 +233,10 @@ class ScoreAmbientalService:
             )
 
         itens.sort(key=lambda x: x.score_geral, reverse=True)
-        score_medio = round(soma_score / len(itens), 2) if itens else 0.0
+        if not _random_sample:
+            itens = itens[:limite]
+        soma_final = sum(it.score_geral for it in itens)
+        score_medio = round(soma_final / len(itens), 2) if itens else 0.0
         return RespostaScoreImoveis(itens=itens, total=len(itens), score_medio=score_medio)
 
     async def score_imovel_detalhe(self, imovel_id: str) -> ScoreImovel:
@@ -321,15 +343,21 @@ class ScoreAmbientalService:
         estado_sigla: Optional[str] = None,
         municipio_id: Optional[int] = None,
         limite: int = 100,
+        _random_sample: bool = False,
     ) -> RespostaScoreAssentamentos:
+        fetch_limit = limite if _random_sample else max(limite, _INTERNAL_FETCH_CAP)
         params = {
-            "estado_sigla": estado_sigla,
+            "estado_sigla": estado_sigla.upper() if estado_sigla else None,
             "municipio_id": municipio_id,
-            "limite": limite,
+            "limite": fetch_limit,
         }
+        order_clause = "ORDER BY random()" if _random_sample else "ORDER BY a.id"
+        # Quando o filtro por município está ativo, restringe os passivos ao mesmo
+        # município (passivos com municipio_id NULL ainda passam — fallback espacial
+        # pelo ST_Intersects continua valendo).
         result = await self._session.execute(
             text(
-                """
+                f"""
                 SELECT
                     a.id::text AS assentamento_id,
                     a.nome,
@@ -344,17 +372,32 @@ class ScoreAmbientalService:
                         )::float
                         FROM desmatamento_alerta d
                         WHERE ST_Intersects(d.geom, a.geom)
+                          AND (
+                              CAST(:municipio_id AS INTEGER) IS NULL
+                              OR d.municipio_id IS NULL
+                              OR d.municipio_id = CAST(:municipio_id AS INTEGER)
+                          )
                     ), 0)::float AS area_desmatamento_ha,
                     COALESCE((
                         SELECT COUNT(*)
                         FROM queimada_evento q
                         WHERE ST_Within(q.geom, a.geom)
+                          AND (
+                              CAST(:municipio_id AS INTEGER) IS NULL
+                              OR q.municipio_id IS NULL
+                              OR q.municipio_id = CAST(:municipio_id AS INTEGER)
+                          )
                     ), 0)::int AS focos_dentro,
                     COALESCE((
                         SELECT COUNT(*)
                         FROM queimada_evento q
                         WHERE ST_DWithin(q.geom::geography, a.geom::geography, 5000)
                           AND NOT ST_Within(q.geom, a.geom)
+                          AND (
+                              CAST(:municipio_id AS INTEGER) IS NULL
+                              OR q.municipio_id IS NULL
+                              OR q.municipio_id = CAST(:municipio_id AS INTEGER)
+                          )
                     ), 0)::int AS focos_proximos,
                     COALESCE((
                         SELECT SUM(
@@ -362,6 +405,11 @@ class ScoreAmbientalService:
                         )::float
                         FROM unidade_conservacao u
                         WHERE ST_Intersects(u.geom, a.geom)
+                          AND (
+                              CAST(:municipio_id AS INTEGER) IS NULL
+                              OR u.municipio_id IS NULL
+                              OR u.municipio_id = CAST(:municipio_id AS INTEGER)
+                          )
                     ), 0)::float AS area_uc_ha,
                     COALESCE((
                         SELECT SUM(
@@ -369,13 +417,18 @@ class ScoreAmbientalService:
                         )::float
                         FROM terra_indigena t
                         WHERE ST_Intersects(t.geom, a.geom)
+                          AND (
+                              CAST(:municipio_id AS INTEGER) IS NULL
+                              OR t.municipio_id IS NULL
+                              OR t.municipio_id = CAST(:municipio_id AS INTEGER)
+                          )
                     ), 0)::float AS area_ti_ha
                 FROM assentamento_rural a
                 LEFT JOIN municipio m ON m.id = a.municipio_id
                 LEFT JOIN estado e ON e.id = m.estado_id
                 WHERE (CAST(:estado_sigla AS TEXT) IS NULL OR e.sigla = CAST(:estado_sigla AS TEXT))
                   AND (CAST(:municipio_id AS INTEGER) IS NULL OR m.id = CAST(:municipio_id AS INTEGER))
-                ORDER BY a.id
+                {order_clause}
                 LIMIT :limite
                 """
             ),
@@ -398,11 +451,12 @@ class ScoreAmbientalService:
                 perc_desm, row.focos_dentro, row.focos_proximos
             )
             score_soc = _score_social_assentamento(perc_uc, perc_ti)
-            completude, score_gov = _score_governanca_assentamento(
+            completude = _completude_assentamento(
                 row.modalidade is not None,
                 row.familias is not None and row.familias > 0,
                 row.area_ha is not None and area_ha > 0,
             )
+            score_gov = completude
             score_geral = _score_geral(score_amb, score_soc, score_gov)
             soma_score += score_geral
             itens.append(
@@ -432,7 +486,10 @@ class ScoreAmbientalService:
             )
 
         itens.sort(key=lambda x: x.score_geral, reverse=True)
-        score_medio = round(soma_score / len(itens), 2) if itens else 0.0
+        if not _random_sample:
+            itens = itens[:limite]
+        soma_final = sum(it.score_geral for it in itens)
+        score_medio = round(soma_final / len(itens), 2) if itens else 0.0
         return RespostaScoreAssentamentos(
             itens=itens, total=len(itens), score_medio=score_medio
         )
@@ -508,11 +565,12 @@ class ScoreAmbientalService:
             perc_desm, row.focos_dentro, row.focos_proximos
         )
         score_soc = _score_social_assentamento(perc_uc, perc_ti)
-        completude, score_gov = _score_governanca_assentamento(
+        completude = _completude_assentamento(
             row.modalidade is not None,
             row.familias is not None and row.familias > 0,
             row.area_ha is not None and area_ha > 0,
         )
+        score_gov = completude
         score_geral = _score_geral(score_amb, score_soc, score_gov)
 
         return ScoreAssentamento(
@@ -539,9 +597,26 @@ class ScoreAmbientalService:
             ),
         )
 
-    async def resumo(self, limite_amostra: int = 500) -> ResumoScoreAmbiental:
-        imoveis = await self.score_imoveis(limite=limite_amostra)
-        assentamentos = await self.score_assentamentos(limite=limite_amostra)
+    async def resumo(
+        self,
+        estado_sigla: Optional[str] = None,
+        municipio_id: Optional[int] = None,
+        limite_amostra: int = 500,
+    ) -> ResumoScoreAmbiental:
+        # Para o resumo precisamos de uma amostra estatística, não do top-N
+        # por score — senão a distribuição A-E fica enviesada pra A.
+        imoveis = await self.score_imoveis(
+            estado_sigla=estado_sigla,
+            municipio_id=municipio_id,
+            limite=limite_amostra,
+            _random_sample=True,
+        )
+        assentamentos = await self.score_assentamentos(
+            estado_sigla=estado_sigla,
+            municipio_id=municipio_id,
+            limite=limite_amostra,
+            _random_sample=True,
+        )
         return ResumoScoreAmbiental(
             total_imoveis_avaliados=imoveis.total,
             score_medio_imoveis=imoveis.score_medio,

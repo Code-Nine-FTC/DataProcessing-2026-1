@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from typing import Optional
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,9 +39,9 @@ class ScoreAmbientalHandler:
                 detail="Erro ao calcular score ambiental de imóveis",
             )
 
-    async def score_imovel_detalhe(self, imovel_id: str) -> BasicResponse[ScoreImovel]:
+    async def score_imovel_detalhe(self, imovel_id: UUID) -> BasicResponse[ScoreImovel]:
         try:
-            data = await self._service.score_imovel_detalhe(imovel_id)
+            data = await self._service.score_imovel_detalhe(str(imovel_id))
             return BasicResponse(data=data)
         except HTTPException:
             raise
@@ -70,10 +71,10 @@ class ScoreAmbientalHandler:
             )
 
     async def score_assentamento_detalhe(
-        self, assentamento_id: str
+        self, assentamento_id: UUID
     ) -> BasicResponse[ScoreAssentamento]:
         try:
-            data = await self._service.score_assentamento_detalhe(assentamento_id)
+            data = await self._service.score_assentamento_detalhe(str(assentamento_id))
             return BasicResponse(data=data)
         except HTTPException:
             raise
@@ -86,9 +87,18 @@ class ScoreAmbientalHandler:
                 detail="Erro ao calcular score ambiental do assentamento",
             )
 
-    async def resumo(self, limite_amostra: int) -> BasicResponse[ResumoScoreAmbiental]:
+    async def resumo(
+        self,
+        estado_sigla: Optional[str],
+        municipio_id: Optional[int],
+        limite_amostra: int,
+    ) -> BasicResponse[ResumoScoreAmbiental]:
         try:
-            data = await self._service.resumo(limite_amostra)
+            data = await self._service.resumo(
+                estado_sigla=estado_sigla,
+                municipio_id=municipio_id,
+                limite_amostra=limite_amostra,
+            )
             return BasicResponse(data=data)
         except Exception as exc:
             self._log.error(msg=f"Erro ao gerar resumo de score ambiental: {exc}")

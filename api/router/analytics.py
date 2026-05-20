@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -370,7 +371,7 @@ async def get_score_imoveis(
     summary="[RF-09] Score ambiental (ASG) de um imóvel rural específico",
 )
 async def get_score_imovel_detalhe(
-    imovel_id: str,
+    imovel_id: UUID,
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[ScoreImovel]:
     return await ScoreAmbientalHandler(session).score_imovel_detalhe(imovel_id)
@@ -400,7 +401,7 @@ async def get_score_assentamentos(
     summary="[RF-09] Score ambiental (ASG) de um assentamento rural específico",
 )
 async def get_score_assentamento_detalhe(
-    assentamento_id: str,
+    assentamento_id: UUID,
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[ScoreAssentamento]:
     return await ScoreAmbientalHandler(session).score_assentamento_detalhe(
@@ -414,12 +415,18 @@ async def get_score_assentamento_detalhe(
     summary="[RF-09] Resumo agregado do score ambiental (ASG) — distribuição por classificação",
 )
 async def get_score_ambiental_resumo(
+    estado_sigla: Optional[str] = Query(
+        None, description="Filtrar por sigla do estado (ex.: SP)", max_length=2
+    ),
+    municipio_id: Optional[int] = Query(None, description="Filtrar por id do município"),
     limite_amostra: int = Query(
         500,
-        description="Tamanho da amostra usada para o cálculo do resumo",
+        description="Tamanho da amostra aleatória usada para o resumo",
         ge=1,
         le=5000,
     ),
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[ResumoScoreAmbiental]:
-    return await ScoreAmbientalHandler(session).resumo(limite_amostra)
+    return await ScoreAmbientalHandler(session).resumo(
+        estado_sigla, municipio_id, limite_amostra
+    )
