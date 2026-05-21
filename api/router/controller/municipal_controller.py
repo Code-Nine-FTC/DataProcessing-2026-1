@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from api.utils.log import Log
 from api.utils.basic_response import BasicResponse
+from api.utils.error_handlers import AppException
 from fastapi import HTTPException, status
 import json
 
@@ -22,13 +23,14 @@ class MunicipalHandler:
             return BasicResponse(data=self._data)
         except HTTPException as e:
             self._log.error(msg=f"Erro ao buscar dados: {e.detail}")
-            raise e
+            raise
         except Exception as e:
             self._log.error(msg=f"Erro inesperado ao buscar dados: {e}")
-            raise HTTPException(
+            raise AppException(
+                "Erro interno do servidor.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro interno do servidor: {e}",
-            )
+                code="internal_server_error",
+            ) from e
 
     async def _fetch_data(self) -> list[ResponseMunicipal]:
         results = await Municipio.get_dados_municipais(self._session, self._municipio_id)
@@ -50,13 +52,14 @@ class MunicipioSearchHandler:
             return BasicResponse(data=self._data)
         except HTTPException as e:
             self._log.error(msg=f"Erro ao buscar municípios: {e.detail}")
-            raise e
+            raise
         except Exception as e:
             self._log.error(msg=f"Erro inesperado ao buscar municípios: {e}")
-            raise HTTPException(
+            raise AppException(
+                "Erro interno do servidor.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro interno do servidor: {e}",
-            )
+                code="internal_server_error",
+            ) from e
 
     async def _fetch_data(self) -> list[ResponseMunicipioSearch]:
         query = select(Municipio, Estado.sigla).join(Estado, Municipio.estado_id == Estado.id).order_by(Municipio.nome)
@@ -97,10 +100,11 @@ class IntersectionHandler:
             return BasicResponse(data=self._data)
         except HTTPException as e:
             self._log.error(msg=f"Erro ao buscar imóveis por interseção: {e.detail}")
-            raise e
+            raise
         except Exception as e:
             self._log.error(msg=f"Erro inesperado ao buscar imóveis por interseção: {e}")
-            raise HTTPException(
+            raise AppException(
+                "Erro interno do servidor.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro interno do servidor: {e}",
-            )
+                code="internal_server_error",
+            ) from e

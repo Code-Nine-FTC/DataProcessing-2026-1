@@ -11,6 +11,7 @@ from models.db_model import (
 from api.schemas.dashboard import DashboardCompleto, EstadoKpis, RankingItem
 from api.utils.log import Log
 from api.utils.basic_response import BasicResponse
+from api.utils.error_handlers import AppException
 
 class DashboardHandler:
     def __init__(self, session: AsyncSession, sigla_estado: str = "SP") -> None:
@@ -33,11 +34,13 @@ class DashboardHandler:
 
         except Exception as e:
             self._log.error(msg=f"Erro no DashboardHandler: {e}")
-            if isinstance(e, HTTPException): raise e
-            raise HTTPException(
+            if isinstance(e, HTTPException):
+                raise
+            raise AppException(
+                "Erro interno do servidor.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro interno: {str(e)}"
-            )
+                code="dashboard_error",
+            ) from e
 
     async def _assemble_dashboard(self, estado: Estado) -> DashboardCompleto:
         area_uc = await self._get_area(UnidadeConservacao, estado.id)

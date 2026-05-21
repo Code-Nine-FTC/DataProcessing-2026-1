@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config.lifespan import lifespan
 from api.router.define_routes import define_routes
+from api.utils.error_handlers import register_exception_handlers
 from api.utils.log import Log
 
 
@@ -21,6 +22,7 @@ def get_application() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    register_exception_handlers(app_)
 
     return app_
 
