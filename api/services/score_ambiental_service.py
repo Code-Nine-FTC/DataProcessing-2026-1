@@ -63,19 +63,27 @@ def _score_ambiental_imovel(
     focos_dentro: int,
     focos_proximos: int,
 ) -> float:
+    # Clampa inputs em zero: percentuais ou contagens negativos (vindos de
+    # bug de ETL) gerariam penalidade negativa, elevando o score acima de 100.
+    pd = max(0.0, float(perc_desmatamento))
+    fd = max(0, int(focos_dentro))
+    fp = max(0, int(focos_proximos))
     penalidade = (
-        min(50.0, perc_desmatamento * 0.7)
-        + min(30.0, focos_dentro * 6.0)
-        + min(20.0, focos_proximos * 2.0)
+        min(50.0, pd * 0.7)
+        + min(30.0, fd * 6.0)
+        + min(20.0, fp * 2.0)
     )
     return max(0.0, round(100.0 - penalidade, 2))
 
 
 def _score_social_imovel(perc_uc: float, perc_ti: float, perc_quilombo: float) -> float:
+    pu = max(0.0, float(perc_uc))
+    pt = max(0.0, float(perc_ti))
+    pq = max(0.0, float(perc_quilombo))
     penalidade = (
-        min(35.0, perc_uc * 0.4)
-        + min(35.0, perc_ti * 0.5)
-        + min(30.0, perc_quilombo * 0.5)
+        min(35.0, pu * 0.4)
+        + min(35.0, pt * 0.5)
+        + min(30.0, pq * 0.5)
     )
     return max(0.0, round(100.0 - penalidade, 2))
 
@@ -89,16 +97,21 @@ def _score_ambiental_assentamento(
     focos_dentro: int,
     focos_proximos: int,
 ) -> float:
+    pd = max(0.0, float(perc_desmatamento))
+    fd = max(0, int(focos_dentro))
+    fp = max(0, int(focos_proximos))
     penalidade = (
-        min(55.0, perc_desmatamento * 0.8)
-        + min(30.0, focos_dentro * 0.5)
-        + min(15.0, focos_proximos * 0.2)
+        min(55.0, pd * 0.8)
+        + min(30.0, fd * 0.5)
+        + min(15.0, fp * 0.2)
     )
     return max(0.0, round(100.0 - penalidade, 2))
 
 
 def _score_social_assentamento(perc_uc: float, perc_ti: float) -> float:
-    penalidade = min(50.0, perc_uc * 0.5) + min(50.0, perc_ti * 0.5)
+    pu = max(0.0, float(perc_uc))
+    pt = max(0.0, float(perc_ti))
+    penalidade = min(50.0, pu * 0.5) + min(50.0, pt * 0.5)
     return max(0.0, round(100.0 - penalidade, 2))
 
 
