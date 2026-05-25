@@ -12,30 +12,46 @@ API para processamento de dados geoespaciais.
 - **PGVector** (Busca Vetorial para IA)
 - **Pydantic Settings** (Gestão de Configurações)
 
-## 🚀 Como Executar o Projeto
+---
 
 ### 1. Preparar o Ambiente
-Certifique-se de ter o Python e o Docker instalados.
+Certifique-se de ter o Python e o Docker instalados. Além disso, é necessário criar as pastas obrigatórias para o Airflow e garantir as permissões de escrita:
 
 ```bash
 # Criar ambiente virtual
 python3 -m venv .venv
-
 # Ativar ambiente virtual
 source .venv/bin/activate
-
 # Instalar dependências
 pip install -r requirements.txt
+
+# Criar pastas obrigatórias para volumes do Airflow
+mkdir -p ./logs ./dags ./plugins ./api/config
+
+# Definir permissões de escrita para o Docker (usuário 50000)
+sudo chown -R 50000:0 ./logs ./dags ./plugins ./api/config
+sudo chmod -R 775 ./logs ./dags ./plugins ./api/config
 ```
 
 ### 2. Configuração de Variáveis de Ambiente
 Crie um arquivo `.env` na raiz do projeto:
 ```env
+# Banco de Dados
 POSTGRES_USER=user
 POSTGRES_PASSWORD=password
 POSTGRES_DB=nome_do_banco_de_dados
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
+
+# Airflow
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST@database/airflow_db
+AIRFLOW__CORE__FERNET_KEY=  # Gere com: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+AIRFLOW__CORE__LOAD_EXAMPLES=False
+AIRFLOW_UID=50000
+
+# Credenciais da Web UI
+AIRFLOW_WWW_USER_USERNAME=airflow
+AIRFLOW_WWW_USER_PASSWORD=airflow
 ```
 
 ### 3. Subir o Banco de Dados
@@ -139,4 +155,3 @@ python -m nlp_processor.training.train
 - `nlp-processor/`: Scripts para processamento de linguagem natural.
 
 ---
-*Desenvolvido para fins acadêmicos - FATEC 2026-1*

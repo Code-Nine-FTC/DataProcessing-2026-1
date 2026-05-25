@@ -14,15 +14,16 @@ x-airflow-environment: &airflow-environment
 x-airflow-common: &airflow-common
   build: .
   image: custom-airflow-weather:latest  
+  user: "${AIRFLOW_UID:-50000}:0"
   environment:
     <<: *airflow-environment
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
-    - ./src:/opt/airflow/src
     - ./data-ingestion:/opt/airflow/data-ingestion
-    - ./config:/opt/airflow/config
+    - ./api:/opt/airflow/api
+    - ./api/config:/opt/airflow/config
   depends_on:
     database:
       condition: service_healthy
@@ -38,7 +39,7 @@ services:
       - "${POSTGRES_PORT}:5432"
     volumes:
       - pgdata:/var/lib/postgresql
-      - ./init.sql:/docker-entrypoint-initdb.d/models/init.sql
+      - ./models/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -47,13 +48,13 @@ services:
 
   airflow-init:
     <<: *airflow-common
-    command: version
+    command: bash -c "airflow db migrate && airflow users create --username $${AIRFLOW_WWW_USER_USERNAME:-airflow} --firstname Admin --lastname User --role Admin --email admin@example.com --password $${AIRFLOW_WWW_USER_PASSWORD:-airflow}"
     environment:
       <<: *airflow-environment
       _AIRFLOW_DB_UPGRADE: "true"
       _AIRFLOW_WWW_USER_CREATE: "true"
-      _AIRFLOW_WWW_USER_USERNAME: "airflow"
-      _AIRFLOW_WWW_USER_PASSWORD: "airflow"
+      _AIRFLOW_WWW_USER_USERNAME: ${"AIRFLOW_WWW_USER_USERNAME:-airflow"}
+      _AIRFLOW_WWW_USER_PASSWORD: ${"AIRFLOW_WWW_USER_PASSWORD:-airflow"}
   airflow-webserver:
     <<: *airflow-common
     command: webserver
