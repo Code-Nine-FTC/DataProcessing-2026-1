@@ -39,13 +39,14 @@ Crie um arquivo `.env` na raiz do projeto:
 # Banco de Dados
 POSTGRES_USER=user
 POSTGRES_PASSWORD=password
-POSTGRES_DB=nome_do_banco_de_dados
-POSTGRES_HOST=localhost
+POSTGRES_DB=airflow_db
+POSTGRES_HOST=database
 POSTGRES_PORT=5432
 
 # Airflow
-AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST@database/airflow_db
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@database/airflow_db
 AIRFLOW__CORE__FERNET_KEY=  # Gere com: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+AIRFLOW__WEBSERVER__SECRET_KEY=  # Gere com: openssl rand -hex 32
 AIRFLOW__CORE__LOAD_EXAMPLES=False
 AIRFLOW_UID=50000
 

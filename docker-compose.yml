@@ -1,6 +1,7 @@
 x-airflow-environment: &airflow-environment
   AIRFLOW__CORE__EXECUTOR: LocalExecutor
   AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+  AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
   AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
   AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW__CORE__LOAD_EXAMPLES}
   PYTHONPATH: /opt/airflow
@@ -48,13 +49,13 @@ services:
 
   airflow-init:
     <<: *airflow-common
-    command: bash -c "airflow db migrate && airflow users create --username $${AIRFLOW_WWW_USER_USERNAME:-airflow} --firstname Admin --lastname User --role Admin --email admin@example.com --password $${AIRFLOW_WWW_USER_PASSWORD:-airflow}"
+    command: bash -c "airflow db migrate && airflow users create --username \"$${_AIRFLOW_WWW_USER_USERNAME}\" --firstname Admin --lastname User --role Admin --email admin@example.com --password \"$${_AIRFLOW_WWW_USER_PASSWORD}\""
     environment:
       <<: *airflow-environment
       _AIRFLOW_DB_UPGRADE: "true"
       _AIRFLOW_WWW_USER_CREATE: "true"
-      _AIRFLOW_WWW_USER_USERNAME: ${"AIRFLOW_WWW_USER_USERNAME:-airflow"}
-      _AIRFLOW_WWW_USER_PASSWORD: ${"AIRFLOW_WWW_USER_PASSWORD:-airflow"}
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_WWW_USER_PASSWORD:-airflow}
   airflow-webserver:
     <<: *airflow-common
     command: webserver
