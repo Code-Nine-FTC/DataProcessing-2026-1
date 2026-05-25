@@ -26,7 +26,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Criar pastas obrigatórias para volumes do Airflow
-mkdir -p ./logs ./dags ./plugins ./api/config
+mkdir -p ./logs ./dags ./plugins 
 
 # Definir permissões de escrita para o Docker (usuário 50000)
 sudo chown -R 50000:0 ./logs ./dags ./plugins ./api/config
