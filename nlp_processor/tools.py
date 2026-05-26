@@ -22,6 +22,20 @@ logger = logging.getLogger(__name__)
 COMPLEX_POLYGON_TOLERANCE = 0.0002
 
 
+def _round_float(value: Any, ndigits: int = 4) -> float | None:
+    if value is None:
+        return None
+    try:
+        return round(float(value), ndigits)
+    except (ValueError, TypeError):
+        return None
+
+
+def _fmt_int(value: int) -> str:
+    """Formata inteiro no padrão brasileiro (ex: 1.234)."""
+    return f"{value:,}".replace(",", ".")
+
+
 def _stmt_sql(stmt: Any) -> str:
     try:
         compiled = stmt.compile(
@@ -129,7 +143,7 @@ async def buscar_passivos_em_imovel(
                 "tipo": "imovel_rural",
                 "codigo_car": imovel_db.codigo_car,
                 "nome_imovel": imovel_db.nome_imovel,
-                "area_ha": float(imovel_db.area_ha) if imovel_db.area_ha else None,
+                "area_ha": _round_float(imovel_db.area_ha, 4),
                 "municipio": imovel_db.municipio_nome,
                 "situacao_cadastral": imovel_db.situacao_cadastral,
                 "imovel_id": str(imovel_db.id),
@@ -160,7 +174,7 @@ async def buscar_passivos_em_imovel(
         detalhes["queimadas"]["items"].append({
             "id": str(r.id),
             "data_ocorrencia": str(r.data_ocorrencia) if r.data_ocorrencia else None,
-            "intensidade": float(r.intensidade) if r.intensidade else None,
+            "intensidade": _round_float(r.intensidade, 2),
         })
         features.append({
             "type": "Feature",
@@ -193,8 +207,8 @@ async def buscar_passivos_em_imovel(
         detalhes["desmatamento"]["items"].append({
             "id": str(r.id),
             "data_ocorrencia": str(r.data_ocorrencia) if r.data_ocorrencia else None,
-            "area_ha": float(r.area_ha) if r.area_ha else None,
-            "area_intersecao_ha": float(r.area_intersecao_ha) if r.area_intersecao_ha else None,
+            "area_ha": _round_float(r.area_ha, 4),
+            "area_intersecao_ha": _round_float(r.area_intersecao_ha, 4),
         })
         features.append({
             "type": "Feature",
@@ -219,8 +233,8 @@ async def buscar_passivos_em_imovel(
         )
         rows_uc = (await session.execute(stmt_uc)).all()
         for r in rows_uc:
-            area_int = float(r.area_intersecao_ha) if r.area_intersecao_ha else None
-            pct_sob = float(r.percentual_sobreposicao) if r.percentual_sobreposicao else None
+            area_int = _round_float(r.area_intersecao_ha, 4)
+            pct_sob = _round_float(r.percentual_sobreposicao, 2)
             detalhes["unidades_conservacao"]["items"].append({
                 "id": str(r.id),
                 "nome": r.nome,
@@ -261,8 +275,8 @@ async def buscar_passivos_em_imovel(
         )
         rows_ti = (await session.execute(stmt_ti)).all()
         for r in rows_ti:
-            area_int = float(r.area_intersecao_ha) if r.area_intersecao_ha else None
-            pct_sob = float(r.percentual_sobreposicao) if r.percentual_sobreposicao else None
+            area_int = _round_float(r.area_intersecao_ha, 4)
+            pct_sob = _round_float(r.percentual_sobreposicao, 2)
             detalhes["terras_indigenas"]["items"].append({
                 "id": str(r.id),
                 "nome": r.nome,
@@ -301,8 +315,8 @@ async def buscar_passivos_em_imovel(
         )
         rows_qm = (await session.execute(stmt_qm)).all()
         for r in rows_qm:
-            area_int = float(r.area_intersecao_ha) if r.area_intersecao_ha else None
-            pct_sob = float(r.percentual_sobreposicao) if r.percentual_sobreposicao else None
+            area_int = _round_float(r.area_intersecao_ha, 4)
+            pct_sob = _round_float(r.percentual_sobreposicao, 2)
             detalhes["quilombolas"]["items"].append({
                 "id": str(r.id),
                 "nome": r.nome,
@@ -325,9 +339,10 @@ async def buscar_passivos_em_imovel(
     except Exception:
         pass
 
+    area_val = _round_float(imovel_db.area_ha, 2)
     area_str = (
-        f"{float(imovel_db.area_ha):,.2f} ha".replace(",", "X").replace(".", ",").replace("X", ".")
-        if imovel_db.area_ha
+        f"{area_val:,.2f} ha".replace(",", "X").replace(".", ",").replace("X", ".")
+        if area_val
         else "área não informada"
     )
     cabecalho = (
@@ -341,11 +356,11 @@ async def buscar_passivos_em_imovel(
     descricao = (
         f"{cabecalho}\n\n"
         f"**Passivos identificados:** "
-        f"{detalhes['queimadas']['total']} queimadas, "
-        f"{detalhes['desmatamento']['total']} desmatamentos, "
-        f"{detalhes['unidades_conservacao']['total']} UCs, "
-        f"{detalhes['terras_indigenas']['total']} TIs, "
-        f"{detalhes['quilombolas']['total']} quilombolas."
+        f"{_fmt_int(detalhes['queimadas']['total'])} queimadas, "
+        f"{_fmt_int(detalhes['desmatamento']['total'])} desmatamentos, "
+        f"{_fmt_int(detalhes['unidades_conservacao']['total'])} UCs, "
+        f"{_fmt_int(detalhes['terras_indigenas']['total'])} TIs, "
+        f"{_fmt_int(detalhes['quilombolas']['total'])} quilombolas."
     )
     return {
         "total": sum([
@@ -447,7 +462,7 @@ async def buscar_focos_queimada_imovel(
                 "tipo": "imovel_rural",
                 "codigo_car": imovel.codigo_car,
                 "nome_imovel": imovel.nome_imovel,
-                "area_ha": float(imovel.area_ha) if imovel.area_ha else None,
+                "area_ha": _round_float(imovel.area_ha, 4),
                 "situacao_cadastral": imovel.situacao_cadastral,
                 "municipio": imovel.municipio_nome,
                 "imovel_id": str(imovel.id),
@@ -460,10 +475,10 @@ async def buscar_focos_queimada_imovel(
     for row in rows:
         if not row.geom_json:
             continue
-        distancia = float(row.distancia_m) if row.distancia_m is not None else None
+        distancia = _round_float(row.distancia_m, 2)
         risco = classificar_nivel_risco_ambiental(
             distancia,
-            bool(row.dentro_imovel),
+            bool(row.dentro_imovel) if row.dentro_imovel is not None else None,
         )
         if distancia is not None:
             distancias.append(distancia)
@@ -474,7 +489,7 @@ async def buscar_focos_queimada_imovel(
             "properties": {
                 "tipo": "queimada",
                 "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
-                "intensidade": float(row.intensidade) if row.intensidade else None,
+                "intensidade": _round_float(row.intensidade, 2),
                 "codigo_car": imovel.codigo_car,
                 "distancia_m": distancia,
                 "dentro_imovel": bool(row.dentro_imovel) if row.dentro_imovel is not None else None,
@@ -500,10 +515,10 @@ async def buscar_focos_queimada_imovel(
     risco_predominante = max(riscos, key=lambda item: risco_prioridade.get(item, -1)) if riscos else "não classificado"
 
     descricao = (
-        f"Encontrados {len(rows)} focos de queimada no imóvel {codigo_car}."
+        f"Encontrados {_fmt_int(len(rows))} focos de queimada no imóvel {codigo_car}."
     )
     if menor_distancia is not None:
-        descricao += f" Menor distância observada: {menor_distancia:.1f} m."
+        descricao += f" Menor distância observada: {menor_distancia:.2f} m.".replace(".", ",")
     descricao += f" Nível de risco ambiental: {risco_predominante}."
 
     return {
@@ -664,12 +679,12 @@ async def buscar_queimadas(
                 "tipo": "queimada",
                 "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
                 "fonte_sensor": row.fonte_sensor,
-                "intensidade": float(row.intensidade) if row.intensidade else None,
+                "intensidade": _round_float(row.intensidade, 2),
                 "municipio": row.municipio_nome,
                 "bioma": row.bioma,
-                "dias_sem_chuva": float(row.dias_sem_chuva) if row.dias_sem_chuva is not None else None,
-                "precipitacao_mm": float(row.precipitacao_mm) if row.precipitacao_mm is not None else None,
-                "risco_fogo": float(row.risco_fogo) if row.risco_fogo is not None else None,
+                "dias_sem_chuva": _round_float(row.dias_sem_chuva, 1),
+                "precipitacao_mm": _round_float(row.precipitacao_mm, 1),
+                "risco_fogo": _round_float(row.risco_fogo, 2),
             },
         })
         if row.fonte_nome:
@@ -684,16 +699,12 @@ async def buscar_queimadas(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} focos de queimada"
+        "descricao": f"Encontrados {_fmt_int(len(features))} focos de queimada"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: desmatamento
-# ---------------------------------------------------------------------------
 
 async def buscar_desmatamentos(
     session: AsyncSession,
@@ -770,7 +781,7 @@ async def buscar_desmatamentos(
                 "tipo": "desmatamento",
                 "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
                 "tipo_alerta": row.tipo_alerta,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome or municipio,
             },
         })
@@ -786,16 +797,12 @@ async def buscar_desmatamentos(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} alertas de desmatamento"
+        "descricao": f"Encontrados {_fmt_int(len(features))} alertas de desmatamento"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: unidades de conservação
-# ---------------------------------------------------------------------------
 
 async def buscar_unidades_conservacao(
     session: AsyncSession,
@@ -871,7 +878,7 @@ async def buscar_unidades_conservacao(
                 "categoria": row.categoria,
                 "esfera": row.esfera,
                 "grupo_snuc": row.grupo_snuc,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
             },
         })
@@ -887,16 +894,12 @@ async def buscar_unidades_conservacao(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontradas {len(features)} unidades de conservação"
+        "descricao": f"Encontradas {_fmt_int(len(features))} unidades de conservação"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: terras indígenas
-# ---------------------------------------------------------------------------
 
 async def buscar_terras_indigenas(
     session: AsyncSession,
@@ -965,7 +968,7 @@ async def buscar_terras_indigenas(
                 "tipo": "terra_indigena",
                 "nome": row.nome,
                 "fase": row.fase,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
             },
         })
@@ -981,16 +984,12 @@ async def buscar_terras_indigenas(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontradas {len(features)} terras indígenas"
+        "descricao": f"Encontradas {_fmt_int(len(features))} terras indígenas"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: assentamentos rurais
-# ---------------------------------------------------------------------------
 
 async def buscar_assentamentos(
     session: AsyncSession,
@@ -1059,7 +1058,7 @@ async def buscar_assentamentos(
             "properties": {
                 "tipo": "assentamento_rural",
                 "nome": row.nome,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "modalidade": row.modalidade,
                 "familias": row.familias,
                 "municipio": row.municipio_nome,
@@ -1077,16 +1076,12 @@ async def buscar_assentamentos(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} assentamentos rurais"
+        "descricao": f"Encontrados {_fmt_int(len(features))} assentamentos rurais"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: territórios quilombolas
-# ---------------------------------------------------------------------------
 
 async def buscar_territorios_quilombolas(
     session: AsyncSession,
@@ -1150,7 +1145,7 @@ async def buscar_territorios_quilombolas(
             "properties": {
                 "tipo": "territorio_quilombola",
                 "nome": row.nome,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
             },
         })
@@ -1166,16 +1161,12 @@ async def buscar_territorios_quilombolas(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} territórios quilombolas"
+        "descricao": f"Encontrados {_fmt_int(len(features))} territórios quilombolas"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: imóveis rurais (CAR)
-# ---------------------------------------------------------------------------
 
 async def buscar_imoveis_rurais(
     session: AsyncSession,
@@ -1259,7 +1250,7 @@ async def buscar_imoveis_rurais(
                 "tipo": "imovel_rural",
                 "nome_imovel": row.nome_imovel,
                 "codigo_car": row.codigo_car,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "situacao_cadastral": row.situacao_cadastral,
                 "municipio": row.municipio_nome,
             },
@@ -1276,16 +1267,12 @@ async def buscar_imoveis_rurais(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} imóveis rurais"
+        "descricao": f"Encontrados {_fmt_int(len(features))} imóveis rurais"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: busca semântica (RAG) em documentos
-# ---------------------------------------------------------------------------
 
 async def buscar_documentos_rag(
     session: AsyncSession,
@@ -1331,7 +1318,7 @@ async def buscar_documentos_rag(
             "tipo": row.tipo,
             "url": row.url_origem,
             "texto": row.texto,
-            "relevancia": round(1 - float(row.distancia), 4) if row.distancia is not None else None,
+            "relevancia": _round_float(1 - float(row.distancia), 4) if row.distancia is not None else None,
         })
         if row.fonte_nome:
             fontes[row.fonte_nome] = {
@@ -1348,7 +1335,7 @@ async def buscar_documentos_rag(
         "trechos": trechos,
         "contexto_textual": contexto,
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(trechos)} trechos de documentos relevantes.",
+        "descricao": f"Encontrados {_fmt_int(len(trechos))} trechos de documentos relevantes.",
         "sql_executado": sql_executado,
     }
 
@@ -1438,11 +1425,11 @@ async def buscar_imoveis_por_queimada(
                 "tipo": "imovel_rural_queimada",
                 "codigo_car": str(row.codigo_car) if row.codigo_car else None,
                 "nome_imovel": row.nome_imovel,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
                 "num_queimadas": int(row.num_queimadas) if row.num_queimadas else 0,
-                "dist_media_m": float(row.dist_media_m) if row.dist_media_m else None,
-                "dist_min_m": float(row.dist_min_m) if row.dist_min_m else None,
+                "dist_media_m": _round_float(row.dist_media_m, 2),
+                "dist_min_m": _round_float(row.dist_min_m, 2),
                 "nivel_risco_ambiental": classificar_nivel_risco_ambiental(row.dist_min_m),
             },
         })
@@ -1496,8 +1483,8 @@ async def buscar_imoveis_por_queimada(
                 "tipo": "queimada_evento_relacionada",
                 "data_ocorrencia": q.data_ocorrencia.isoformat() if q.data_ocorrencia else None,
                 "sensor": q.fonte_sensor,
-                "intensidade": float(q.intensidade) if q.intensidade else None,
-                "risco_fogo": float(q.risco_fogo) if q.risco_fogo else None,
+                "intensidade": _round_float(q.intensidade, 2),
+                "risco_fogo": _round_float(q.risco_fogo, 2),
             },
         })
         total_queimadas += 1
@@ -1509,8 +1496,8 @@ async def buscar_imoveis_por_queimada(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": (
-            f"Foram encontrados **{total_imoveis} imóveis rurais** com "
-            f"**{total_queimadas} focos de queimada dentro da propriedade** {escopo_txt}. "
+            f"Foram encontrados **{_fmt_int(total_imoveis)} imóveis rurais** com "
+            f"**{_fmt_int(total_queimadas)} focos de queimada dentro da propriedade** {escopo_txt}. "
             "O mapa exibe os imóveis (polígonos) e os focos contidos neles (pontos)."
         ),
         "sql_executado": sql_executado,
@@ -1595,12 +1582,12 @@ async def buscar_imoveis_por_desmatamento(
                 "tipo": "imovel_rural_desmatamento",
                 "codigo_car": str(row.codigo_car) if row.codigo_car else None,
                 "nome_imovel": row.nome_imovel,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
                 "num_alertas_desmatamento": int(row.num_alertas_desmatamento) if row.num_alertas_desmatamento else 0,
-                "area_total_intersecao_ha": float(row.area_total_intersecao_ha) if row.area_total_intersecao_ha else None,
-                "percentual_medio_sobreposicao": float(row.percentual_medio_sobreposicao) if row.percentual_medio_sobreposicao else None,
-                "percentual_max_sobreposicao": float(row.percentual_max_sobreposicao) if row.percentual_max_sobreposicao else None,
+                "area_total_intersecao_ha": _round_float(row.area_total_intersecao_ha, 4),
+                "percentual_medio_sobreposicao": _round_float(row.percentual_medio_sobreposicao, 2),
+                "percentual_max_sobreposicao": _round_float(row.percentual_max_sobreposicao, 2),
             },
         })
         if row.fonte_nome:
@@ -1649,7 +1636,7 @@ async def buscar_imoveis_por_desmatamento(
                 "tipo": "desmatamento_alerta_relacionado",
                 "data_ocorrencia": a.data_ocorrencia.isoformat() if a.data_ocorrencia else None,
                 "tipo_alerta": a.tipo_alerta,
-                "area_ha": float(a.area_ha) if a.area_ha else None,
+                "area_ha": _round_float(a.area_ha, 4),
             },
         })
         total_alertas += 1
@@ -1661,8 +1648,8 @@ async def buscar_imoveis_por_desmatamento(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": (
-            f"Foram encontrados **{total_imoveis} imóveis rurais** afetados por "
-            f"**{total_alertas} alertas de desmatamento** {escopo_txt}. "
+            f"Foram encontrados **{_fmt_int(total_imoveis)} imóveis rurais** afetados por "
+            f"**{_fmt_int(total_alertas)} alertas de desmatamento** {escopo_txt}. "
             "O mapa exibe os imóveis e os polígonos dos alertas relacionados."
         ),
         "sql_executado": sql_executado,
@@ -1730,11 +1717,11 @@ async def buscar_imoveis_por_terra_indigena(
                 "tipo": "imovel_rural_ti",
                 "codigo_car": str(row.codigo_car) if row.codigo_car else None,
                 "nome_imovel": row.nome_imovel,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
                 "terra_indigena": row.ti_nome,
-                "area_intersecao_ha": float(row.area_intersecao_ha) if row.area_intersecao_ha else 0,
-                "percentual_sobreposicao": float(row.percentual_sobreposicao) if row.percentual_sobreposicao else 0,
+                "area_intersecao_ha": _round_float(row.area_intersecao_ha, 4) or 0,
+                "percentual_sobreposicao": _round_float(row.percentual_sobreposicao, 2) or 0,
             },
         })
         if row.fonte_nome:
@@ -1749,7 +1736,7 @@ async def buscar_imoveis_por_terra_indigena(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} imóveis rurais em Terras Indígenas"
+        "descricao": f"Encontrados {_fmt_int(len(features))} imóveis rurais em Terras Indígenas"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ".",
         "sql_executado": sql_executado,
@@ -1824,11 +1811,11 @@ async def buscar_imoveis_por_quilombo(
                 "tipo": "imovel_rural_quilombo",
                 "codigo_car": str(row.codigo_car) if row.codigo_car else None,
                 "nome_imovel": row.nome_imovel,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
                 "territorio_quilombola": row.quilombo_nome,
-                "area_intersecao_ha": float(row.area_intersecao_ha) if row.area_intersecao_ha else 0,
-                "percentual_sobreposicao": float(row.percentual_sobreposicao) if row.percentual_sobreposicao else 0,
+                "area_intersecao_ha": _round_float(row.area_intersecao_ha, 4) or 0,
+                "percentual_sobreposicao": _round_float(row.percentual_sobreposicao, 2) or 0,
             },
         })
         if row.fonte_nome:
@@ -1874,7 +1861,7 @@ async def buscar_imoveis_por_quilombo(
             "properties": {
                 "tipo": "territorio_quilombola_relacionado",
                 "nome": q.nome,
-                "area_ha": float(q.area_ha) if q.area_ha else None,
+                "area_ha": _round_float(q.area_ha, 4),
             },
         })
         total_quilombos += 1
@@ -1886,17 +1873,13 @@ async def buscar_imoveis_por_quilombo(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": (
-            f"Foram encontrados **{total_imoveis} imóveis rurais** sobrepostos a "
-            f"**{total_quilombos} territórios quilombolas** {escopo_txt}. "
+            f"Foram encontrados **{_fmt_int(total_imoveis)} imóveis rurais** sobrepostos a "
+            f"**{_fmt_int(total_quilombos)} territórios quilombolas** {escopo_txt}. "
             "O mapa exibe os imóveis e os polígonos dos territórios relacionados."
         ),
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: camadas estaduais ambientais (DataGeo SP)
-# ---------------------------------------------------------------------------
 
 async def buscar_camadas_estaduais(
     session: AsyncSession,
@@ -1984,17 +1967,13 @@ async def buscar_camadas_estaduais(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontradas {len(features)} camadas estaduais ambientais"
+        "descricao": f"Encontradas {_fmt_int(len(features))} camadas estaduais ambientais"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ("" if not tema else f" com tema '{tema}'")
         + ".",
         "sql_executado": sql_executado,
     }
 
-
-# ---------------------------------------------------------------------------
-# Ferramenta: imoveis rurais com camadas estaduais ambientais
-# ---------------------------------------------------------------------------
 
 async def buscar_imoveis_com_camadas_estaduais(
     session: AsyncSession,
@@ -2070,13 +2049,13 @@ async def buscar_imoveis_com_camadas_estaduais(
                 "tipo": "imovel_com_camada_ambiental",
                 "nome_imovel": row.nome_imovel,
                 "codigo_car": row.codigo_car,
-                "area_ha": float(row.area_ha) if row.area_ha else None,
+                "area_ha": _round_float(row.area_ha, 4),
                 "situacao_cadastral": row.situacao_cadastral,
                 "municipio": row.municipio_nome,
                 "camada_nome": row.camada_nome,
                 "camada_tema": row.tema,
                 "camada_subtipo": row.subtipo,
-                "area_intersecao_ha": float(row[10]) if row[10] else 0,  # area from ST_Area
+                "area_intersecao_ha": _round_float(row[10], 4) or 0,
             },
         })
 
@@ -2085,7 +2064,7 @@ async def buscar_imoveis_com_camadas_estaduais(
         "features": features,
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
-        "descricao": f"Encontrados {len(features)} imóveis rurais em camadas estaduais ambientais"
+        "descricao": f"Encontrados {_fmt_int(len(features))} imóveis rurais em camadas estaduais ambientais"
         + (f" em {municipio}" if municipio else " no estado de SP")
         + ("" if not tema else f" com tema '{tema}'")
         + ".",

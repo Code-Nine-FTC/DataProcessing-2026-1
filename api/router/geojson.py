@@ -13,6 +13,8 @@ router = APIRouter(
     prefix="/municipal/geojson/layers",
 )
 
+_GEOJSON_PRECISION = 6
+
 _LAYER_QUERIES = {
     "municipios": """
         SELECT
@@ -20,7 +22,7 @@ _LAYER_QUERIES = {
             m.nome,
             m.codigo_ibge,
             e.sigla AS estado_sigla,
-            ST_AsGeoJSON(m.geom)::json AS geometry
+            ST_AsGeoJSON(m.geom, {p})::json AS geometry
         FROM municipio m
         JOIN estado e ON m.estado_id = e.id
         WHERE e.sigla = 'SP'
@@ -32,7 +34,7 @@ _LAYER_QUERIES = {
             d.area_ha,
             d.data_ocorrencia::text AS data_ocorrencia,
             m.nome AS municipio,
-            ST_AsGeoJSON(d.geom)::json AS geometry
+            ST_AsGeoJSON(d.geom, {p})::json AS geometry
         FROM desmatamento_alerta d
         LEFT JOIN municipio m ON d.municipio_id = m.id
         {filter_clause}
@@ -48,7 +50,7 @@ _LAYER_QUERIES = {
             q.precipitacao_mm,
             q.risco_fogo,
             m.nome AS municipio,
-            ST_AsGeoJSON(q.geom)::json AS geometry
+            ST_AsGeoJSON(q.geom, {p})::json AS geometry
         FROM queimada_evento q
         LEFT JOIN municipio m ON q.municipio_id = m.id
         {filter_clause}
@@ -60,7 +62,7 @@ _LAYER_QUERIES = {
             t.fase,
             t.area_ha,
             m.nome AS municipio,
-            ST_AsGeoJSON(t.geom)::json AS geometry
+            ST_AsGeoJSON(t.geom, {p})::json AS geometry
         FROM terra_indigena t
         LEFT JOIN municipio m ON t.municipio_id = m.id
         {filter_clause}
@@ -73,7 +75,7 @@ _LAYER_QUERIES = {
             u.esfera,
             u.area_ha,
             m.nome AS municipio,
-            ST_AsGeoJSON(u.geom)::json AS geometry
+            ST_AsGeoJSON(u.geom, {p})::json AS geometry
         FROM unidade_conservacao u
         LEFT JOIN municipio m ON u.municipio_id = m.id
         {filter_clause}
@@ -85,7 +87,7 @@ _LAYER_QUERIES = {
             a.modalidade,
             a.area_ha,
             m.nome AS municipio,
-            ST_AsGeoJSON(a.geom)::json AS geometry
+            ST_AsGeoJSON(a.geom, {p})::json AS geometry
         FROM assentamento_rural a
         LEFT JOIN municipio m ON a.municipio_id = m.id
         {filter_clause}
@@ -96,7 +98,7 @@ _LAYER_QUERIES = {
             q.nome,
             q.area_ha,
             m.nome AS municipio,
-            ST_AsGeoJSON(q.geom)::json AS geometry
+            ST_AsGeoJSON(q.geom, {p})::json AS geometry
         FROM territorio_quilombola q
         LEFT JOIN municipio m ON q.municipio_id = m.id
         {filter_clause}
@@ -109,7 +111,7 @@ _LAYER_QUERIES = {
             i.area_ha,
             i.situacao_cadastral,
             m.nome AS municipio,
-            ST_AsGeoJSON(i.geom)::json AS geometry
+            ST_AsGeoJSON(i.geom, {p})::json AS geometry
         FROM imovel_rural i
         LEFT JOIN municipio m ON i.municipio_id = m.id
         {filter_clause}
@@ -158,6 +160,7 @@ async def get_layer_geojson(
             detail=f"Layer '{layer_name}' not found. Available: {list(_LAYER_QUERIES.keys())}",
         )
 
+    fmt_kwargs: dict[str, str] = {"p": str(_GEOJSON_PRECISION)}
     params = {}
     if municipio_id is not None:
         params["municipio_id"] = municipio_id
@@ -165,10 +168,11 @@ async def get_layer_geojson(
             query = raw_query + " AND m.id = :municipio_id"
         else:
             alias = _LAYER_ALIASES.get(layer_name, "m")
-            filter_clause = _municipio_filter_clause(alias)
-            query = raw_query.format(filter_clause=filter_clause)
+            fmt_kwargs["filter_clause"] = _municipio_filter_clause(alias)
+            query = raw_query.format(**fmt_kwargs)
     else:
-        query = raw_query.format(filter_clause="") if "{filter_clause}" in raw_query else raw_query
+        fmt_kwargs["filter_clause"] = ""
+        query = raw_query.format(**fmt_kwargs)
 
     result = await session.execute(text(query), params)
     rows = result.mappings().all()
@@ -176,6 +180,8 @@ async def get_layer_geojson(
     features = []
     for row in rows:
         props = {k: v for k, v in row.items() if k != "geometry"}
+        if "area_ha" in props and props["area_ha"] is not None:
+            props["area_ha"] = round(float(props["area_ha"]), 4)
         features.append({
             "type": "Feature",
             "geometry": row["geometry"],
