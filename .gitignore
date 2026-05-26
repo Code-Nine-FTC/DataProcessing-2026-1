@@ -57,3 +57,6 @@ output/
 data.zip
 data.zip
 data/sicar/
+
+plugins/
+logs/
