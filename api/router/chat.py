@@ -15,6 +15,7 @@ from api.schemas.chat import (
 )
 from api.services.chat_service import ChatService
 from models.database import SessionConnection
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/chat", tags=["Chat Ambiental NLP"])
 
@@ -112,3 +113,21 @@ async def registrar_feedback(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     return await _service.registrar_feedback(req, session)
+
+
+class ResumoResponse(BaseModel):
+    resumo: str
+    fontes: List[dict] = []
+
+@router.get(
+    "/{chat_id}/resumo",
+    response_model=ResumoResponse,
+    summary="Gera um relatório condensado do chat via IA",
+)
+async def resumo_chat(
+    chat_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+
+    dados_relatorio = await _service.gerar_resumo_relatorio(chat_id, session)
+    return ResumoResponse(resumo=dados_relatorio["resumo"], fontes=dados_relatorio["fontes"])
