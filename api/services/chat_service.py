@@ -217,3 +217,60 @@ class ChatService:
         session.add(feedback)
         await session.commit()
         return {"mensagem": "Feedback registrado com sucesso."}
+
+# ------------------------------------------------------------------
+# Gerar Resumo do Relatório 
+# ------------------------------------------------------------------
+
+    async def gerar_resumo_relatorio(self, chat_id: UUID, session: AsyncSession) -> dict:
+        try:
+            # 1. Pega o histórico completo
+            historico = await self.historico_chat(chat_id, session)
+            
+            if not historico.mensagens:
+                return {
+                    "resumo": "Nenhuma conversa encontrada neste chat.",
+                    "fontes": []
+                }
+
+            resumos_limpos = []
+            fontes_acumuladas = []
+
+            for msg in historico.mensagens:
+                if msg.resposta:
+                    texto_cru = msg.resposta
+                    
+                    # Limpeza inteligente: Remove metadados brutos que poluem o texto
+                    if "Contexto documental:" in texto_cru:
+                        texto_cru = texto_cru.split("Contexto documental:")[0]
+                    if "Copiar Link QGIS" in texto_cru:
+                        texto_cru = texto_cru.split("Copiar Link QGIS")[0]
+                    if "📚 Fontes consultadas" in texto_cru:
+                        texto_cru = texto_cru.split("📚 Fontes consultadas")[0]
+                    
+                    texto_limpo = texto_cru.strip()
+                    if texto_limpo:
+                        resumos_limpos.append(texto_limpo)
+                
+                # Coleta estruturada das fontes reais salvas no banco
+                if msg.fontes:
+                    for f in msg.fontes:
+                        fonte_dict = {"nome": f.nome, "orgao": getattr(f, 'orgao', ''), "url": getattr(f, 'url', '')}
+                        if fonte_dict not in fontes_acumuladas:
+                            fontes_acumuladas.append(fonte_dict)
+
+            # Une as principais conclusões encontradas na conversa
+            resumo_final = "\n\n".join(resumos_limpos)
+
+            return {
+                "resumo": resumo_final,
+                "fontes": fontes_acumuladas
+            }
+
+        except Exception as e:
+            logger.error(f"Erro ao compilar relatório inteligente: {e}")
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=500, 
+                detail="Erro ao compilar as informações estruturadas do relatório."
+            )
