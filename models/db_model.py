@@ -485,3 +485,18 @@ class RelImovelBacia(Base):
     area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric)
     percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric)
     tipo_relacao: Mapped[Optional[str]] = mapped_column(String) # 'dentro', 'parcial', etc.
+
+# --- 7. MONITORAMENTO E LOGS ---
+
+class HistoricoEtl(Base):
+    __tablename__ = "historico_etl"
+    id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    pipeline_name: Mapped[str] = mapped_column(TEXT, nullable=False)
+    etapa: Mapped[str] = mapped_column(TEXT, nullable=False) # 'EXTRAÇÃO', 'TRANSFORMAÇÃO', 'CARGA', 'COMPLETO', 'PÓS-PROCESSAMENTO'
+    status: Mapped[str] = mapped_column(TEXT, nullable=False) # 'EM_PROCESSAMENTO', 'SUCESSO', 'ERRO', 'IGNORADO'
+    detalhes: Mapped[Optional[str]] = mapped_column(TEXT)
+    data_inicio: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    data_fim: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    total_registros: Mapped[int] = mapped_column(Integer, server_default="0")
+    registros_inseridos: Mapped[int] = mapped_column(Integer, server_default="0")
+    erro_traceback: Mapped[Optional[str]] = mapped_column(TEXT)
