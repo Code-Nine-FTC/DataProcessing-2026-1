@@ -42,3 +42,5 @@ sentence-transformers>=3.0.0
 joblib>=1.4.0
 pytesseract>=0.3.10
 SICAR @ git+https://github.com/urbanogilson/SICAR.git
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

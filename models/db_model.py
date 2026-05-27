@@ -209,6 +209,9 @@ class ImovelRural(Base):
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
     centroid: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    __table_args__ = (
+        Index("idx_imovel_rural_municipio_id", "municipio_id"),
+    )
 
     @staticmethod
     async def get_imoveis_intersecting_geometry(session: AsyncSession, geojson_geometry: str) -> list[Row]:
@@ -240,6 +243,10 @@ class QueimadaEvento(Base):
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("POINT", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    __table_args__ = (
+        Index("idx_queimada_evento_municipio_id", "municipio_id"),
+        Index("idx_queimada_evento_data_ocorrencia", "data_ocorrencia"),
+    )
 
 class DesmatamentoAlerta(Base):
     __tablename__ = "desmatamento_alerta"
@@ -252,6 +259,10 @@ class DesmatamentoAlerta(Base):
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    __table_args__ = (
+        Index("idx_desmatamento_alerta_municipio_id", "municipio_id"),
+        Index("idx_desmatamento_alerta_data_ocorrencia", "data_ocorrencia"),
+    )
 
 # --- 4. ÁREAS PROTEGIDAS E ESPECIAIS ---
 
@@ -268,6 +279,9 @@ class UnidadeConservacao(Base):
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    __table_args__ = (
+        Index("idx_unidade_conservacao_municipio_id", "municipio_id"),
+    )
 
 class TerraIndigena(Base):
     __tablename__ = "terra_indigena"
@@ -280,6 +294,9 @@ class TerraIndigena(Base):
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    __table_args__ = (
+        Index("idx_terra_indigena_municipio_id", "municipio_id"),
+    )
 
 class AssentamentoRural(Base):
     __tablename__ = "assentamento_rural"
@@ -293,6 +310,9 @@ class AssentamentoRural(Base):
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    __table_args__ = (
+        Index("idx_assentamento_rural_municipio_id", "municipio_id"),
+    )
 
 class TerritorioQuilombola(Base):
     __tablename__ = "territorio_quilombola"
@@ -304,6 +324,9 @@ class TerritorioQuilombola(Base):
     municipio_id: Mapped[Optional[int]] = mapped_column(ForeignKey("municipio.id"))
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
     atributos_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    __table_args__ = (
+        Index("idx_territorio_quilombola_municipio_id", "municipio_id"),
+    )
 
 class CamadaEstadualAmbiental(Base):
     __tablename__ = "camada_estadual_ambiental"
@@ -329,6 +352,10 @@ class RelImovelQueimada(Base):
     dentro_imovel: Mapped[Optional[bool]] = mapped_column(Boolean) #
     nivel_risco_ambiental: Mapped[Optional[str]] = mapped_column(TEXT) #
     data_calculo: Mapped[Optional[datetime]] = mapped_column(DateTime) #
+    __table_args__ = (
+        Index("idx_rel_imovel_queimada_imovel_id", "imovel_rural_id"),
+        Index("idx_rel_imovel_queimada_dentro_imovel", "dentro_imovel"),
+    )
 
 class RelImovelDesmatamento(Base):
     __tablename__ = "rel_imovel_desmatamento"
@@ -338,6 +365,9 @@ class RelImovelDesmatamento(Base):
     area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric) #
     percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric) #
     data_calculo: Mapped[Optional[datetime]] = mapped_column(DateTime) #
+    __table_args__ = (
+        Index("idx_rel_imovel_desmatamento_imovel_id", "imovel_rural_id"),
+    )
 
 class RelImovelUC(Base):
     __tablename__ = "rel_imovel_uc"
@@ -347,6 +377,9 @@ class RelImovelUC(Base):
     area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric) #
     percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric) #
     tipo_relacao: Mapped[Optional[str]] = mapped_column(TEXT) #
+    __table_args__ = (
+        Index("idx_rel_imovel_uc_imovel_id", "imovel_rural_id"),
+    )
 
 class RelImovelTI(Base):
     __tablename__ = "rel_imovel_ti"
@@ -356,6 +389,9 @@ class RelImovelTI(Base):
     area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric) #
     percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric) #
     tipo_relacao: Mapped[Optional[str]] = mapped_column(TEXT) #
+    __table_args__ = (
+        Index("idx_rel_imovel_ti_imovel_id", "imovel_rural_id"),
+    )
 
 class RelImovelAssentamento(Base):
     __tablename__ = "rel_imovel_assentamento"
@@ -365,6 +401,9 @@ class RelImovelAssentamento(Base):
     area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric) #
     percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric) #
     tipo_relacao: Mapped[Optional[str]] = mapped_column(TEXT) #
+    __table_args__ = (
+        Index("idx_rel_imovel_assentamento_imovel_id", "imovel_rural_id"),
+    )
 
 class RelImovelQuilombo(Base):
     __tablename__ = "rel_imovel_quilombo"
@@ -374,6 +413,9 @@ class RelImovelQuilombo(Base):
     area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric) #
     percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric) #
     tipo_relacao: Mapped[Optional[str]] = mapped_column(TEXT) #
+    __table_args__ = (
+        Index("idx_rel_imovel_quilombo_imovel_id", "imovel_rural_id"),
+    )
 
 # --- 6. INTELIGÊNCIA ARTIFICIAL E CHAT (RAG) ---
 class Conceito(Base):
