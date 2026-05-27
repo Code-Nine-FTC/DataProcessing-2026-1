@@ -418,9 +418,21 @@ class DocumentoTrecho(Base):
         ),
     )
 
+class Usuario(Base):
+    __tablename__ = "usuario"
+    id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    email: Mapped[str] = mapped_column(TEXT, nullable=False, unique=True)
+    nome: Mapped[Optional[str]] = mapped_column(TEXT)
+    senha_hash: Mapped[str] = mapped_column(TEXT, nullable=False)
+    role: Mapped[str] = mapped_column(String, server_default="user", nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
+
+
 class Chat(Base):
     __tablename__ = "chat"
     id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    usuario_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("usuario.id"), nullable=True)
     title: Mapped[Optional[str]] = mapped_column(TEXT)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)

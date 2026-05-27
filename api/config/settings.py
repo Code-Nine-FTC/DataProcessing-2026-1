@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     POSTGRES_DB: str
     PROJECT_NAME: str = "DataProcessing"
     LOG_LEVEL: str = "INFO"
+    JWT_SECRET: str = "change-me-in-production"
+    JWT_EXPIRE_MINUTES: int = 60 * 8  # 8 horas
 
     @property
     def DATABASE_URL(self) -> str:
