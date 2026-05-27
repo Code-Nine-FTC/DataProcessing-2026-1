@@ -133,3 +133,84 @@ class ProximidadeQueimadaItem(BaseModel):
 class RespostaProximidadeQueimada(BaseModel):
     itens: List[ProximidadeQueimadaItem]
     total: int
+
+
+# --- [RF-09] Score Ambiental (ASG) ---
+
+class IndicadoresScoreImovel(BaseModel):
+    perc_desmatamento_max: float
+    area_desmatamento_ha: float
+    focos_queimada_dentro: int
+    focos_queimada_proximos: int
+    perc_sobreposicao_uc_max: float
+    perc_sobreposicao_ti_max: float
+    perc_sobreposicao_quilombo_max: float
+    situacao_cadastral: Optional[str]
+
+
+class ScoreImovel(BaseModel):
+    imovel_id: str
+    codigo_car: Optional[str]
+    nome_imovel: Optional[str]
+    municipio: Optional[str]
+    estado: Optional[str]
+    area_ha: Optional[float]
+    score_ambiental: float
+    score_social: float
+    score_governanca: float
+    score_geral: float
+    classificacao: str
+    indicadores: IndicadoresScoreImovel
+
+
+class RespostaScoreImoveis(BaseModel):
+    itens: List[ScoreImovel]
+    total: int
+    score_medio: float
+
+
+class IndicadoresScoreAssentamento(BaseModel):
+    perc_desmatamento: float
+    area_desmatamento_ha: float
+    focos_queimada_dentro: int
+    focos_queimada_proximos: int
+    perc_sobreposicao_uc: float
+    perc_sobreposicao_ti: float
+    completude_dados: float
+
+
+class ScoreAssentamento(BaseModel):
+    assentamento_id: str
+    nome: Optional[str]
+    modalidade: Optional[str]
+    familias: Optional[int]
+    municipio: Optional[str]
+    estado: Optional[str]
+    area_ha: Optional[float]
+    score_ambiental: float
+    score_social: float
+    score_governanca: float
+    score_geral: float
+    classificacao: str
+    indicadores: IndicadoresScoreAssentamento
+
+
+class RespostaScoreAssentamentos(BaseModel):
+    itens: List[ScoreAssentamento]
+    total: int
+    score_medio: float
+
+
+class ScoreDistribuicaoItem(BaseModel):
+    classificacao: str
+    total: int
+    percentual: float
+
+
+class ResumoScoreAmbiental(BaseModel):
+    total_imoveis_avaliados: int
+    score_medio_imoveis: float
+    distribuicao_imoveis: List[ScoreDistribuicaoItem]
+    total_assentamentos_avaliados: int
+    score_medio_assentamentos: float
+    distribuicao_assentamentos: List[ScoreDistribuicaoItem]

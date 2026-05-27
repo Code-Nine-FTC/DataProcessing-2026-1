@@ -678,9 +678,9 @@ class AnalyticsService:
                 estado=row.estado,
                 area_id=row.area_id,
                 area_nome=row.area_nome,
-                area_imovel_ha=float(row.area_imovel_ha) if row.area_imovel_ha is not None else None,
-                area_intersecao_ha=float(row.area_intersecao_ha) if row.area_intersecao_ha is not None else None,
-                percentual_sobreposicao=float(row.percentual_sobreposicao) if row.percentual_sobreposicao is not None else None,
+                area_imovel_ha=round(float(row.area_imovel_ha), 4) if row.area_imovel_ha is not None else None,
+                area_intersecao_ha=round(float(row.area_intersecao_ha), 4) if row.area_intersecao_ha is not None else None,
+                percentual_sobreposicao=round(float(row.percentual_sobreposicao), 2) if row.percentual_sobreposicao is not None else None,
                 tipo_relacao=row.tipo_relacao,
             )
             for row in result

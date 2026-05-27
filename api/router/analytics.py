@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+from typing import Optional
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,14 +10,21 @@ from api.schemas.index import (
     RespostaBuffer,
     RespostaProximidade,
     RespostaProximidadeQueimada,
+    RespostaScoreAssentamentos,
+    RespostaScoreImoveis,
     RespostaSobreposicoesAreas,
     RespostaQueimadaDentroFora,
     RespostaTemporalDesmatamento,
     RespostaTemporalQueimada,
     RespostaUltimoIncendio,
+    ResumoScoreAmbiental,
     ResumoSobreposicoes,
+    ScoreAssentamento,
+    ScoreImovel,
     TipoAreaSobreposicao,
 )
+from api.router.controller.analytics_controller import AnalyticsMunicipalHandler
+from api.router.controller.score_ambiental_controller import ScoreAmbientalHandler
 from api.services.index import AnalyticsService
 from api.utils.basic_response import BasicResponse
 from api.utils.cache import cached, DEFAULT_TTL
@@ -387,3 +397,90 @@ async def get_resumo_sobreposicoes(
 ) -> BasicResponse[ResumoSobreposicoes]:
     svc = AnalyticsService(session)
     return BasicResponse(data=await cached("sobreposicoes:resumo", DEFAULT_TTL, svc.resumo_sobreposicoes))
+
+
+# --- Score Ambiental (ASG) ---
+
+@router.get(
+    "/score-ambiental/imoveis",
+    response_model=BasicResponse[RespostaScoreImoveis],
+    summary="[RF-09] Score ambiental (ASG) dos imóveis rurais",
+)
+async def get_score_imoveis(
+    estado_sigla: Optional[str] = Query(
+        None, description="Filtrar por sigla do estado (ex.: SP)", max_length=2
+    ),
+    municipio_id: Optional[int] = Query(None, description="Filtrar por id do município"),
+    limite: int = Query(100, description="Número máximo de resultados", ge=1, le=1000),
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[RespostaScoreImoveis]:
+    return await ScoreAmbientalHandler(session).score_imoveis(
+        estado_sigla, municipio_id, limite
+    )
+
+
+@router.get(
+    "/score-ambiental/imoveis/{imovel_id}",
+    response_model=BasicResponse[ScoreImovel],
+    summary="[RF-09] Score ambiental (ASG) de um imóvel rural específico",
+)
+async def get_score_imovel_detalhe(
+    imovel_id: UUID,
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[ScoreImovel]:
+    return await ScoreAmbientalHandler(session).score_imovel_detalhe(imovel_id)
+
+
+@router.get(
+    "/score-ambiental/assentamentos",
+    response_model=BasicResponse[RespostaScoreAssentamentos],
+    summary="[RF-09] Score ambiental (ASG) dos assentamentos rurais",
+)
+async def get_score_assentamentos(
+    estado_sigla: Optional[str] = Query(
+        None, description="Filtrar por sigla do estado (ex.: SP)", max_length=2
+    ),
+    municipio_id: Optional[int] = Query(None, description="Filtrar por id do município"),
+    limite: int = Query(100, description="Número máximo de resultados", ge=1, le=1000),
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[RespostaScoreAssentamentos]:
+    return await ScoreAmbientalHandler(session).score_assentamentos(
+        estado_sigla, municipio_id, limite
+    )
+
+
+@router.get(
+    "/score-ambiental/assentamentos/{assentamento_id}",
+    response_model=BasicResponse[ScoreAssentamento],
+    summary="[RF-09] Score ambiental (ASG) de um assentamento rural específico",
+)
+async def get_score_assentamento_detalhe(
+    assentamento_id: UUID,
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[ScoreAssentamento]:
+    return await ScoreAmbientalHandler(session).score_assentamento_detalhe(
+        assentamento_id
+    )
+
+
+@router.get(
+    "/score-ambiental/resumo",
+    response_model=BasicResponse[ResumoScoreAmbiental],
+    summary="[RF-09] Resumo agregado do score ambiental (ASG) — distribuição por classificação",
+)
+async def get_score_ambiental_resumo(
+    estado_sigla: Optional[str] = Query(
+        None, description="Filtrar por sigla do estado (ex.: SP)", max_length=2
+    ),
+    municipio_id: Optional[int] = Query(None, description="Filtrar por id do município"),
+    limite_amostra: int = Query(
+        500,
+        description="Tamanho da amostra aleatória usada para o resumo",
+        ge=1,
+        le=5000,
+    ),
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[ResumoScoreAmbiental]:
+    return await ScoreAmbientalHandler(session).resumo(
+        estado_sigla, municipio_id, limite_amostra
+    )

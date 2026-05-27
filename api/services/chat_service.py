@@ -20,6 +20,7 @@ from api.schemas.chat import (
     FonteCitada,
     MensagemHistorico,
 )
+from api.utils.qgis_integracao import montar_integracao_qgis
 from models.db_model import Chat, ConsultaUsuario, FeedbackResposta, RespostaSistema
 from nlp_processor.index import NLPProcessor
 
@@ -59,6 +60,7 @@ class ChatService:
             mapa=mapa,
             bbox=result["bbox"],
             status=result["status"],
+            qgis=montar_integracao_qgis(result["resposta_id"]),
         )
 
     # ------------------------------------------------------------------
@@ -121,6 +123,10 @@ class ChatService:
                     avaliacao=feedback.avaliacao,
                 )
 
+            mapa_turno: Optional[FeatureCollection] = None
+            if resposta and resposta.mapa_geojson:
+                mapa_turno = FeatureCollection(**resposta.mapa_geojson)
+
             mensagens.append(
                 MensagemHistorico(
                     consulta_id=consulta.id,
@@ -130,6 +136,8 @@ class ChatService:
                     turno=consulta.turno or 0,
                     fontes=fontes,
                     feedback=feedback_info,
+                    mapa=mapa_turno,
+                    qgis=montar_integracao_qgis(resposta.id) if resposta else None,
                 )
             )
 
@@ -156,6 +164,23 @@ class ChatService:
             bbox=bbox,
             status=last_status,
         )
+
+    # ------------------------------------------------------------------
+    # GeoJSON de uma resposta (QGIS via HTTP)
+    # ------------------------------------------------------------------
+
+    async def geojson_por_resposta(
+        self, resposta_id: UUID, session: AsyncSession
+    ) -> dict:
+        from fastapi import HTTPException
+
+        resposta = await session.get(RespostaSistema, resposta_id)
+        if resposta is None or not resposta.mapa_geojson:
+            raise HTTPException(
+                status_code=404,
+                detail="Resposta não encontrada ou sem GeoJSON armazenado.",
+            )
+        return resposta.mapa_geojson
 
     # ------------------------------------------------------------------
     # Desativar chat (soft delete)
@@ -192,3 +217,60 @@ class ChatService:
         session.add(feedback)
         await session.commit()
         return {"mensagem": "Feedback registrado com sucesso."}
+
+# ------------------------------------------------------------------
+# Gerar Resumo do Relatório 
+# ------------------------------------------------------------------
+
+    async def gerar_resumo_relatorio(self, chat_id: UUID, session: AsyncSession) -> dict:
+        try:
+            # 1. Pega o histórico completo
+            historico = await self.historico_chat(chat_id, session)
+            
+            if not historico.mensagens:
+                return {
+                    "resumo": "Nenhuma conversa encontrada neste chat.",
+                    "fontes": []
+                }
+
+            resumos_limpos = []
+            fontes_acumuladas = []
+
+            for msg in historico.mensagens:
+                if msg.resposta:
+                    texto_cru = msg.resposta
+                    
+                    # Limpeza inteligente: Remove metadados brutos que poluem o texto
+                    if "Contexto documental:" in texto_cru:
+                        texto_cru = texto_cru.split("Contexto documental:")[0]
+                    if "Copiar Link QGIS" in texto_cru:
+                        texto_cru = texto_cru.split("Copiar Link QGIS")[0]
+                    if "📚 Fontes consultadas" in texto_cru:
+                        texto_cru = texto_cru.split("📚 Fontes consultadas")[0]
+                    
+                    texto_limpo = texto_cru.strip()
+                    if texto_limpo:
+                        resumos_limpos.append(texto_limpo)
+                
+                # Coleta estruturada das fontes reais salvas no banco
+                if msg.fontes:
+                    for f in msg.fontes:
+                        fonte_dict = {"nome": f.nome, "orgao": getattr(f, 'orgao', ''), "url": getattr(f, 'url', '')}
+                        if fonte_dict not in fontes_acumuladas:
+                            fontes_acumuladas.append(fonte_dict)
+
+            # Une as principais conclusões encontradas na conversa
+            resumo_final = "\n\n".join(resumos_limpos)
+
+            return {
+                "resumo": resumo_final,
+                "fontes": fontes_acumuladas
+            }
+
+        except Exception as e:
+            logger.error(f"Erro ao compilar relatório inteligente: {e}")
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=500, 
+                detail="Erro ao compilar as informações estruturadas do relatório."
+            )

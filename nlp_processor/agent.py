@@ -13,6 +13,7 @@ Fluxo:
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime, timedelta
 import logging
 from time import perf_counter
 from typing import Any, Optional
@@ -35,6 +36,11 @@ logger = logging.getLogger(__name__)
 # Com 9 classes, probabilidades acima de 0.35 já indicam predição confiável.
 CONFIDENCE_THRESHOLD = 0.20
 
+# Janela de validade do feedback do turno anterior. Depois disso, descarta —
+# o usuário pode ter voltado ao chat dias depois pra perguntar outra coisa,
+# e o feedback antigo não reflete a expectativa atual.
+FEEDBACK_VALIDADE_MINUTOS = 30
+
 _ESCOPO_AMBIENTAL_TOKENS = (
     "ambiental", "ambientais", "meio ambiente",
     "queimada", "queimadas", "incendio", "incendios", "foco", "focos", "fogo",
@@ -52,19 +58,60 @@ _ESCOPO_AMBIENTAL_TOKENS = (
 )
 
 
-def _extrair_feedback_contexto(historico: list[dict]) -> dict[str, int]:
+def _extrair_feedback_contexto(
+    historico: list[dict],
+    intencao_atual: Optional[str] = None,
+    agora: Optional[datetime] = None,
+) -> dict[str, int]:
+    """Devolve o feedback do turno anterior, mas só se ainda for relevante.
+
+    Regras (RF-02 — evitar reuso de respostas/sinais antigos sem contexto):
+      1. Apenas o turno imediatamente anterior é considerado, não "o mais
+         recente em qualquer lugar do histórico".
+      2. Se a intenção mudou entre o turno anterior e o atual, descarta —
+         o feedback foi sobre outro assunto.
+      3. Se passou mais que FEEDBACK_VALIDADE_MINUTOS desde o turno anterior,
+         descarta — o contexto provavelmente expirou.
+    """
+    ultima_assistente: Optional[dict] = None
     for mensagem in reversed(historico):
-        if mensagem.get("role") != "assistant":
-            continue
+        if mensagem.get("role") == "assistant":
+            ultima_assistente = mensagem
+            break
 
-        feedback = mensagem.get("feedback")
-        if isinstance(feedback, dict):
-            feedback = feedback.get("avaliacao")
+    if not ultima_assistente:
+        return {}
 
-        if feedback in (-1, 1):
-            return {"avaliacao": int(feedback)}
+    feedback = ultima_assistente.get("feedback")
+    if isinstance(feedback, dict):
+        feedback = feedback.get("avaliacao")
+    if feedback not in (-1, 1):
+        return {}
 
-    return {}
+    intencao_anterior = ultima_assistente.get("intencao")
+    if intencao_atual and intencao_anterior and intencao_atual != intencao_anterior:
+        logger.info(
+            "Feedback do turno anterior descartado: mudança de intenção "
+            "(%s -> %s).",
+            intencao_anterior,
+            intencao_atual,
+        )
+        return {}
+
+    data_anterior = ultima_assistente.get("data_hora")
+    if isinstance(data_anterior, datetime):
+        referencia = agora or datetime.utcnow()
+        if referencia - data_anterior > timedelta(minutes=FEEDBACK_VALIDADE_MINUTOS):
+            logger.info(
+                "Feedback do turno anterior descartado: fora da janela de "
+                "%d min (delta=%s).",
+                FEEDBACK_VALIDADE_MINUTOS,
+                referencia - data_anterior,
+            )
+            return {}
+
+    logger.info("Feedback do turno anterior aplicado: avaliacao=%s.", feedback)
+    return {"avaliacao": int(feedback)}
 
 
 async def _carregar_municipios_normalizados(session: AsyncSession) -> list[str]:
@@ -113,7 +160,9 @@ async def run_agent(
     inicio = perf_counter()
     classifier = get_classifier()
     embedder = get_embedder()
-    feedback_contexto = _extrair_feedback_contexto(historico)
+    # `feedback_contexto` é calculado mais adiante (após a intenção final ser
+    # decidida), pra que a regra "descartar feedback em caso de mudança de
+    # intenção" possa comparar a intenção do turno anterior com a atual.
 
     def _finalizar(
         texto_resposta: str,
@@ -409,7 +458,14 @@ async def run_agent(
     else:
         status = "sucesso"
 
-    # 6. Formatar resposta
+    # 6. Avaliar se feedback do turno anterior ainda é aplicável.
+    # Só fazemos isso aqui porque a intenção final pode diferir da inicial
+    # do classifier (vários overrides acima podem ter mudado).
+    feedback_contexto = _extrair_feedback_contexto(
+        historico, intencao_atual=intencao
+    )
+
+    # 7. Formatar resposta
     texto = formatar_resposta(
         intencao=intencao,
         entidades=entidades,
