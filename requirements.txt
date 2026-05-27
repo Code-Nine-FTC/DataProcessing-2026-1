@@ -42,5 +42,8 @@ sentence-transformers>=3.0.0
 joblib>=1.4.0
 pytesseract>=0.3.10
 SICAR @ git+https://github.com/urbanogilson/SICAR.git
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+email-validator>=2.0.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
