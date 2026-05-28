@@ -4,6 +4,14 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+from typing_extensions import Literal
+
+class FallbackResponse(BaseModel):
+    tipo_fallback: Literal["nlp_fallback", "data_fallback", "connection_fallback", "generic_fallback"]
+    mensagem_usuario: str
+    sugestoes: List[str] = []
+    retry_count: int = 0
+    timestamp: datetime
 
 
 class ChatMensagemRequest(BaseModel):
@@ -77,6 +85,7 @@ class ChatMensagemResponse(BaseModel):
         ...,
         description="Como usar o «mapa» desta resposta no QGIS.",
     )
+    fallback_info: Optional[FallbackResponse] = None
 
 class ChatResumo(BaseModel):
     id: UUID
