@@ -18,14 +18,17 @@ logger = logging.getLogger(__name__)
 class PipelineOrchestrator:
     """Coordena execução de múltiplas pipelines ETL."""
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, engine=None):
         self.config = config
-        self.engine = create_engine(
-            config.db.url,
-            pool_size=config.db.pool_size,
-            max_overflow=config.db.max_overflow,
-            echo=config.db.echo,
-        )
+        if engine:
+            self.engine = engine
+        else:
+            self.engine = create_engine(
+                config.db.url,
+                pool_size=config.db.pool_size,
+                max_overflow=config.db.max_overflow,
+                echo=config.db.echo,
+            )
         self.wfs_client = WFSClient(config.wfs)
         self.pipelines: Dict[str, callable] = {}
         self.results = {}

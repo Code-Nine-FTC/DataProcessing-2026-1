@@ -1,37 +1,53 @@
 # -*- coding: utf-8 -*-
-from fastapi import APIRouter, Depends, BackgroundTasks, status
+from typing import Dict, Any
+
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from models.database import SessionConnection
+
 from api.schemas.etl import EtlStatusResponse, EtlTriggerRequest
 from api.services.etl_service import EtlService
 from api.utils.basic_response import BasicResponse
+from celery_app import run_etl_update_task
+from models.database import SessionConnection
 
 router = APIRouter(
     tags=["Admin & ETL"],
     prefix="/admin/etl",
 )
+def get_etl_service() -> EtlService:
+    return EtlService()
 
-# Singleton service to track state
-_etl_service = EtlService()
 
 @router.get("/status", response_model=BasicResponse[EtlStatusResponse])
 async def get_etl_status(
-    session: AsyncSession = Depends(SessionConnection.session)
+    session: AsyncSession = Depends(SessionConnection.session),
+    etl_service: EtlService = Depends(get_etl_service)
 ):
     """
     Retorna o status atual do processo de ETL e o histórico das últimas etapas.
     """
-    status_data = await _etl_service.get_status(session)
-    return BasicResponse(data=status_data)
 
-@router.post("/atualizar", status_code=status.HTTP_202_ACCEPTED)
+    raw_status_data = await etl_service.get_status(session)
+
+    validated_status = EtlStatusResponse.model_validate(raw_status_data)
+    
+    return BasicResponse(data=validated_status)
+
+@router.post(
+    "/atualizar", 
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=Dict[str, str]
+)
 async def trigger_manual_update(
-    req: EtlTriggerRequest,
-    background_tasks: BackgroundTasks,
+    req: EtlTriggerRequest
 ):
     """
     Inicia o processo de atualização manual do banco de dados (ETL).
-    O processo roda em segundo plano.
+    A tarefa é enfileirada no Celery para execução assíncrona em um worker separado.
     """
-    background_tasks.add_task(_etl_service.run_manual_update, req.pipelines)
-    return {"message": "Processo de atualização iniciado em segundo plano."}
+    task = run_etl_update_task.delay(req.pipelines)
+    
+    return {
+        "message": "Processo de atualização enfileirado com sucesso.",
+        "task_id": task.id
+    }
