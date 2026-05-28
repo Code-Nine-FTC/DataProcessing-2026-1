@@ -13,6 +13,11 @@ from typing import Optional
 
 from nlp_processor.pipeline.preprocessor import normalizar
 
+try:
+    from models.regioes_administrativas_sp_data import RA_METADATA
+except Exception:  # pragma: no cover - fallback se o módulo de dados não existir
+    RA_METADATA = []
+
 # ---------------------------------------------------------------------------
 # Gazetteer de municípios do estado de São Paulo (nomes normalizados)
 # ---------------------------------------------------------------------------
@@ -103,6 +108,7 @@ _SENSORES = [
 @dataclass
 class Entidades:
     municipio: Optional[str] = None
+    regiao_administrativa: Optional[str] = None  # nome canônico (ex: "RA de Campinas")
     data_inicio: Optional[str] = None      # YYYY-MM-DD
     data_fim: Optional[str] = None         # YYYY-MM-DD
     ano: Optional[int] = None
@@ -176,6 +182,88 @@ def _extrair_periodo_relativo(texto_norm: str) -> tuple[Optional[str], Optional[
 def _extrair_ano(texto_norm: str) -> Optional[int]:
     match = _YEAR_PATTERN.search(texto_norm)
     return int(match.group(1)) if match else None
+
+
+# ---------------------------------------------------------------------------
+# Regiões Administrativas (RA) de SP
+# ---------------------------------------------------------------------------
+# Aliases especiais que mapeiam siglas de Região Metropolitana para a RA
+# correspondente. As siglas RA são derivadas
+# automaticamente do RA_METADATA.
+_RM_ALIASES_SIGLA: dict[str, str] = {
+    "rmsp": "RA de São Paulo",
+    "rmbs": "RA da Baixada Santista",
+    "rmc": "RA de Campinas",
+    "rmrp": "RA de Ribeirão Preto",
+    "rmvp": "RA de São José dos Campos",
+    "rmvplm": "RA de São José dos Campos",
+    "rmvpln": "RA de São José dos Campos",
+}
+
+
+def _ra_cidade_normalizada(ra_nome: str) -> str:
+    """Extrai a parte 'cidade' de um nome canônico de RA, normalizada.
+
+    Ex.: "RA de São Paulo" -> "sao paulo"
+         "RA da Baixada Santista" -> "baixada santista"
+         "RA Central" -> "central"
+    """
+    base = ra_nome
+    for prefixo in ("RA de ", "RA da ", "RA do ", "RA dos ", "RA das ", "RA "):
+        if base.startswith(prefixo):
+            base = base[len(prefixo):]
+            break
+    return normalizar(base)
+
+
+# Mapa {cidade_normalizada: nome_canonico_da_RA} construído a partir do
+# RA_METADATA importado. Ordenado do maior para o menor para evitar match
+# parcial (ex.: "sao jose do rio preto" antes de "sao jose dos campos").
+_RA_CIDADE_TO_NOME: list[tuple[str, str]] = sorted(
+    [
+        (_ra_cidade_normalizada(meta["nome"]), meta["nome"])
+        for meta in RA_METADATA
+    ],
+    key=lambda item: len(item[0]),
+    reverse=True,
+)
+
+# Siglas RA* (RACAM, RASP, RABS, ...) extraídas do RA_METADATA + siglas RM.
+_RA_SIGLAS: dict[str, str] = {
+    **{normalizar(meta["sigla"]): meta["nome"] for meta in RA_METADATA},
+    **_RM_ALIASES_SIGLA,
+}
+
+
+def _extrair_regiao_administrativa(texto_norm: str) -> tuple[Optional[str], str]:
+    """Tenta identificar uma RA mencionada no texto.
+
+    Retorna `(nome_canonico, texto_norm_sem_match)`. Quando uma RA é encontrada,
+    o trecho que a representa é removido do texto retornado, de modo que o
+    extrator de município não capture acidentalmente a cidade-sede da RA
+    (ex.: "RA de Campinas" não deve resultar em município = "Campinas").
+    """
+
+    for sigla_norm, ra_nome in _RA_SIGLAS.items():
+        padrao = rf"\b{re.escape(sigla_norm)}\b"
+        if re.search(padrao, texto_norm):
+            return ra_nome, re.sub(padrao, " ", texto_norm)
+
+    # 2. Padrões explícitos com prefixo ("ra de X", "regiao administrativa de X",
+    #    "regiao de X"). Iteramos das cidades mais longas para as mais curtas
+    #    para evitar match parcial entre nomes que compartilham prefixo.
+    prefixos = (
+        r"regiao\s+administrativa\s+(?:de\s+|da\s+|do\s+|dos\s+|das\s+)?",
+        r"ra\s+(?:de\s+|da\s+|do\s+|dos\s+|das\s+)?",
+        r"regiao\s+(?:de\s+|da\s+|do\s+|dos\s+|das\s+)?",
+    )
+    for cidade_norm, ra_nome in _RA_CIDADE_TO_NOME:
+        for prefixo in prefixos:
+            padrao = rf"\b{prefixo}{re.escape(cidade_norm)}\b"
+            if re.search(padrao, texto_norm):
+                return ra_nome, re.sub(padrao, " ", texto_norm)
+
+    return None, texto_norm
 
 
 def _extrair_municipio(
@@ -255,8 +343,11 @@ def extrair_entidades(
             data_inicio = periodo_inicio
             data_fim = periodo_fim
 
+    regiao_administrativa, texto_sem_ra = _extrair_regiao_administrativa(texto_norm)
+
     return Entidades(
-        municipio=_extrair_municipio(texto_norm, municipios_extras),
+        municipio=_extrair_municipio(texto_sem_ra, municipios_extras),
+        regiao_administrativa=regiao_administrativa,
         data_inicio=data_inicio,
         data_fim=data_fim,
         ano=ano,

@@ -64,6 +64,7 @@ from models.db_model import (
     ImovelRural,
     Municipio,
     QueimadaEvento,
+    RegiaoAdministrativa,
     RelImovelDesmatamento,
     RelImovelQueimada,
     RelImovelUC,
@@ -574,6 +575,51 @@ async def _get_municipio_id(session: AsyncSession, municipio: str) -> tuple[Opti
     return None, sql_executado
 
 
+async def _get_regiao_administrativa_id(
+    session: AsyncSession, ra_nome: str
+) -> tuple[Optional[int], str]:
+    """Resolve nome de Região Administrativa para id.
+
+    Aceita o nome canônico (ex.: "RA de Campinas"), a forma normalizada
+    ou a sigla (RACAM). Tenta primeiro `nome` exato, depois
+    `nome_normalizado`, depois `sigla`.
+    """
+    ra_norm = normalizar(ra_nome)
+    stmt = select(
+        RegiaoAdministrativa.id,
+        RegiaoAdministrativa.nome,
+        RegiaoAdministrativa.nome_normalizado,
+        RegiaoAdministrativa.sigla,
+    )
+    sql_executado = _stmt_sql(stmt)
+    rows = (await session.execute(stmt)).all()
+
+    for row_id, nome, nome_norm, sigla in rows:
+        if nome == ra_nome:
+            return row_id, sql_executado
+        if nome_norm and nome_norm == ra_norm:
+            return row_id, sql_executado
+        if nome and normalizar(nome) == ra_norm:
+            return row_id, sql_executado
+        if sigla and normalizar(sigla) == ra_norm:
+            return row_id, sql_executado
+
+    logger.warning(f"Nenhuma RA encontrada para '{ra_nome}'")
+    return None, sql_executado
+
+
+def _escopo_textual(
+    municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
+) -> str:
+    """Texto do escopo para as descrições retornadas pelas tools."""
+    if municipio:
+        return f" em {municipio}"
+    if regiao_administrativa:
+        return f" na {regiao_administrativa}"
+    return " no estado de SP"
+
+
 def _build_bbox(features: list[dict]) -> Optional[list[float]]:
     """Calcula [minx, miny, maxx, maxy] a partir das features GeoJSON."""
     coords: list[tuple[float, float]] = []
@@ -615,6 +661,7 @@ def _build_bbox(features: list[dict]) -> Optional[list[float]]:
 async def buscar_queimadas(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     data_inicio: Optional[str] = None,
     data_fim: Optional[str] = None,
     limite: int = 500,
@@ -657,6 +704,19 @@ async def buscar_queimadas(
             }
         stmt = stmt.where(Municipio.id == municipio_id)
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 focos de queimada na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
     if data_inicio:
         stmt = stmt.where(QueimadaEvento.data_ocorrencia >= datetime.fromisoformat(data_inicio))
     if data_fim:
@@ -700,7 +760,7 @@ async def buscar_queimadas(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontrados {_fmt_int(len(features))} focos de queimada"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ".",
         "sql_executado": sql_executado,
     }
@@ -709,6 +769,7 @@ async def buscar_queimadas(
 async def buscar_desmatamentos(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     data_inicio: Optional[str] = None,
     data_fim: Optional[str] = None,
     tipo_alerta: Optional[str] = None,
@@ -757,6 +818,19 @@ async def buscar_desmatamentos(
         )
         stmt = stmt.where(func.ST_Intersects(DesmatamentoAlerta.geom, _mun_geom))
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 alertas de desmatamento na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
     if data_inicio:
         stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
     if data_fim:
@@ -798,7 +872,7 @@ async def buscar_desmatamentos(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontrados {_fmt_int(len(features))} alertas de desmatamento"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ".",
         "sql_executado": sql_executado,
     }
@@ -807,6 +881,7 @@ async def buscar_desmatamentos(
 async def buscar_unidades_conservacao(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     categoria: Optional[str] = None,
     grupo_snuc: Optional[str] = None,
 ) -> dict:
@@ -855,6 +930,19 @@ async def buscar_unidades_conservacao(
         )
         stmt = stmt.where(func.ST_Intersects(UnidadeConservacao.geom, _mun_geom))
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontradas 0 unidades de conservação na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
     if categoria:
         stmt = stmt.where(func.lower(UnidadeConservacao.categoria).contains(categoria.lower()))
     if grupo_snuc:
@@ -895,7 +983,7 @@ async def buscar_unidades_conservacao(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontradas {_fmt_int(len(features))} unidades de conservação"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ".",
         "sql_executado": sql_executado,
     }
@@ -904,6 +992,7 @@ async def buscar_unidades_conservacao(
 async def buscar_terras_indigenas(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     fase: Optional[str] = None,
 ) -> dict:
     """Busca terras indígenas no estado de São Paulo."""
@@ -949,6 +1038,19 @@ async def buscar_terras_indigenas(
         )
         stmt = stmt.where(func.ST_Intersects(TerraIndigena.geom, _mun_geom))
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontradas 0 terras indígenas na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
     if fase:
         stmt = stmt.where(func.lower(TerraIndigena.fase).contains(fase.lower()))
 
@@ -985,7 +1087,7 @@ async def buscar_terras_indigenas(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontradas {_fmt_int(len(features))} terras indígenas"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ".",
         "sql_executado": sql_executado,
     }
@@ -994,6 +1096,7 @@ async def buscar_terras_indigenas(
 async def buscar_assentamentos(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     modalidade: Optional[str] = None,
 ) -> dict:
     """Busca assentamentos rurais do INCRA no estado de São Paulo."""
@@ -1040,6 +1143,19 @@ async def buscar_assentamentos(
         )
         stmt = stmt.where(func.ST_Intersects(AssentamentoRural.geom, _mun_geom))
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 assentamentos rurais na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
     if modalidade:
         stmt = stmt.where(func.lower(AssentamentoRural.modalidade).contains(modalidade.lower()))
 
@@ -1077,7 +1193,7 @@ async def buscar_assentamentos(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontrados {_fmt_int(len(features))} assentamentos rurais"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ".",
         "sql_executado": sql_executado,
     }
@@ -1086,6 +1202,7 @@ async def buscar_assentamentos(
 async def buscar_territorios_quilombolas(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
 ) -> dict:
     """Busca territórios quilombolas no estado de São Paulo."""
     sql_partes: list[str] = []
@@ -1129,6 +1246,19 @@ async def buscar_territorios_quilombolas(
         )
         stmt = stmt.where(func.ST_Intersects(TerritorioQuilombola.geom, _mun_geom))
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 territórios quilombolas na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
 
     sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
 
@@ -1162,7 +1292,7 @@ async def buscar_territorios_quilombolas(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontrados {_fmt_int(len(features))} territórios quilombolas"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ".",
         "sql_executado": sql_executado,
     }
@@ -1172,6 +1302,7 @@ async def buscar_imoveis_rurais(
     session: AsyncSession,
     codigo_car: Optional[str] = None,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     limite: int = 100,
 ) -> dict:
     """Busca imóveis rurais (CAR) no estado de São Paulo."""
@@ -1220,6 +1351,19 @@ async def buscar_imoveis_rurais(
         )
         stmt = stmt.where(func.ST_Intersects(ImovelRural.geom, _mun_geom))
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 imóveis rurais na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
 
     stmt = stmt.limit(limite)
     sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
@@ -1268,7 +1412,7 @@ async def buscar_imoveis_rurais(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontrados {_fmt_int(len(features))} imóveis rurais"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ".",
         "sql_executado": sql_executado,
     }
@@ -1348,11 +1492,13 @@ async def buscar_documentos_rag(
 async def buscar_imoveis_por_queimada(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     limite: int = 500,
 ) -> dict:
     """Busca imóveis rurais relacionados a queimadas (via rel_imovel_queimada)."""
     sql_partes: list[str] = []
     municipio_id: Optional[int] = None
+    ra_id: Optional[int] = None
     stmt = (
         select(
             ImovelRural.id,
@@ -1407,6 +1553,27 @@ async def buscar_imoveis_por_queimada(
             )
         )
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 imóveis com focos de queimada dentro da propriedade na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        # Restringe queimadas a focos cujo município também pertence à RA.
+        stmt = stmt.where(
+            RelImovelQueimada.queimada_evento_id.in_(
+                select(QueimadaEvento.id)
+                .join(Municipio, QueimadaEvento.municipio_id == Municipio.id)
+                .where(Municipio.regiao_administrativa_id == ra_id)
+            )
+        )
+        sql_partes.append(ra_sql)
 
     stmt = stmt.order_by(func.count(RelImovelQueimada.id).desc()).limit(limite)
     sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
@@ -1455,6 +1622,8 @@ async def buscar_imoveis_por_queimada(
     )
     if municipio_id is not None:
         rel_subq = rel_subq.where(Municipio.id == municipio_id)
+    elif ra_id is not None:
+        rel_subq = rel_subq.where(Municipio.regiao_administrativa_id == ra_id)
 
     queimadas_stmt = (
         select(
@@ -1471,6 +1640,12 @@ async def buscar_imoveis_por_queimada(
     )
     if municipio_id is not None:
         queimadas_stmt = queimadas_stmt.where(QueimadaEvento.municipio_id == municipio_id)
+    elif ra_id is not None:
+        queimadas_stmt = queimadas_stmt.where(
+            QueimadaEvento.municipio_id.in_(
+                select(Municipio.id).where(Municipio.regiao_administrativa_id == ra_id)
+            )
+        )
     queimadas_rows = (await session.execute(queimadas_stmt)).all()
     total_queimadas = 0
     for q in queimadas_rows:
@@ -1489,7 +1664,12 @@ async def buscar_imoveis_por_queimada(
         })
         total_queimadas += 1
 
-    escopo_txt = f"no município de **{municipio}**" if municipio else "no estado de **São Paulo**"
+    if municipio:
+        escopo_txt = f"no município de **{municipio}**"
+    elif regiao_administrativa:
+        escopo_txt = f"na **{regiao_administrativa}**"
+    else:
+        escopo_txt = "no estado de **São Paulo**"
     return {
         "total": total_imoveis,
         "features": features,
@@ -1507,11 +1687,13 @@ async def buscar_imoveis_por_queimada(
 async def buscar_imoveis_por_desmatamento(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     limite: int = 500,
 ) -> dict:
     """Busca imóveis rurais relacionados a alertas de desmatamento (via rel_imovel_desmatamento)."""
     sql_partes: list[str] = []
     municipio_id: Optional[int] = None
+    ra_id: Optional[int] = None
     stmt = (
         select(
             ImovelRural.id,
@@ -1564,6 +1746,26 @@ async def buscar_imoveis_por_desmatamento(
             )
         )
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 imóveis relacionados a desmatamento na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        stmt = stmt.where(
+            RelImovelDesmatamento.desmatamento_alerta_id.in_(
+                select(DesmatamentoAlerta.id)
+                .join(Municipio, DesmatamentoAlerta.municipio_id == Municipio.id)
+                .where(Municipio.regiao_administrativa_id == ra_id)
+            )
+        )
+        sql_partes.append(ra_sql)
 
     stmt = stmt.order_by(func.count(RelImovelDesmatamento.id).desc()).limit(limite)
     sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
@@ -1609,6 +1811,8 @@ async def buscar_imoveis_por_desmatamento(
     )
     if municipio_id is not None:
         rel_subq = rel_subq.where(Municipio.id == municipio_id)
+    elif ra_id is not None:
+        rel_subq = rel_subq.where(Municipio.regiao_administrativa_id == ra_id)
 
     alertas_stmt = (
         select(
@@ -1624,6 +1828,12 @@ async def buscar_imoveis_por_desmatamento(
     )
     if municipio_id is not None:
         alertas_stmt = alertas_stmt.where(DesmatamentoAlerta.municipio_id == municipio_id)
+    elif ra_id is not None:
+        alertas_stmt = alertas_stmt.where(
+            DesmatamentoAlerta.municipio_id.in_(
+                select(Municipio.id).where(Municipio.regiao_administrativa_id == ra_id)
+            )
+        )
     alertas_rows = (await session.execute(alertas_stmt)).all()
     total_alertas = 0
     for a in alertas_rows:
@@ -1641,7 +1851,12 @@ async def buscar_imoveis_por_desmatamento(
         })
         total_alertas += 1
 
-    escopo_txt = f"no município de **{municipio}**" if municipio else "no estado de **São Paulo**"
+    if municipio:
+        escopo_txt = f"no município de **{municipio}**"
+    elif regiao_administrativa:
+        escopo_txt = f"na **{regiao_administrativa}**"
+    else:
+        escopo_txt = "no estado de **São Paulo**"
     return {
         "total": total_imoveis,
         "features": features,
@@ -1659,6 +1874,7 @@ async def buscar_imoveis_por_desmatamento(
 async def buscar_imoveis_por_terra_indigena(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     limite: int = 500,
 ) -> dict:
     """Busca imóveis rurais que sobrepõem terras indígenas."""
@@ -1699,6 +1915,19 @@ async def buscar_imoveis_por_terra_indigena(
             }
         stmt = stmt.where(Municipio.id == municipio_id)
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 imóveis em TI na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
 
     stmt = stmt.order_by(RelImovelTI.percentual_sobreposicao.desc()).limit(limite)
     sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
@@ -1737,7 +1966,7 @@ async def buscar_imoveis_por_terra_indigena(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontrados {_fmt_int(len(features))} imóveis rurais em Terras Indígenas"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ".",
         "sql_executado": sql_executado,
     }
@@ -1746,11 +1975,13 @@ async def buscar_imoveis_por_terra_indigena(
 async def buscar_imoveis_por_quilombo(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     limite: int = 500,
 ) -> dict:
     """Busca imóveis rurais que sobrepõem territórios quilombolas."""
     sql_partes: list[str] = []
     municipio_id: Optional[int] = None
+    ra_id: Optional[int] = None
     stmt = (
         select(
             ImovelRural.id,
@@ -1793,6 +2024,26 @@ async def buscar_imoveis_por_quilombo(
             )
         )
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 imóveis em quilombos na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        stmt = stmt.where(
+            RelImovelQuilombo.territorio_quilombola_id.in_(
+                select(TerritorioQuilombola.id)
+                .join(Municipio, TerritorioQuilombola.municipio_id == Municipio.id)
+                .where(Municipio.regiao_administrativa_id == ra_id)
+            )
+        )
+        sql_partes.append(ra_sql)
 
     stmt = stmt.order_by(RelImovelQuilombo.percentual_sobreposicao.desc()).limit(limite)
     sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
@@ -1837,6 +2088,8 @@ async def buscar_imoveis_por_quilombo(
     )
     if municipio_id is not None:
         rel_subq = rel_subq.where(Municipio.id == municipio_id)
+    elif ra_id is not None:
+        rel_subq = rel_subq.where(Municipio.regiao_administrativa_id == ra_id)
 
     quilombos_stmt = (
         select(
@@ -1850,6 +2103,12 @@ async def buscar_imoveis_por_quilombo(
     )
     if municipio_id is not None:
         quilombos_stmt = quilombos_stmt.where(TerritorioQuilombola.municipio_id == municipio_id)
+    elif ra_id is not None:
+        quilombos_stmt = quilombos_stmt.where(
+            TerritorioQuilombola.municipio_id.in_(
+                select(Municipio.id).where(Municipio.regiao_administrativa_id == ra_id)
+            )
+        )
     quilombos_rows = (await session.execute(quilombos_stmt)).all()
     total_quilombos = 0
     for q in quilombos_rows:
@@ -1866,7 +2125,12 @@ async def buscar_imoveis_por_quilombo(
         })
         total_quilombos += 1
 
-    escopo_txt = f"no município de **{municipio}**" if municipio else "no estado de **São Paulo**"
+    if municipio:
+        escopo_txt = f"no município de **{municipio}**"
+    elif regiao_administrativa:
+        escopo_txt = f"na **{regiao_administrativa}**"
+    else:
+        escopo_txt = "no estado de **São Paulo**"
     return {
         "total": total_imoveis,
         "features": features,
@@ -1884,6 +2148,7 @@ async def buscar_imoveis_por_quilombo(
 async def buscar_camadas_estaduais(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     tema: Optional[str] = None,
     limite: int = 200,
 ) -> dict:
@@ -1930,6 +2195,19 @@ async def buscar_camadas_estaduais(
         )
         stmt = stmt.where(func.ST_Intersects(CamadaEstadualAmbiental.geom, _mun_geom))
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontradas 0 camadas estaduais ambientais na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
 
     if tema:
         stmt = stmt.where(func.lower(CamadaEstadualAmbiental.tema).contains(tema.lower()))
@@ -1968,7 +2246,7 @@ async def buscar_camadas_estaduais(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontradas {_fmt_int(len(features))} camadas estaduais ambientais"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ("" if not tema else f" com tema '{tema}'")
         + ".",
         "sql_executado": sql_executado,
@@ -1978,6 +2256,7 @@ async def buscar_camadas_estaduais(
 async def buscar_imoveis_com_camadas_estaduais(
     session: AsyncSession,
     municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
     tema: Optional[str] = None,
     limite: int = 100,
 ) -> dict:
@@ -2028,6 +2307,19 @@ async def buscar_imoveis_com_camadas_estaduais(
             }
         stmt = stmt.where(Municipio.id == municipio_id)
         sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 imóveis rurais com camadas ambientais na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
 
     if tema:
         stmt = stmt.where(func.lower(CamadaEstadualAmbiental.tema).contains(tema.lower()))
@@ -2065,7 +2357,7 @@ async def buscar_imoveis_com_camadas_estaduais(
         "bbox": _build_bbox(features),
         "fontes": list(fontes.values()),
         "descricao": f"Encontrados {_fmt_int(len(features))} imóveis rurais em camadas estaduais ambientais"
-        + (f" em {municipio}" if municipio else " no estado de SP")
+        + _escopo_textual(municipio, regiao_administrativa)
         + ("" if not tema else f" com tema '{tema}'")
         + ".",
         "sql_executado": sql_executado,

@@ -368,6 +368,100 @@ TRAIN_DATA: list[tuple[str, str]] = [
     ("diferenca entre uc de uso sustentavel e protecao integral", "buscar_documentos"),
     ("lei 12651 codigo florestal brasileiro", "buscar_documentos"),
 
+    # ---- exemplos com Região Administrativa (RA) ----
+    # Cobrem cada intent com diferentes variações de menção de RA:
+    #   - nome canônico ("RA de Campinas")
+    #   - prefixo "região administrativa" / "região de"
+    #   - sigla (RACAM, RMSP, RMC, RMRP, RMBS, RMVP)
+    ("Quais focos de queimada na RA de Campinas em 2024?", "buscar_queimadas"),
+    ("Queimadas registradas na região administrativa de Sorocaba", "buscar_queimadas"),
+    ("Mostre os focos de calor na RA de Ribeirão Preto", "buscar_queimadas"),
+    ("Incêndios florestais na RMSP no último ano", "buscar_queimadas"),
+    ("focos de queimada na ra de bauru", "buscar_queimadas"),
+    ("queimadas na regiao de marilia 2023", "buscar_queimadas"),
+    ("incendios na racam em setembro", "buscar_queimadas"),
+    ("focos de calor na ra central", "buscar_queimadas"),
+    ("queimadas na ra de presidente prudente", "buscar_queimadas"),
+    ("queimadas na regiao administrativa de aracatuba", "buscar_queimadas"),
+
+    ("Alertas de desmatamento na RA de Sorocaba", "buscar_desmatamentos"),
+    ("Desmatamento na região administrativa de Registro", "buscar_desmatamentos"),
+    ("Áreas desmatadas na RA de Itapeva", "buscar_desmatamentos"),
+    ("supressao vegetal na ra de bauru", "buscar_desmatamentos"),
+    ("alertas deter na regiao de marilia", "buscar_desmatamentos"),
+    ("desmatamento na rmc 2024", "buscar_desmatamentos"),
+    ("areas desmatadas na ra de barretos", "buscar_desmatamentos"),
+    ("desmatamento na regiao administrativa de franca", "buscar_desmatamentos"),
+
+    ("Unidades de conservação na RA de São José dos Campos", "buscar_unidades_conservacao"),
+    ("Parques estaduais na região administrativa de Registro", "buscar_unidades_conservacao"),
+    ("APAs na RA da Baixada Santista", "buscar_unidades_conservacao"),
+    ("ucs na ra de campinas", "buscar_unidades_conservacao"),
+    ("parques na rmsp", "buscar_unidades_conservacao"),
+    ("reservas biologicas na ra de sorocaba", "buscar_unidades_conservacao"),
+    ("estacoes ecologicas na regiao de itapeva", "buscar_unidades_conservacao"),
+    ("flona na ra central", "buscar_unidades_conservacao"),
+
+    ("Terras indígenas na RA de Registro", "buscar_terras_indigenas"),
+    ("TIs na região administrativa de Sorocaba", "buscar_terras_indigenas"),
+    ("Demarcações indígenas na RA de Itapeva", "buscar_terras_indigenas"),
+    ("terras indigenas na ra de sao paulo", "buscar_terras_indigenas"),
+    ("ti na regiao de bauru", "buscar_terras_indigenas"),
+    ("indigenas guarani na ra de registro", "buscar_terras_indigenas"),
+
+    ("Assentamentos rurais na RA de Presidente Prudente", "buscar_assentamentos"),
+    ("Reforma agrária na região administrativa de Araçatuba", "buscar_assentamentos"),
+    ("Projetos do INCRA na RA de Marília", "buscar_assentamentos"),
+    ("assentamentos na ra de sao jose do rio preto", "buscar_assentamentos"),
+    ("incra na regiao administrativa de bauru", "buscar_assentamentos"),
+    ("pa incra na ra central", "buscar_assentamentos"),
+
+    ("Quilombos na RA de Registro", "buscar_quilombolas"),
+    ("Comunidades quilombolas na região administrativa de Sorocaba", "buscar_quilombolas"),
+    ("Territórios quilombolas na RA de Itapeva", "buscar_quilombolas"),
+    ("quilombos na regiao de registro", "buscar_quilombolas"),
+    ("quilombolas na ra de sao paulo", "buscar_quilombolas"),
+    ("territorios quilombolas na ra de itapeva", "buscar_quilombolas"),
+
+    ("Imóveis rurais na RA de Campinas", "buscar_imoveis_rurais"),
+    ("Propriedades CAR na região administrativa de Bauru", "buscar_imoveis_rurais"),
+    ("Fazendas com CAR na RA de Ribeirão Preto", "buscar_imoveis_rurais"),
+    ("imoveis rurais na rmc", "buscar_imoveis_rurais"),
+    ("propriedades rurais na ra de sorocaba", "buscar_imoveis_rurais"),
+    ("car na regiao administrativa de marilia", "buscar_imoveis_rurais"),
+    ("sicar imoveis na ra de presidente prudente", "buscar_imoveis_rurais"),
+
+    ("Imóveis rurais com queimadas na RA de Bauru", "buscar_imoveis_queimada"),
+    ("Fazendas afetadas por queimadas na região administrativa de Marília", "buscar_imoveis_queimada"),
+    ("Propriedades com focos de calor na RA de Ribeirão Preto", "buscar_imoveis_queimada"),
+    ("imoveis com queimada na ra de campinas", "buscar_imoveis_queimada"),
+    ("fazendas com foco de calor na regiao de presidente prudente", "buscar_imoveis_queimada"),
+    ("imovel rural queimado na rmrp", "buscar_imoveis_queimada"),
+
+    ("Imóveis com alertas de desmatamento na RA de Sorocaba", "buscar_imoveis_desmatamento"),
+    ("Fazendas com supressão vegetal na região administrativa de Itapeva", "buscar_imoveis_desmatamento"),
+    ("Propriedades CAR com desmatamento na RA de Bauru", "buscar_imoveis_desmatamento"),
+    ("imoveis desmatados na ra de marilia", "buscar_imoveis_desmatamento"),
+    ("fazenda com alerta deter na regiao de campinas", "buscar_imoveis_desmatamento"),
+
+    ("Imóveis sobrepostos a quilombos na RA de Registro", "buscar_imoveis_quilombo"),
+    ("Fazendas em territórios quilombolas na região administrativa de Sorocaba", "buscar_imoveis_quilombo"),
+    ("Propriedades em terras de quilombo na RA de Itapeva", "buscar_imoveis_quilombo"),
+    ("car em quilombo na regiao de registro", "buscar_imoveis_quilombo"),
+    ("imoveis em territorio quilombola na ra de itapeva", "buscar_imoveis_quilombo"),
+
+    ("Camadas ambientais estaduais na RA de Campinas", "buscar_camadas_estaduais"),
+    ("Áreas de proteção ambiental estadual na região administrativa de Sorocaba", "buscar_camadas_estaduais"),
+    ("Zonas ambientais estaduais na RA de Ribeirão Preto", "buscar_camadas_estaduais"),
+    ("camadas estaduais na rmc", "buscar_camadas_estaduais"),
+    ("zonas ambientais na ra de bauru", "buscar_camadas_estaduais"),
+
+    ("Imóveis em camadas ambientais estaduais na RA de Campinas", "buscar_imoveis_em_camadas"),
+    ("Propriedades rurais em zonas ambientais estaduais na região administrativa de Sorocaba", "buscar_imoveis_em_camadas"),
+    ("Fazendas em áreas de proteção estadual na RA de Bauru", "buscar_imoveis_em_camadas"),
+    ("imoveis em camadas ambientais na ra de marilia", "buscar_imoveis_em_camadas"),
+    ("propriedades rurais em zonas ambientais na regiao de presidente prudente", "buscar_imoveis_em_camadas"),
+
     # ---- fora_escopo ----
     ("Qual a previsão do tempo para amanhã?", "fora_escopo"),
     ("Me diga o PIB do estado de São Paulo", "fora_escopo"),
