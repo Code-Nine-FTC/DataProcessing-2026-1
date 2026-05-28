@@ -80,6 +80,17 @@ class Estado(Base):
     nome: Mapped[Optional[str]] = mapped_column(TEXT)
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
 
+class RegiaoAdministrativa(Base):
+    __tablename__ = "regiao_administrativa"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nome: Mapped[str] = mapped_column(TEXT, nullable=False, unique=True)
+    nome_normalizado: Mapped[Optional[str]] = mapped_column(TEXT)
+    sigla: Mapped[Optional[str]] = mapped_column(VARCHAR(20))
+    tipo: Mapped[Optional[str]] = mapped_column(VARCHAR(20))
+    estado_id: Mapped[Optional[int]] = mapped_column(ForeignKey("estado.id"))
+    geom: Mapped[Optional[Any]] = mapped_column(Geometry("MULTIPOLYGON", srid=4326), nullable=True)
+
+
 class Municipio(Base):
     __tablename__ = "municipio"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -87,6 +98,9 @@ class Municipio(Base):
     nome: Mapped[Optional[str]] = mapped_column(TEXT)
     nome_normalizado: Mapped[Optional[str]] = mapped_column(TEXT)
     estado_id: Mapped[Optional[int]] = mapped_column(ForeignKey("estado.id"))
+    regiao_administrativa_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("regiao_administrativa.id"), nullable=True
+    )
     geom: Mapped[Any] = mapped_column(Geometry("MULTIPOLYGON", srid=4326))
 
     @staticmethod
