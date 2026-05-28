@@ -27,6 +27,7 @@ from api.router.controller.analytics_controller import AnalyticsMunicipalHandler
 from api.router.controller.score_ambiental_controller import ScoreAmbientalHandler
 from api.services.index import AnalyticsService
 from api.utils.basic_response import BasicResponse
+from api.utils.cache import cached, DEFAULT_TTL
 from models.database import SessionConnection
 
 router = APIRouter(prefix="/analytics", tags=["Analytics RF-07"])
@@ -42,7 +43,8 @@ router = APIRouter(prefix="/analytics", tags=["Analytics RF-07"])
 async def get_imoveis_area_por_estado(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).imoveis_area_por_estado())
+    svc = AnalyticsService(session)
+    return BasicResponse(data=await cached("imoveis:area_por_estado", DEFAULT_TTL, svc.imoveis_area_por_estado))
 
 
 @router.get(
@@ -53,7 +55,10 @@ async def get_imoveis_area_por_estado(
 async def get_imoveis_area_por_municipio(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return await AnalyticsMunicipalHandler(session).imoveis_area_por_municipio()
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("imoveis:area_por_municipio", DEFAULT_TTL, svc.imoveis_area_por_municipio)
+    )
 
 
 @router.get(
@@ -64,7 +69,8 @@ async def get_imoveis_area_por_municipio(
 async def get_imoveis_por_status_car(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).imoveis_por_status_car())
+    svc = AnalyticsService(session)
+    return BasicResponse(data=await cached("imoveis:status_car", DEFAULT_TTL, svc.imoveis_por_status_car))
 
 
 # --- Desmatamento ---
@@ -78,7 +84,11 @@ async def get_desmatamento_area_por_estado(
     ultimos_12_meses: bool = Query(False, description="Filtrar apenas os últimos 12 meses"),
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).desmatamento_area_por_estado(ultimos_12_meses))
+    svc = AnalyticsService(session)
+    cache_key = f"desmatamento:area_por_estado:{ultimos_12_meses}"
+    return BasicResponse(
+        data=await cached(cache_key, DEFAULT_TTL, lambda: svc.desmatamento_area_por_estado(ultimos_12_meses))
+    )
 
 
 @router.get(
@@ -89,7 +99,10 @@ async def get_desmatamento_area_por_estado(
 async def get_desmatamento_area_por_mes(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaTemporalDesmatamento]:
-    return BasicResponse(data=await AnalyticsService(session).desmatamento_area_por_mes())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("desmatamento:area_por_mes", DEFAULT_TTL, svc.desmatamento_area_por_mes)
+    )
 
 
 @router.get(
@@ -100,7 +113,10 @@ async def get_desmatamento_area_por_mes(
 async def get_desmatamento_alertas_por_tipo(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).desmatamento_alertas_por_tipo())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("desmatamento:alertas_por_tipo", DEFAULT_TTL, svc.desmatamento_alertas_por_tipo)
+    )
 
 
 @router.get(
@@ -111,7 +127,10 @@ async def get_desmatamento_alertas_por_tipo(
 async def get_desmatamento_area_em_imoveis(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).desmatamento_area_em_imoveis())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("desmatamento:area_em_imoveis", DEFAULT_TTL, svc.desmatamento_area_em_imoveis)
+    )
 
 
 @router.get(
@@ -168,7 +187,10 @@ async def get_queimadas_distancia_imoveis(
 async def get_queimadas_focos_por_estado(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).queimadas_focos_por_estado())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:focos_por_estado", DEFAULT_TTL, svc.queimadas_focos_por_estado)
+    )
 
 
 @router.get(
@@ -179,7 +201,10 @@ async def get_queimadas_focos_por_estado(
 async def get_queimadas_focos_por_municipio(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return await AnalyticsMunicipalHandler(session).queimadas_focos_por_municipio()
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:focos_por_municipio", DEFAULT_TTL, svc.queimadas_focos_por_municipio)
+    )
 
 
 @router.get(
@@ -190,7 +215,10 @@ async def get_queimadas_focos_por_municipio(
 async def get_queimadas_focos_por_mes(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaTemporalQueimada]:
-    return BasicResponse(data=await AnalyticsService(session).queimadas_focos_por_mes())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:focos_por_mes", DEFAULT_TTL, svc.queimadas_focos_por_mes)
+    )
 
 
 @router.get(
@@ -201,7 +229,10 @@ async def get_queimadas_focos_por_mes(
 async def get_queimadas_focos_por_bioma(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).queimadas_focos_por_bioma())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:focos_por_bioma", DEFAULT_TTL, svc.queimadas_focos_por_bioma)
+    )
 
 
 @router.get(
@@ -212,7 +243,10 @@ async def get_queimadas_focos_por_bioma(
 async def get_queimadas_intensidade_por_bioma(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).queimadas_intensidade_por_bioma())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:intensidade_por_bioma", DEFAULT_TTL, svc.queimadas_intensidade_por_bioma)
+    )
 
 
 @router.get(
@@ -223,7 +257,10 @@ async def get_queimadas_intensidade_por_bioma(
 async def get_queimadas_dias_sem_chuva(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).queimadas_dias_sem_chuva_por_estado())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:dias_sem_chuva", DEFAULT_TTL, svc.queimadas_dias_sem_chuva_por_estado)
+    )
 
 
 @router.get(
@@ -234,7 +271,10 @@ async def get_queimadas_dias_sem_chuva(
 async def get_queimadas_risco_medio_por_estado(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).queimadas_risco_medio_por_estado())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:risco_medio", DEFAULT_TTL, svc.queimadas_risco_medio_por_estado)
+    )
 
 
 @router.get(
@@ -245,7 +285,10 @@ async def get_queimadas_risco_medio_por_estado(
 async def get_queimadas_dentro_fora(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaQueimadaDentroFora]:
-    return BasicResponse(data=await AnalyticsService(session).queimadas_dentro_fora_imoveis())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:dentro_fora", DEFAULT_TTL, svc.queimadas_dentro_fora_imoveis)
+    )
 
 
 @router.get(
@@ -256,7 +299,10 @@ async def get_queimadas_dentro_fora(
 async def get_queimadas_ultimo_incendio(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaUltimoIncendio]:
-    return BasicResponse(data=await AnalyticsService(session).queimadas_ultimo_incendio_por_estado())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("queimadas:ultimo_incendio", DEFAULT_TTL, svc.queimadas_ultimo_incendio_por_estado)
+    )
 
 
 # --- Áreas Protegidas ---
@@ -269,7 +315,8 @@ async def get_queimadas_ultimo_incendio(
 async def get_uc_por_grupo_snuc(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).uc_por_grupo_snuc())
+    svc = AnalyticsService(session)
+    return BasicResponse(data=await cached("uc:por_grupo_snuc", DEFAULT_TTL, svc.uc_por_grupo_snuc))
 
 
 @router.get(
@@ -280,7 +327,8 @@ async def get_uc_por_grupo_snuc(
 async def get_uc_por_esfera(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).uc_por_esfera())
+    svc = AnalyticsService(session)
+    return BasicResponse(data=await cached("uc:por_esfera", DEFAULT_TTL, svc.uc_por_esfera))
 
 
 @router.get(
@@ -291,7 +339,8 @@ async def get_uc_por_esfera(
 async def get_ti_por_fase(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).ti_por_fase())
+    svc = AnalyticsService(session)
+    return BasicResponse(data=await cached("ti:por_fase", DEFAULT_TTL, svc.ti_por_fase))
 
 
 @router.get(
@@ -302,7 +351,8 @@ async def get_ti_por_fase(
 async def get_assentamentos_por_modalidade(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).assentamentos_por_modalidade())
+    svc = AnalyticsService(session)
+    return BasicResponse(data=await cached("assentamentos:por_modalidade", DEFAULT_TTL, svc.assentamentos_por_modalidade))
 
 
 @router.get(
@@ -313,7 +363,10 @@ async def get_assentamentos_por_modalidade(
 async def get_assentamentos_familias_por_estado(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[RespostaAgrupada]:
-    return BasicResponse(data=await AnalyticsService(session).assentamentos_familias_por_estado())
+    svc = AnalyticsService(session)
+    return BasicResponse(
+        data=await cached("assentamentos:familias_por_estado", DEFAULT_TTL, svc.assentamentos_familias_por_estado)
+    )
 
 
 # --- Sobreposições ---
@@ -342,7 +395,8 @@ async def get_sobreposicoes_areas(
 async def get_resumo_sobreposicoes(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[ResumoSobreposicoes]:
-    return BasicResponse(data=await AnalyticsService(session).resumo_sobreposicoes())
+    svc = AnalyticsService(session)
+    return BasicResponse(data=await cached("sobreposicoes:resumo", DEFAULT_TTL, svc.resumo_sobreposicoes))
 
 
 # --- Score Ambiental (ASG) ---

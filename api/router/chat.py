@@ -3,6 +3,7 @@ from typing import AsyncGenerator, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.chat import (
@@ -14,6 +15,7 @@ from api.schemas.chat import (
 )
 from api.services.chat_service import ChatService
 from models.database import SessionConnection
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/chat", tags=["Chat Ambiental NLP"])
 
@@ -55,9 +57,32 @@ async def listar_chats(
 
 
 @router.get(
+    "/resposta/{resposta_id}/geojson",
+    summary="Retorna o GeoJSON persistido de uma resposta do sistema",
+    description=(
+        "Útil no QGIS como fonte HTTP (vetor). O conteúdo é o mesmo de `resposta_sistema.mapa_geojson` "
+        "e do campo «mapa» na mesma rodada. Identifique a rodada pelo `resposta_id` retornado em "
+        "`POST /chat/mensagem` ou em cada item de `GET /chat/{chat_id}/historico`."
+    ),
+    responses={404: {"description": "Resposta inexistente ou sem mapa gravado."}},
+)
+async def geojson_resposta(
+    resposta_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    payload = await _service.geojson_por_resposta(resposta_id, session)
+    return JSONResponse(content=payload, media_type="application/geo+json")
+
+
+@router.get(
     "/{chat_id}/historico",
     response_model=ChatHistoricoResponse,
     summary="Retorna o histórico de mensagens de um chat",
+    description=(
+        "Cada item em «mensagens» pode incluir «resposta_id», «mapa» (GeoJSON do banco) e «qgis» "
+        "(«geojson_url_path» aponta para GET /chat/resposta/{resposta_id}/geojson daquela rodada). "
+        "No nível raiz, «mapa»/«bbox»/«status» repetem a última resposta."
+    ),
 )
 async def historico_chat(
     chat_id: UUID,
@@ -88,3 +113,21 @@ async def registrar_feedback(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     return await _service.registrar_feedback(req, session)
+
+
+class ResumoResponse(BaseModel):
+    resumo: str
+    fontes: List[dict] = []
+
+@router.get(
+    "/{chat_id}/resumo",
+    response_model=ResumoResponse,
+    summary="Gera um relatório condensado do chat via IA",
+)
+async def resumo_chat(
+    chat_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+
+    dados_relatorio = await _service.gerar_resumo_relatorio(chat_id, session)
+    return ResumoResponse(resumo=dados_relatorio["resumo"], fontes=dados_relatorio["fontes"])

@@ -51,7 +51,7 @@ class DashboardHandler:
             nome=estado.nome,
             sigla=estado.sigla,
             total_municipios=await self._get_total(Municipio, estado.id, True),
-            area_protegida_total_ha=float(area_uc + area_ti), # Soma segura
+            area_protegida_total_ha=round(float(area_uc + area_ti), 2),
             focos_queimada_periodo=await self._get_total(QueimadaEvento, estado.id),
             total_alertas_desmatamento=await self._get_total(DesmatamentoAlerta, estado.id),
             total_imoveis_rurais=await self._get_total(ImovelRural, estado.id)
@@ -104,10 +104,10 @@ class DashboardHandler:
         res = await self._session.execute(query)
         return [
             RankingItem(
-                municipio=r.nome, 
-                uf=r.sigla, 
-                valor=float(r.v or 0), 
-                unidade=unit, 
+                municipio=r.nome,
+                uf=r.sigla,
+                valor=round(float(r.v or 0), 2),
+                unidade=unit,
                 percentual_do_estado=round(float(r.p or 0), 2)
             ) for r in res
         ]

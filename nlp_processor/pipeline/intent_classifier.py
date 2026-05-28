@@ -73,7 +73,7 @@ class IntentClassifier:
         X = self._vectorizer.transform([normalizado])
         intencao = self._classifier.predict(X)[0]
         proba = np.max(self._classifier.predict_proba(X))
-        return intencao, float(proba)
+        return intencao, round(float(proba), 4)
 
     def is_ready(self) -> bool:
         try:
