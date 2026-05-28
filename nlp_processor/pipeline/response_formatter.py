@@ -10,26 +10,40 @@ from typing import Any
 from nlp_processor.pipeline.entity_extractor import Entidades
 
 # ---------------------------------------------------------------------------
+# Helpers de formatação
+# ---------------------------------------------------------------------------
+
+
+def _fmt_num(value: int | float, decimals: int = 0) -> str:
+    """Formata número no padrão brasileiro (1.234,56)."""
+    if decimals == 0:
+        formatted = f"{int(value):,}".replace(",", ".")
+        return formatted
+    formatted = f"{value:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return formatted
+
+
+# ---------------------------------------------------------------------------
 # Templates por intenção
 # ---------------------------------------------------------------------------
 
 _TEMPLATES: dict[str, str] = {
     "buscar_queimadas": (
         "Com base nos dados do **{fonte_principal}**, foram identificados "
-        "**{total} focos de queimada**{escopo}. "
+        "**{total_fmt} focos de queimada**{escopo}. "
         "{detalhe_periodo}"
         "{contexto}"
         "\n\n{fontes_citadas}"
     ),
     "buscar_desmatamentos": (
         "De acordo com os alertas do **{fonte_principal}**, foram encontrados "
-        "**{total} alertas de desmatamento**{escopo}. "
+        "**{total_fmt} alertas de desmatamento**{escopo}. "
         "{detalhe_periodo}"
         "{contexto}"
         "\n\n{fontes_citadas}"
     ),
     "buscar_unidades_conservacao": (
-        "O sistema registra **{total} unidades de conservação**{escopo}, "
+        "O sistema registra **{total_fmt} unidades de conservação**{escopo}, "
         "conforme o Cadastro Nacional de Unidades de Conservação (CNUC) do **{fonte_principal}**. "
         "{detalhe_categoria}"
         "{contexto}"
@@ -37,26 +51,26 @@ _TEMPLATES: dict[str, str] = {
     ),
     "buscar_terras_indigenas": (
         "Segundo dados da **{fonte_principal}**, foram encontradas "
-        "**{total} terras indígenas**{escopo}. "
+        "**{total_fmt} terras indígenas**{escopo}. "
         "{detalhe_fase}"
         "{contexto}"
         "\n\n{fontes_citadas}"
     ),
     "buscar_assentamentos": (
         "Com base no acervo fundiário do **{fonte_principal}**, existem "
-        "**{total} assentamentos rurais**{escopo}. "
+        "**{total_fmt} assentamentos rurais**{escopo}. "
         "{contexto}"
         "\n\n{fontes_citadas}"
     ),
     "buscar_quilombolas": (
         "De acordo com o **{fonte_principal}**, foram identificados "
-        "**{total} territórios quilombolas**{escopo}. "
+        "**{total_fmt} territórios quilombolas**{escopo}. "
         "{contexto}"
         "\n\n{fontes_citadas}"
     ),
     "buscar_imoveis_rurais": (
         "O Cadastro Ambiental Rural (**{fonte_principal}**) registra "
-        "**{total} imóveis rurais**{escopo}. "
+        "**{total_fmt} imóveis rurais**{escopo}. "
         "{contexto}"
         "\n\n{fontes_citadas}"
     ),
@@ -179,9 +193,9 @@ def _detalhar_passivos_imovel(
             continue
 
         cabecalho = (
-            f"**{titulo} ({len(items)}):**"
+            f"**{titulo} ({_fmt_num(len(items))}):**"
             if len(items) <= limite_por_tipo
-            else f"**{titulo} (top {limite_por_tipo} de {len(items)}):**"
+            else f"**{titulo} (top {limite_por_tipo} de {_fmt_num(len(items))}):**"
         )
         linhas = [cabecalho]
         for prop in items[:limite_por_tipo]:
@@ -191,13 +205,13 @@ def _detalhar_passivos_imovel(
                 partes.append(str(categoria))
             pct = prop.get("percentual_sobreposicao")
             if pct:
-                partes.append(f"{pct:.2f}% sobreposto")
+                partes.append(f"{pct:.2f}% sobreposto".replace(".", ","))
             area = prop.get("area_intersecao_ha")
             if area:
-                partes.append(f"{area:.2f} ha intersectados")
+                partes.append(f"{area:.2f} ha intersectados".replace(".", ","))
             linhas.append("- " + " — ".join(partes))
         if len(items) > limite_por_tipo:
-            linhas.append(f"- … e mais {len(items) - limite_por_tipo} no mapa.")
+            linhas.append(f"- … e mais {_fmt_num(len(items) - limite_por_tipo)} no mapa.")
         blocos.append("\n".join(linhas))
 
     return "\n\n".join(blocos)
@@ -222,9 +236,9 @@ def _listar_imoveis_afetados(
         return ""
 
     titulo = (
-        f"**Imóveis afetados (top {min(len(imoveis), limite)} de {len(imoveis)}):**"
+        f"**Imóveis afetados (top {min(len(imoveis), limite)} de {_fmt_num(len(imoveis))}):**"
         if len(imoveis) > limite
-        else f"**Imóveis afetados ({len(imoveis)}):**"
+        else f"**Imóveis afetados ({_fmt_num(len(imoveis))}):**"
     )
     linhas = [titulo]
     for prop in imoveis[:limite]:
@@ -237,26 +251,26 @@ def _listar_imoveis_afetados(
         if intencao == "buscar_imoveis_queimada":
             n = prop.get("num_queimadas")
             if n:
-                partes.append(f"{n} foco(s)")
+                partes.append(f"{_fmt_num(n)} foco(s)")
             risco = prop.get("nivel_risco_ambiental")
             if risco:
                 partes.append(f"risco {risco}")
         elif intencao == "buscar_imoveis_desmatamento":
             n = prop.get("num_alertas_desmatamento")
             if n:
-                partes.append(f"{n} alerta(s)")
+                partes.append(f"{_fmt_num(n)} alerta(s)")
             area = prop.get("area_total_intersecao_ha")
             if area:
-                partes.append(f"{area:.2f} ha intersectados")
+                partes.append(f"{area:.2f} ha intersectados".replace(".", ","))
         elif intencao in ("buscar_imoveis_quilombo", "buscar_imoveis_ti"):
             pct = prop.get("percentual_sobreposicao")
             if pct:
-                partes.append(f"{pct:.1f}% sobreposto")
+                partes.append(f"{pct:.1f}% sobreposto".replace(".", ","))
 
         linhas.append("- " + " — ".join(partes))
 
     if len(imoveis) > limite:
-        linhas.append(f"- … e mais {len(imoveis) - limite} imóvel(is) no mapa.")
+        linhas.append(f"- … e mais {_fmt_num(len(imoveis) - limite)} imóvel(is) no mapa.")
 
     return "\n".join(linhas)
 
@@ -305,7 +319,7 @@ def formatar_resposta(
             total_focos = total_features
         texto = (
             f"Na propriedade rural **{codigo}**, foram identificados "
-            f"**{total_focos} focos de queimada**{periodo}."
+            f"**{_fmt_num(total_focos)} focos de queimada**{periodo}."
         )
         texto = _anexar_descricao(texto, descricao_consulta)
         if fontes_str:
@@ -339,7 +353,7 @@ def formatar_resposta(
         "buscar_imoveis_ti",
     ) and total_features > 0:
         texto = descricao_consulta or (
-            f"Foram encontrados {total_features} resultados{escopo}."
+            f"Foram encontrados {_fmt_num(total_features)} resultados{escopo}."
         )
         listagem_imoveis = _listar_imoveis_afetados(features, intencao)
         if listagem_imoveis:
@@ -355,7 +369,7 @@ def formatar_resposta(
 
         nomes = ", ".join(f["nome"] for f in fontes) if fontes else "fontes do sistema"
         return _aplicar_feedback_contexto(
-            _TEMPLATES["sem_dados"].format(fontes_citadas=nomes),
+            _TEMPLATES["sem_dados"].format(fontes_citadas=nomes or "fontes do sistema"),
             feedback_contexto,
         )
 
@@ -371,6 +385,7 @@ def formatar_resposta(
     try:
         texto = template.format(
             total=total_features,
+            total_fmt=_fmt_num(total_features),
             escopo=escopo,
             fonte_principal=_fonte_principal(fontes),
             fontes_citadas=fontes_str,
@@ -394,6 +409,6 @@ def formatar_resposta(
         texto = _anexar_descricao(texto, descricao_consulta)
         return _aplicar_feedback_contexto(texto, feedback_contexto)
     except KeyError:
-        texto = f"Foram encontrados {total_features} resultado(s){escopo}.\n\n{fontes_str}"
+        texto = f"Foram encontrados {_fmt_num(total_features)} resultado(s){escopo}.\n\n{fontes_str}"
         texto = _anexar_descricao(texto, descricao_consulta)
         return _aplicar_feedback_contexto(texto, feedback_contexto)

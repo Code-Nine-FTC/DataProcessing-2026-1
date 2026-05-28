@@ -73,18 +73,19 @@ class AnalyticsService:
     # Área desmatada (ha) por estado, com filtro de 12 meses
     # ------------------------------------------------------------------
     async def desmatamento_area_por_estado(self, ultimos_12_meses: bool = False) -> RespostaAgrupada:
-        filtro = "AND d.data_ocorrencia >= CURRENT_DATE - INTERVAL '12 months'" if ultimos_12_meses else ""
         result = await self._session.execute(
-            text(f"""
+            text("""
                 SELECT e.sigla AS label,
                        ROUND(SUM(d.area_ha)::numeric, 2)::float AS valor
                 FROM desmatamento_alerta d
                 JOIN municipio m ON m.id = d.municipio_id
                 JOIN estado e ON e.id = m.estado_id
-                WHERE d.area_ha IS NOT NULL {filtro}
+                WHERE d.area_ha IS NOT NULL
+                  AND (NOT :filtrar_12m OR d.data_ocorrencia >= CURRENT_DATE - INTERVAL '12 months')
                 GROUP BY e.sigla
                 ORDER BY valor DESC
-            """)
+            """),
+            {"filtrar_12m": ultimos_12_meses},
         )
         grupos = [GrupoItem(label=row.label, valor=row.valor) for row in result]
         return RespostaAgrupada(grupos=grupos, total=round(sum(g.valor for g in grupos), 2))
@@ -422,15 +423,16 @@ class AnalyticsService:
                     m.nome       AS municipio,
                     d.id::text   AS alerta_id,
                     d.tipo_alerta,
-                    ROUND(
-                        ST_Distance(i.geom::geography, d.geom::geography)::numeric, 2
-                    )::float     AS distancia_m
+                    dist.distancia_m
                 FROM imovel_rural i
                 JOIN desmatamento_alerta d
                     ON ST_DWithin(i.geom::geography, d.geom::geography, :raio_m)
                    AND NOT ST_Intersects(i.geom, d.geom)
+                JOIN LATERAL (
+                    SELECT ROUND(ST_Distance(i.geom::geography, d.geom::geography)::numeric, 2)::float AS distancia_m
+                ) dist ON true
                 LEFT JOIN municipio m ON m.id = i.municipio_id
-                ORDER BY distancia_m
+                ORDER BY dist.distancia_m
                 LIMIT :limite
             """),
             {"raio_m": raio_km * 1000, "limite": limite},
@@ -512,15 +514,16 @@ class AnalyticsService:
                     m.nome       AS municipio,
                     q.id::text   AS queimada_id,
                     q.bioma      AS bioma,
-                    ROUND(
-                        ST_Distance(i.geom::geography, q.geom::geography)::numeric, 2
-                    )::float     AS distancia_m
+                    dist.distancia_m
                 FROM imovel_rural i
                 JOIN queimada_evento q
                     ON ST_DWithin(i.geom::geography, q.geom::geography, :raio_m)
                    AND NOT ST_Intersects(i.geom, q.geom)
+                JOIN LATERAL (
+                    SELECT ROUND(ST_Distance(i.geom::geography, q.geom::geography)::numeric, 2)::float AS distancia_m
+                ) dist ON true
                 LEFT JOIN municipio m ON m.id = i.municipio_id
-                ORDER BY distancia_m
+                ORDER BY dist.distancia_m
                 LIMIT :limite
             """),
             {"raio_m": raio_km * 1000, "limite": limite},
@@ -546,11 +549,16 @@ class AnalyticsService:
         result = await self._session.execute(
             text("""
                 SELECT
-                    (SELECT COUNT(DISTINCT imovel_rural_id) FROM rel_imovel_uc)::int          AS qtd_uc,
-                    (SELECT COUNT(DISTINCT imovel_rural_id) FROM rel_imovel_ti)::int           AS qtd_ti,
-                    (SELECT COUNT(DISTINCT imovel_rural_id) FROM rel_imovel_quilombo)::int     AS qtd_quilombo,
-                    (SELECT COUNT(DISTINCT imovel_rural_id) FROM rel_imovel_assentamento)::int AS qtd_assentamento,
-                    (SELECT COUNT(*) FROM imovel_rural)::int                                   AS total_imoveis
+                    COUNT(DISTINCT uc.imovel_rural_id)::int          AS qtd_uc,
+                    COUNT(DISTINCT ti.imovel_rural_id)::int           AS qtd_ti,
+                    COUNT(DISTINCT qu.imovel_rural_id)::int           AS qtd_quilombo,
+                    COUNT(DISTINCT as_.imovel_rural_id)::int          AS qtd_assentamento,
+                    COUNT(DISTINCT i.id)::int                         AS total_imoveis
+                FROM imovel_rural i
+                LEFT JOIN rel_imovel_uc          uc  ON uc.imovel_rural_id  = i.id
+                LEFT JOIN rel_imovel_ti          ti  ON ti.imovel_rural_id  = i.id
+                LEFT JOIN rel_imovel_quilombo    qu  ON qu.imovel_rural_id  = i.id
+                LEFT JOIN rel_imovel_assentamento as_ ON as_.imovel_rural_id = i.id
             """)
         )
         row = result.one()
@@ -670,9 +678,9 @@ class AnalyticsService:
                 estado=row.estado,
                 area_id=row.area_id,
                 area_nome=row.area_nome,
-                area_imovel_ha=float(row.area_imovel_ha) if row.area_imovel_ha is not None else None,
-                area_intersecao_ha=float(row.area_intersecao_ha) if row.area_intersecao_ha is not None else None,
-                percentual_sobreposicao=float(row.percentual_sobreposicao) if row.percentual_sobreposicao is not None else None,
+                area_imovel_ha=round(float(row.area_imovel_ha), 4) if row.area_imovel_ha is not None else None,
+                area_intersecao_ha=round(float(row.area_intersecao_ha), 4) if row.area_intersecao_ha is not None else None,
+                percentual_sobreposicao=round(float(row.percentual_sobreposicao), 2) if row.percentual_sobreposicao is not None else None,
                 tipo_relacao=row.tipo_relacao,
             )
             for row in result

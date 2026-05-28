@@ -97,7 +97,12 @@ async def _load_or_create_chat(
 async def _load_historico(
     session: AsyncSession, chat_id: UUID
 ) -> list[dict]:
-    """Carrega os últimos N turnos de um chat como mensagens OpenAI."""
+    """Carrega os últimos N turnos de um chat como mensagens OpenAI.
+
+    Cada mensagem do assistente recebe metadados do turno (`intencao`,
+    `data_hora`, `feedback`) — usados pelo agente para decidir se sinais
+    de turnos passados ainda são válidos no contexto atual.
+    """
     latest_feedback = (
         select(FeedbackResposta.avaliacao)
         .where(FeedbackResposta.resposta_sistema_id == RespostaSistema.id)
@@ -127,11 +132,18 @@ async def _load_historico(
     historico: list[dict] = []
     for consulta, resposta, feedback_avaliacao in rows:
         if consulta.pergunta:
-            historico.append({"role": "user", "content": consulta.pergunta})
+            historico.append({
+                "role": "user",
+                "content": consulta.pergunta,
+                "intencao": consulta.intencao_detectada,
+                "data_hora": consulta.data_hora,
+            })
         if resposta and resposta.texto_resposta:
             mensagem_assistente = {
                 "role": "assistant",
                 "content": resposta.texto_resposta,
+                "intencao": consulta.intencao_detectada,
+                "data_hora": consulta.data_hora,
             }
             if feedback_avaliacao is not None:
                 mensagem_assistente["feedback"] = int(feedback_avaliacao)

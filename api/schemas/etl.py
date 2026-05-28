@@ -20,7 +20,7 @@ class EtlStepStatus(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class EtlStatusResponse(BaseModel):
-    status_atual: str # 'IDLE', 'RUNNING', 'COMPLETED', 'FAILED'
+    status_atual: str 
     ultima_atualizacao: datetime
     passos: List[EtlStepStatus]
 
