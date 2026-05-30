@@ -214,3 +214,39 @@ class ResumoScoreAmbiental(BaseModel):
     total_assentamentos_avaliados: int
     score_medio_assentamentos: float
     distribuicao_assentamentos: List[ScoreDistribuicaoItem]
+
+
+# --- [RF-09] Resumo Ambiental simplificado por imóvel ---
+
+class AlertaResumoItem(BaseModel):
+    tipo: str
+    severidade: str
+    descricao: str
+
+
+class IndicadoresResumoImovel(BaseModel):
+    focos_queimada_dentro: int
+    focos_queimada_proximos: int
+    area_desmatamento_ha: float
+    perc_desmatamento: float
+    perc_sobreposicao_uc: float
+    perc_sobreposicao_ti: float
+    perc_sobreposicao_quilombo: float
+    perc_sobreposicao_assentamento: float
+
+
+class ResumoAmbientalImovel(BaseModel):
+    imovel_id: str
+    codigo_car: Optional[str]
+    nome_imovel: Optional[str]
+    municipio: Optional[str]
+    estado: Optional[str]
+    area_ha: Optional[float]
+    situacao_cadastral: Optional[str]
+    nivel_risco: str
+    classificacao: str
+    score_geral: float
+    diagnostico: str
+    indicadores: IndicadoresResumoImovel
+    alertas: List[AlertaResumoItem]
+    recomendacoes: List[str]
