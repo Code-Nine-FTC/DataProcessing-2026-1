@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.schemas.index import (
     RespostaScoreAssentamentos,
     RespostaScoreImoveis,
+    ResumoAmbientalImovel,
     ResumoScoreAmbiental,
     ScoreAssentamento,
     ScoreImovel,
@@ -85,6 +86,23 @@ class ScoreAmbientalHandler:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Erro ao calcular score ambiental do assentamento",
+            )
+
+    async def resumo_ambiental_imovel(
+        self, imovel_id: UUID
+    ) -> BasicResponse[ResumoAmbientalImovel]:
+        try:
+            data = await self._service.resumo_ambiental_imovel(str(imovel_id))
+            return BasicResponse(data=data)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            self._log.error(
+                msg=f"Erro ao gerar resumo ambiental do imóvel {imovel_id}: {exc}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao gerar resumo ambiental do imóvel",
             )
 
     async def resumo(

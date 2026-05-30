@@ -17,6 +17,7 @@ from api.schemas.index import (
     RespostaTemporalDesmatamento,
     RespostaTemporalQueimada,
     RespostaUltimoIncendio,
+    ResumoAmbientalImovel,
     ResumoScoreAmbiental,
     ResumoSobreposicoes,
     ScoreAssentamento,
@@ -429,6 +430,18 @@ async def get_score_imovel_detalhe(
     session: AsyncSession = Depends(SessionConnection.session),
 ) -> BasicResponse[ScoreImovel]:
     return await ScoreAmbientalHandler(session).score_imovel_detalhe(imovel_id)
+
+
+@router.get(
+    "/imoveis/{imovel_id}/resumo-ambiental",
+    response_model=BasicResponse[ResumoAmbientalImovel],
+    summary="[RF-09] Resumo ambiental simplificado de um imóvel para análise rápida",
+)
+async def get_resumo_ambiental_imovel(
+    imovel_id: UUID,
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> BasicResponse[ResumoAmbientalImovel]:
+    return await ScoreAmbientalHandler(session).resumo_ambiental_imovel(imovel_id)
 
 
 @router.get(
