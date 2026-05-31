@@ -1,0 +1,65 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3548708,
+        "codigo_ibge": "3548708",
+        "nome": "São José dos Campos",
+        "nome_normalizado": "sao jose dos campos",
+        "estado_sigla": "SP"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [[[
+          [-46.0, -23.3],
+          [-45.8, -23.3],
+          [-45.8, -23.1],
+          [-46.0, -23.1],
+          [-46.0, -23.3]
+        ]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3524402,
+        "codigo_ibge": "3524402",
+        "nome": "Jacareí",
+        "nome_normalizado": "jacarei",
+        "estado_sigla": "SP"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [[[
+          [-46.1, -23.4],
+          [-45.9, -23.4],
+          [-45.9, -23.2],
+          [-46.1, -23.2],
+          [-46.1, -23.4]
+        ]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3518800,
+        "codigo_ibge": "3518800",
+        "nome": "Caçapava",
+        "nome_normalizado": "cacapava",
+        "estado_sigla": "SP"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [[[
+          [-45.8, -23.2],
+          [-45.6, -23.2],
+          [-45.6, -23.0],
+          [-45.8, -23.0],
+          [-45.8, -23.2]
+        ]]]
+      }
+    }
+  ]
+}
