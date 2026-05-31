@@ -1,0 +1,78 @@
+name: Test
+
+on:
+  push:
+    branches: [main, homolog, dev]
+  pull_request:
+    branches: [main, homolog, dev]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests (parallel)
+        run: |
+          pytest -n auto tests/ \
+            --ignore=tests/integration \
+            -m "not integration and not slow and not smoke" \
+            -v \
+            --tb=short
+
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build test-db container image
+        run: |
+          docker build -t test-db:latest -f Dockerfile.db .
+
+      - name: Run integration tests (sequential)
+        run: |
+          pytest tests/integration/ \
+            -m integration \
+            -n 1 \
+            -v \
+            --tb=short \
+            --junitxml=reports/integration.xml
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-report
+          path: reports/integration.xml
