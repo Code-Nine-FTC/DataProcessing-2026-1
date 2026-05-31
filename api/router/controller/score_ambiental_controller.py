@@ -15,6 +15,7 @@ from api.schemas.index import (
 )
 from api.services.score_ambiental_service import ScoreAmbientalService
 from api.utils.basic_response import BasicResponse
+from api.utils.error_handlers import AppException
 from api.utils.log import Log
 
 
@@ -33,12 +34,15 @@ class ScoreAmbientalHandler:
         try:
             data = await self._service.score_imoveis(estado_sigla, municipio_id, limite)
             return BasicResponse(data=data)
+        except HTTPException:
+            raise
         except Exception as exc:
             self._log.error(msg=f"Erro ao calcular score ambiental de imóveis: {exc}")
-            raise HTTPException(
+            raise AppException(
+                "Erro ao calcular score ambiental de imóveis.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao calcular score ambiental de imóveis",
-            )
+                code="score_imoveis_error",
+            ) from exc
 
     async def score_imovel_detalhe(self, imovel_id: UUID) -> BasicResponse[ScoreImovel]:
         try:
@@ -48,10 +52,11 @@ class ScoreAmbientalHandler:
             raise
         except Exception as exc:
             self._log.error(msg=f"Erro ao calcular score ambiental do imóvel {imovel_id}: {exc}")
-            raise HTTPException(
+            raise AppException(
+                "Erro ao calcular score ambiental do imóvel.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao calcular score ambiental do imóvel",
-            )
+                code="score_imovel_error",
+            ) from exc
 
     async def score_assentamentos(
         self,
@@ -64,12 +69,15 @@ class ScoreAmbientalHandler:
                 estado_sigla, municipio_id, limite
             )
             return BasicResponse(data=data)
+        except HTTPException:
+            raise
         except Exception as exc:
             self._log.error(msg=f"Erro ao calcular score ambiental de assentamentos: {exc}")
-            raise HTTPException(
+            raise AppException(
+                "Erro ao calcular score ambiental de assentamentos.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao calcular score ambiental de assentamentos",
-            )
+                code="score_assentamentos_error",
+            ) from exc
 
     async def score_assentamento_detalhe(
         self, assentamento_id: UUID
@@ -83,10 +91,11 @@ class ScoreAmbientalHandler:
             self._log.error(
                 msg=f"Erro ao calcular score ambiental do assentamento {assentamento_id}: {exc}"
             )
-            raise HTTPException(
+            raise AppException(
+                "Erro ao calcular score ambiental do assentamento.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao calcular score ambiental do assentamento",
-            )
+                code="score_assentamento_error",
+            ) from exc
 
     async def resumo_ambiental_imovel(
         self, imovel_id: UUID
@@ -118,9 +127,12 @@ class ScoreAmbientalHandler:
                 limite_amostra=limite_amostra,
             )
             return BasicResponse(data=data)
+        except HTTPException:
+            raise
         except Exception as exc:
             self._log.error(msg=f"Erro ao gerar resumo de score ambiental: {exc}")
-            raise HTTPException(
+            raise AppException(
+                "Erro ao gerar resumo de score ambiental.",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao gerar resumo de score ambiental",
-            )
+                code="score_resumo_error",
+            ) from exc
