@@ -34,5 +34,6 @@ class UsuarioResponse(BaseModel):
     id: UUID
     email: str
     nome: Optional[str]
+    role: str
 
     model_config = {"from_attributes": True}
