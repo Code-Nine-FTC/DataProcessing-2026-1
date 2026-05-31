@@ -1,15 +1,15 @@
 x-airflow-environment: &airflow-environment
   AIRFLOW__CORE__EXECUTOR: LocalExecutor
-  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:-postgresql+psycopg2://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@database:5432/${POSTGRES_DB:-airflow_db}}
-  AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-local-dev-secret-key}
-  AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-}
-  AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW__CORE__LOAD_EXAMPLES:-False}
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+  AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
+  AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+  AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW__CORE__LOAD_EXAMPLES}
   PYTHONPATH: /opt/airflow
-  POSTGRES_HOST: database
-  POSTGRES_USER: ${POSTGRES_USER:-user}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
-  POSTGRES_DB: ${POSTGRES_DB:-airflow_db}
-  POSTGRES_PORT: 5432
+  POSTGRES_HOST: ${POSTGRES_HOST}
+  POSTGRES_USER: ${POSTGRES_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  POSTGRES_DB: ${POSTGRES_DB}
+  POSTGRES_PORT: ${POSTGRES_PORT}
 
 
 x-airflow-common: &airflow-common
@@ -26,37 +26,25 @@ x-airflow-common: &airflow-common
     - ./api:/opt/airflow/api
     - ./api/config:/opt/airflow/config
   depends_on:
-    airflow-permissions:
-      condition: service_completed_successfully
     database:
       condition: service_healthy
 
 services:
-  airflow-permissions:
-    image: apache/airflow:2.10.2
-    user: "0:0"
-    command: bash -c "mkdir -p /opt/airflow/logs /opt/airflow/plugins && chown -R $${AIRFLOW_UID}:0 /opt/airflow/logs /opt/airflow/plugins && chmod -R g+rwX /opt/airflow/logs /opt/airflow/plugins"
-    environment:
-      AIRFLOW_UID: ${AIRFLOW_UID:-50000}
-    volumes:
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-
   database:
     build:
         context: .
         dockerfile: Dockerfile.db
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
-      - POSTGRES_DB=${POSTGRES_DB:-airflow_db}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT}:5432"
     volumes:
       - pgdata:/var/lib/postgresql
       - ./models/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -73,7 +61,7 @@ services:
 
   airflow-init:
     <<: *airflow-common
-    command: bash -c "airflow db migrate && (airflow users create --username \"$${_AIRFLOW_WWW_USER_USERNAME}\" --firstname Admin --lastname User --role Admin --email admin@example.com --password \"$${_AIRFLOW_WWW_USER_PASSWORD}\" || true)"
+    command: bash -c "airflow db migrate && airflow users create --username \"$${_AIRFLOW_WWW_USER_USERNAME}\" --firstname Admin --lastname User --role Admin --email admin@example.com --password \"$${_AIRFLOW_WWW_USER_PASSWORD}\""
     environment:
       <<: *airflow-environment
       _AIRFLOW_DB_UPGRADE: "true"
@@ -83,9 +71,6 @@ services:
   airflow-webserver:
     <<: *airflow-common
     command: webserver
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
     ports:
       - "8080:8080"
     restart: always
@@ -93,9 +78,6 @@ services:
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
     restart: always
 
 volumes:
