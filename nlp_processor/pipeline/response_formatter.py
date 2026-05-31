@@ -97,6 +97,8 @@ def _formatar_escopo(entidades: Entidades) -> str:
     partes = []
     if entidades.municipio:
         partes.append(f" no município de **{entidades.municipio}**")
+    elif entidades.regiao_administrativa:
+        partes.append(f" na **{entidades.regiao_administrativa}**")
     else:
         partes.append(" no estado de **São Paulo**")
 

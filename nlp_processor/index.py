@@ -23,6 +23,8 @@ from models.db_model import (
     IntencaoConsulta,
     RespostaSistema,
 )
+from api.utils.exceptions import NLPProcessingError, DatabaseConnectionError, DataNotFoundError
+from sqlalchemy.exc import SQLAlchemyError
 from nlp_processor.agent import run_agent
 
 logger = logging.getLogger(__name__)
@@ -216,21 +218,25 @@ class NLPProcessor:
                 historico=historico,
                 municipio=municipio,
             )
-            texto = resultado["texto_resposta"]
-            features = resultado["features"]
-            fontes = resultado["fontes"]
-            status = resultado["status"]
-        except Exception:
+            texto = resultado.get("texto_resposta", "")
+            features = resultado.get("features", [])
+            fontes = resultado.get("fontes", [])
+            status = resultado.get("status", "erro")
+            
+            # Se o agente indicou erro explicitamente sem lançar exception, lançamos para ativar o Fallback
+            if status == "erro":
+                raise NLPProcessingError(resultado.get("mensagem_erro", "Erro desconhecido no NLP"))
+            elif status == "sem_resultado":
+                raise DataNotFoundError("Dados não encontrados para a consulta.")
+
+        except SQLAlchemyError as e:
+            logger.exception("Erro de banco de dados na execução do agente")
+            raise DatabaseConnectionError("Erro de acesso ou timeout no banco de dados.") from e
+        except (NLPProcessingError, DataNotFoundError):
+            raise
+        except Exception as e:
             logger.exception("Erro crítico no agente NLP")
-            texto = "Ocorreu um erro interno ao processar sua pergunta. Tente novamente."
-            features = []
-            fontes = []
-            status = "erro"
-            resultado = {
-                "sql_executado": None,
-                "mensagem_erro": "Erro crítico no agente NLP.",
-                "tempo_resposta_ms": int((perf_counter() - inicio_processamento) * 1000),
-            }
+            raise NLPProcessingError("Ocorreu um erro excecional ao processar sua pergunta pelo NLP.") from e
 
         # 4. Calcular turno
         turno = await _next_turno(session, chat.id)

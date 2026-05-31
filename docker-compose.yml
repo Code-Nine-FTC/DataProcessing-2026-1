@@ -61,6 +61,16 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   airflow-init:
     <<: *airflow-common
     command: bash -c "airflow db migrate && (airflow users create --username \"$${_AIRFLOW_WWW_USER_USERNAME}\" --firstname Admin --lastname User --role Admin --email admin@example.com --password \"$${_AIRFLOW_WWW_USER_PASSWORD}\" || true)"
