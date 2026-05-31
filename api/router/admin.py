@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.etl import EtlStatusResponse, EtlTriggerRequest
 from api.services.etl_service import EtlService
+from api.utils.auth import require_admin
 from api.utils.basic_response import BasicResponse
 from celery_app import run_etl_update_task
 from models.database import SessionConnection
@@ -13,6 +14,7 @@ from models.database import SessionConnection
 router = APIRouter(
     tags=["Admin & ETL"],
     prefix="/admin/etl",
+    dependencies=[Depends(require_admin)],
 )
 def get_etl_service() -> EtlService:
     return EtlService()
