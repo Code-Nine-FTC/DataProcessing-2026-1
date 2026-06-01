@@ -18,17 +18,31 @@ logger = logging.getLogger(__name__)
 class PipelineOrchestrator:
     """Coordena execução de múltiplas pipelines ETL."""
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, engine=None):
         self.config = config
-        self.engine = create_engine(
-            config.db.url,
-            pool_size=config.db.pool_size,
-            max_overflow=config.db.max_overflow,
-            echo=config.db.echo,
-        )
+        if engine:
+            self.engine = engine
+        else:
+            self.engine = create_engine(
+                config.db.url,
+                pool_size=config.db.pool_size,
+                max_overflow=config.db.max_overflow,
+                echo=config.db.echo,
+            )
         self.wfs_client = WFSClient(config.wfs)
         self.pipelines: Dict[str, callable] = {}
         self.results = {}
+        self.on_progress = None # Callback function: (name, etapa, status, detalhes, total, inseridos)
+
+    def set_progress_callback(self, callback):
+        self.on_progress = callback
+
+    def _report_progress(self, name, etapa, status, detalhes=None, total=0, inseridos=0):
+        if self.on_progress:
+            try:
+                self.on_progress(name, etapa, status, detalhes, total, inseridos)
+            except Exception as e:
+                logger.error(f"Error in progress callback: {e}")
 
     def close(self) -> None:
         """Libera as conexões do pool de banco."""
@@ -54,6 +68,11 @@ class PipelineOrchestrator:
         try:
             factory = self.pipelines[pipeline_name]
             pipeline = factory(self.engine, self.wfs_client)
+            
+            # Hook the progress callback
+            if self.on_progress:
+                pipeline.set_progress_callback(self.on_progress)
+            
             result = pipeline.run()
             self.results[pipeline_name] = result
             logger.info(f"✓ {pipeline_name}: {result.inserted_records} records inserted")

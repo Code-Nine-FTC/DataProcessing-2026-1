@@ -5,6 +5,11 @@ import logging
 from typing import Optional
 from uuid import UUID
 
+from datetime import datetime
+from time import time
+import uuid
+
+from sqlalchemy.exc import SQLAlchemyError
 from geoalchemy2.shape import to_shape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,14 +24,21 @@ from api.schemas.chat import (
     FeedbackRequest,
     FonteCitada,
     MensagemHistorico,
+    FallbackResponse,
+    QgisIntegracao,
 )
 from api.utils.qgis_integracao import montar_integracao_qgis
+from api.utils.exceptions import NLPProcessingError, DatabaseConnectionError, DataNotFoundError
+from api.utils.fallback_logger import FallbackLogger
+from api.utils.fallback_metrics import FallbackMetrics
 from models.db_model import Chat, ConsultaUsuario, FeedbackResposta, RespostaSistema
 from nlp_processor.index import NLPProcessor
 
 logger = logging.getLogger(__name__)
 
 _processor = NLPProcessor()
+_fallback_logger = FallbackLogger()
+_fallback_metrics = FallbackMetrics()
 
 
 class ChatService:
@@ -39,17 +51,39 @@ class ChatService:
         req: ChatMensagemRequest,
         session: AsyncSession,
     ) -> ChatMensagemResponse:
-        result = await _processor.process(
+        start_time = time()
+        try:
+            result = await self._process_with_fallback(req, session)
+            return self._build_success_response(result)
+            
+        except NLPProcessingError as e:
+            return await self._handle_nlp_fallback(req, e, start_time)
+            
+        except DatabaseConnectionError as e:
+            return await self._handle_database_fallback(req, e, start_time)
+            
+        except DataNotFoundError as e:
+            return await self._handle_data_fallback(req, e, start_time)
+            
+        except SQLAlchemyError as e:
+            return await self._handle_database_fallback(req, e, start_time)
+            
+        except Exception as e:
+            return await self._handle_generic_fallback(req, e, start_time)
+
+    async def _process_with_fallback(self, req: ChatMensagemRequest, session: AsyncSession) -> dict:
+        return await _processor.process(
             session=session,
             pergunta=req.pergunta,
             chat_id=req.chat_id,
             municipio=req.municipio,
         )
 
-        mapa_raw = result["mapa"]
+    def _build_success_response(self, result: dict) -> ChatMensagemResponse:
+        mapa_raw = result.get("mapa", {"type": "FeatureCollection", "features": []})
         mapa = FeatureCollection(**mapa_raw)
 
-        fontes = [FonteCitada(**f) for f in result["fontes_citadas"]]
+        fontes = [FonteCitada(**f) for f in result.get("fontes_citadas", [])]
 
         return ChatMensagemResponse(
             chat_id=result["chat_id"],
@@ -58,9 +92,79 @@ class ChatService:
             texto_resposta=result["texto_resposta"],
             fontes_citadas=fontes,
             mapa=mapa,
-            bbox=result["bbox"],
-            status=result["status"],
+            bbox=result.get("bbox"),
+            status=result.get("status", "sucesso"),
             qgis=montar_integracao_qgis(result["resposta_id"]),
+            fallback_info=None
+        )
+
+    async def _handle_nlp_fallback(self, req: ChatMensagemRequest, e: Exception, start_time: float) -> ChatMensagemResponse:
+        tipo = "nlp_fallback"
+        mensagem = "Não consegui entender sua pergunta. Tente reformular assim:"
+        sugestoes = ["Queimadas em [município]", "Risco ambiental de [propriedade]"]
+        return self._build_fallback_response(tipo, req, mensagem, sugestoes, start_time)
+
+    async def _handle_data_fallback(self, req: ChatMensagemRequest, e: Exception, start_time: float) -> ChatMensagemResponse:
+        tipo = "data_fallback"
+        mensagem = "Desculpe, não encontrei informações sobre este assunto."
+        sugestoes = ["Deseja pesquisar sobre outro tema?", "Listar propriedades com risco", "Exibir alertas recentes"]
+        return self._build_fallback_response(tipo, req, mensagem, sugestoes, start_time)
+
+    async def _handle_database_fallback(self, req: ChatMensagemRequest, e: Exception, start_time: float) -> ChatMensagemResponse:
+        tipo = "connection_fallback"
+        mensagem = "Estou com dificuldade de acessar os dados. Poderia tentar novamente em alguns minutos?"
+        sugestoes = []
+        return self._build_fallback_response(tipo, req, mensagem, sugestoes, start_time)
+
+    async def _handle_generic_fallback(self, req: ChatMensagemRequest, e: Exception, start_time: float) -> ChatMensagemResponse:
+        tipo = "generic_fallback"
+        mensagem = "Ocorreu um erro inesperado ao processar sua solicitação. Tente novamente mais tarde."
+        sugestoes = ["Tentar novamente"]
+        return self._build_fallback_response(tipo, req, mensagem, sugestoes, start_time)
+
+    def _build_fallback_response(self, tipo: str, req: ChatMensagemRequest, mensagem: str, sugestoes: list, start_time: float) -> ChatMensagemResponse:
+        tempo_resposta = time() - start_time
+        
+        chat_id_str = str(req.chat_id) if req.chat_id else None
+        
+        _fallback_logger.log_fallback_event(
+            tipo_fallback=tipo,
+            pergunta_original=req.pergunta,
+            resposta_fallback=mensagem,
+            sugestoes_providas=sugestoes,
+            tempo_resposta=tempo_resposta,
+            chat_id=chat_id_str
+        )
+        
+        _fallback_metrics.registrar_fallback(tipo, tempo_resposta)
+        
+        fallback_info = FallbackResponse(
+            tipo_fallback=tipo,
+            mensagem_usuario=mensagem,
+            sugestoes=sugestoes,
+            retry_count=0,
+            timestamp=datetime.now()
+        )
+        
+        consulta_id = uuid.uuid4()
+        resposta_id = uuid.uuid4()
+        
+        # Em fallback de mock, geramos um fallback dummy, sem salvar de fato caso não haja banco.
+        return ChatMensagemResponse(
+            chat_id=req.chat_id or uuid.uuid4(),
+            consulta_id=consulta_id,
+            resposta_id=resposta_id,
+            texto_resposta=mensagem,
+            fontes_citadas=[],
+            mapa=FeatureCollection(type="FeatureCollection", features=[]),
+            bbox=None,
+            status="erro",
+            qgis=QgisIntegracao(
+                crs="EPSG:4326",
+                geojson_url_path=f"/api/chat/resposta/{resposta_id}/geojson",
+                como_carregar_no_qgis="N/A (Mensagem de falha)"
+            ),
+            fallback_info=fallback_info
         )
 
     # ------------------------------------------------------------------

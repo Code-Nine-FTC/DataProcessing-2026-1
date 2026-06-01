@@ -45,9 +45,24 @@ def _build_args(intencao: str, ent: Entidades) -> dict[str, Any]:
         "buscar_passivos_imovel",
         "buscar_focos_queimada_imovel",
     }
+    # Intents que não aceitam filtro de RA (são escopadas por CAR/imóvel).
+    ra_excluded_intents = {
+        "buscar_passivos_imovel",
+        "buscar_focos_queimada_imovel",
+    }
 
     if ent.municipio and not (ent.codigo_car and intencao in car_scoped_intents):
         base["municipio"] = ent.municipio
+
+    # RA: aplicada quando o município não foi capturado (mais específico vence)
+    # e quando a intenção não é escopada por CAR.
+    if (
+        ent.regiao_administrativa
+        and not ent.municipio
+        and intencao not in ra_excluded_intents
+        and not (ent.codigo_car and intencao in car_scoped_intents)
+    ):
+        base["regiao_administrativa"] = ent.regiao_administrativa
 
     if intencao == "buscar_queimadas":
         if ent.data_inicio:

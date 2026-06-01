@@ -139,7 +139,11 @@ def _serializar_filtros(entidades_json: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fora_escopo_sem_sinal_geografico(texto_norm: str, entidades) -> bool:
-    if entidades.codigo_car or entidades.municipio:
+    if (
+        entidades.codigo_car
+        or entidades.municipio
+        or entidades.regiao_administrativa
+    ):
         return False
     return not any(token in texto_norm for token in _ESCOPO_AMBIENTAL_TOKENS)
 

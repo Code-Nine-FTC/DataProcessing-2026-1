@@ -33,6 +33,14 @@ class BasePipeline(IPipeline, ABC):
 
         self.fonte_repo = FonteDadoRepository(loader.engine)
         self.dataset_repo = DatasetRepository(loader.engine)
+        self.on_progress = None
+
+    def set_progress_callback(self, callback):
+        self.on_progress = callback
+
+    def _report(self, etapa, status, detalhes=None, total=0, inseridos=0):
+        if self.on_progress:
+            self.on_progress(self.fonte_dado.name, etapa, status, detalhes, total, inseridos)
 
     def _datasource_to_fontedado(self, ds: DataSource) -> FonteDado:
         """Converte DataSource (DTO) para FonteDado (entidade de domínio)."""
@@ -49,11 +57,14 @@ class BasePipeline(IPipeline, ABC):
     def run(self) -> LoadResult:
         """Executa a pipeline completa."""
         logger.info(f"Starting pipeline: {self.fonte_dado.name}")
+        self._report("INÍCIO", "EM_PROCESSAMENTO", f"Iniciando pipeline {self.fonte_dado.name}")
 
         try:
             # 1. Extract
             logger.info("→ Extract phase")
+            self._report("EXTRAÇÃO", "EM_PROCESSAMENTO", "Extraindo dados da fonte...")
             extracted_data = self.extractor.extract_with_logging()
+            self._report("EXTRAÇÃO", "SUCESSO", f"Extraídos {len(extracted_data.rows)} registros")
 
             # 2. Ensure FonteDado exists
             logger.info("→ Ensure FonteDado")
@@ -80,6 +91,7 @@ class BasePipeline(IPipeline, ABC):
                     already_loaded,
                     self.loader.table_name,
                 )
+                self._report("CARGA", "IGNORADO", f"Dataset já importado ({already_loaded} registros). Regra de atualização: ignorando duplicata.")
                 return LoadResult(
                     total_records=0,
                     inserted_records=0,
@@ -93,21 +105,30 @@ class BasePipeline(IPipeline, ABC):
 
             # 4. Transform
             logger.info("→ Transform phase")
+            self._report("TRANSFORMAÇÃO", "EM_PROCESSAMENTO", "Normalizando e validando dados...")
             transformed_records = self.transformer.transform_with_logging(
                 extracted_data
             )
+            self._report("TRANSFORMAÇÃO", "SUCESSO", f"{len(transformed_records)} registros transformados com sucesso")
 
             # 5. Load
             logger.info("→ Load phase")
+            self._report("CARGA", "EM_PROCESSAMENTO", f"Iniciando carga de {len(transformed_records)} registros no banco...")
             load_result = self.loader.load_with_logging(
                 transformed_records, dataset_id
             )
+            
+            status_carga = "SUCESSO" if load_result.failed_records == 0 else "AVISO"
+            detalhes_carga = f"Carga finalizada. Inseridos: {load_result.inserted_records}, Falhas: {load_result.failed_records}"
+            self._report("CARGA", status_carga, detalhes_carga, total=load_result.total_records, inseridos=load_result.inserted_records)
 
             logger.info(f"✓ Pipeline completed: {self.fonte_dado.name}")
+            self._report("COMPLETO", "SUCESSO", f"Pipeline {self.fonte_dado.name} finalizada com sucesso")
             return load_result
 
         except Exception as e:
             logger.error(f"✗ Pipeline failed: {str(e)}")
+            self._report("ERRO", "ERRO", f"Falha na pipeline: {str(e)}")
             raise
 
     @abstractmethod
