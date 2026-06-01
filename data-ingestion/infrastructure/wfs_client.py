@@ -91,9 +91,16 @@ class WFSClient:
                     f"Fetching {request.layer} ({start}–{start + request.batch_size})..."
                 )
 
+                # --- CONFIGURAÇÃO ADICIONADA: Simula um navegador real para evitar o erro 403 ---
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*"
+                }
+
                 response = requests.get(
                     request.url,
                     params=params,
+                    headers=headers,
                     timeout=self.config.timeout,
                 )
                 response.raise_for_status()
