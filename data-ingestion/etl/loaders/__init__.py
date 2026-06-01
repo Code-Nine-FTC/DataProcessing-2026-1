@@ -60,7 +60,7 @@ class BaseLoader(ABC):
                 failed_records=0,
             )
 
-        logger.info(f"[{self.table_name}] Loading {len(records)} records...")
+        logger.info(f"[{self.table_name}] Iniciando carga de {len(records)} registros no banco.")
 
         inserted = 0
         failed = 0
@@ -85,7 +85,7 @@ class BaseLoader(ABC):
                         conn.execute(text(self.get_insert_query()), [params])
                     inserted += 1
                 except Exception as row_err:
-                    logger.warning(f"[{self.table_name}] Registro ignorado: {row_err}")
+                    logger.warning(f"[{self.table_name}] Erro no registro {params.get('id_origem')}: {row_err}")
                     errors.append(str(row_err))
                     failed += 1
 

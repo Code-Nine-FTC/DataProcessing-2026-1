@@ -7,10 +7,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas.index import (
+    AlertaResumoItem,
+    IndicadoresResumoImovel,
     IndicadoresScoreAssentamento,
     IndicadoresScoreImovel,
     RespostaScoreAssentamentos,
     RespostaScoreImoveis,
+    ResumoAmbientalImovel,
     ResumoScoreAmbiental,
     ScoreAssentamento,
     ScoreDistribuicaoItem,
@@ -610,6 +613,59 @@ class ScoreAmbientalService:
             ),
         )
 
+    async def resumo_ambiental_imovel(self, imovel_id: str) -> ResumoAmbientalImovel:
+        """[RF-09] Resumo ambiental simplificado de um imóvel para análise rápida.
+
+        Retorna nível de risco em linguagem natural, indicadores agregados,
+        lista de alertas detectados e recomendações práticas.
+        """
+        detalhe = await self.score_imovel_detalhe(imovel_id)
+
+        perc_assentamento_result = await self._session.execute(
+            text(
+                """
+                SELECT COALESCE(MAX(ra.percentual_sobreposicao)::float, 0)::float
+                FROM rel_imovel_assentamento ra
+                WHERE ra.imovel_rural_id = CAST(:imovel_id AS UUID)
+                """
+            ),
+            {"imovel_id": imovel_id},
+        )
+        perc_assentamento = float(perc_assentamento_result.scalar() or 0.0)
+
+        nivel_risco = _nivel_risco_por_score(detalhe.score_geral)
+        alertas = _gerar_alertas_imovel(detalhe.indicadores, perc_assentamento)
+        recomendacoes = _gerar_recomendacoes_imovel(detalhe.indicadores, perc_assentamento, detalhe.score_geral)
+        diagnostico = _gerar_diagnostico_imovel(detalhe, nivel_risco, len(alertas))
+
+        indicadores = IndicadoresResumoImovel(
+            focos_queimada_dentro=detalhe.indicadores.focos_queimada_dentro,
+            focos_queimada_proximos=detalhe.indicadores.focos_queimada_proximos,
+            area_desmatamento_ha=detalhe.indicadores.area_desmatamento_ha,
+            perc_desmatamento=detalhe.indicadores.perc_desmatamento_max,
+            perc_sobreposicao_uc=detalhe.indicadores.perc_sobreposicao_uc_max,
+            perc_sobreposicao_ti=detalhe.indicadores.perc_sobreposicao_ti_max,
+            perc_sobreposicao_quilombo=detalhe.indicadores.perc_sobreposicao_quilombo_max,
+            perc_sobreposicao_assentamento=round(perc_assentamento, 2),
+        )
+
+        return ResumoAmbientalImovel(
+            imovel_id=detalhe.imovel_id,
+            codigo_car=detalhe.codigo_car,
+            nome_imovel=detalhe.nome_imovel,
+            municipio=detalhe.municipio,
+            estado=detalhe.estado,
+            area_ha=detalhe.area_ha,
+            situacao_cadastral=detalhe.indicadores.situacao_cadastral,
+            nivel_risco=nivel_risco,
+            classificacao=detalhe.classificacao,
+            score_geral=detalhe.score_geral,
+            diagnostico=diagnostico,
+            indicadores=indicadores,
+            alertas=alertas,
+            recomendacoes=recomendacoes,
+        )
+
     async def resumo(
         self,
         estado_sigla: Optional[str] = None,
@@ -640,6 +696,190 @@ class ScoreAmbientalService:
                 [a.classificacao for a in assentamentos.itens]
             ),
         )
+
+
+def _nivel_risco_por_score(score: float) -> str:
+    if score >= 80:
+        return "Baixo"
+    if score >= 60:
+        return "Moderado"
+    if score >= 40:
+        return "Médio"
+    if score >= 20:
+        return "Alto"
+    return "Crítico"
+
+
+def _gerar_alertas_imovel(
+    indicadores: IndicadoresScoreImovel,
+    perc_assentamento: float,
+) -> list[AlertaResumoItem]:
+    alertas: list[AlertaResumoItem] = []
+
+    if indicadores.focos_queimada_dentro > 0:
+        severidade = "alta" if indicadores.focos_queimada_dentro >= 3 else "média"
+        alertas.append(
+            AlertaResumoItem(
+                tipo="queimada",
+                severidade=severidade,
+                descricao=(
+                    f"{indicadores.focos_queimada_dentro} foco(s) de queimada "
+                    "registrado(s) dentro do imóvel."
+                ),
+            )
+        )
+    if indicadores.focos_queimada_proximos >= 5:
+        alertas.append(
+            AlertaResumoItem(
+                tipo="queimada_proxima",
+                severidade="média" if indicadores.focos_queimada_proximos < 15 else "alta",
+                descricao=(
+                    f"{indicadores.focos_queimada_proximos} foco(s) de queimada "
+                    "em até 5 km do imóvel."
+                ),
+            )
+        )
+
+    if indicadores.perc_desmatamento_max >= 5.0:
+        severidade = "alta" if indicadores.perc_desmatamento_max >= 20.0 else "média"
+        alertas.append(
+            AlertaResumoItem(
+                tipo="desmatamento",
+                severidade=severidade,
+                descricao=(
+                    f"Alerta de desmatamento cobrindo {indicadores.perc_desmatamento_max:.1f}% "
+                    f"do imóvel ({indicadores.area_desmatamento_ha:.2f} ha)."
+                ),
+            )
+        )
+
+    if indicadores.perc_sobreposicao_uc_max > 0:
+        severidade = "alta" if indicadores.perc_sobreposicao_uc_max >= 10.0 else "baixa"
+        alertas.append(
+            AlertaResumoItem(
+                tipo="sobreposicao_uc",
+                severidade=severidade,
+                descricao=(
+                    f"Sobreposição de {indicadores.perc_sobreposicao_uc_max:.1f}% "
+                    "com Unidade de Conservação."
+                ),
+            )
+        )
+    if indicadores.perc_sobreposicao_ti_max > 0:
+        alertas.append(
+            AlertaResumoItem(
+                tipo="sobreposicao_ti",
+                severidade="alta",
+                descricao=(
+                    f"Sobreposição de {indicadores.perc_sobreposicao_ti_max:.1f}% "
+                    "com Terra Indígena."
+                ),
+            )
+        )
+    if indicadores.perc_sobreposicao_quilombo_max > 0:
+        alertas.append(
+            AlertaResumoItem(
+                tipo="sobreposicao_quilombo",
+                severidade="alta",
+                descricao=(
+                    f"Sobreposição de {indicadores.perc_sobreposicao_quilombo_max:.1f}% "
+                    "com Território Quilombola."
+                ),
+            )
+        )
+    if perc_assentamento > 0:
+        alertas.append(
+            AlertaResumoItem(
+                tipo="sobreposicao_assentamento",
+                severidade="média",
+                descricao=(
+                    f"Sobreposição de {perc_assentamento:.1f}% com Assentamento Rural."
+                ),
+            )
+        )
+
+    situacao = _normalizar_situacao(indicadores.situacao_cadastral)
+    if situacao and ("CANCELADO" in situacao or "SUSPENSO" in situacao):
+        alertas.append(
+            AlertaResumoItem(
+                tipo="cadastro_car",
+                severidade="alta",
+                descricao=(
+                    f"Situação cadastral do CAR irregular: "
+                    f"{indicadores.situacao_cadastral}."
+                ),
+            )
+        )
+    elif not situacao:
+        alertas.append(
+            AlertaResumoItem(
+                tipo="cadastro_car",
+                severidade="média",
+                descricao="Situação cadastral do CAR não informada.",
+            )
+        )
+
+    return alertas
+
+
+def _gerar_recomendacoes_imovel(
+    indicadores: IndicadoresScoreImovel,
+    perc_assentamento: float,
+    score_geral: float,
+) -> list[str]:
+    recs: list[str] = []
+
+    if indicadores.focos_queimada_dentro > 0 or indicadores.focos_queimada_proximos >= 10:
+        recs.append(
+            "Reforçar prevenção a incêndios (aceiros, monitoramento) e acionar "
+            "brigadas locais em períodos de seca."
+        )
+    if indicadores.perc_desmatamento_max >= 5.0:
+        recs.append(
+            "Investigar alertas de desmatamento; verificar autorização de "
+            "supressão e cumprimento do Código Florestal."
+        )
+    if (
+        indicadores.perc_sobreposicao_uc_max > 0
+        or indicadores.perc_sobreposicao_ti_max > 0
+        or indicadores.perc_sobreposicao_quilombo_max > 0
+        or perc_assentamento > 0
+    ):
+        recs.append(
+            "Revisar limites do imóvel quanto a áreas protegidas e territórios "
+            "especiais; consultar órgãos competentes."
+        )
+
+    situacao = _normalizar_situacao(indicadores.situacao_cadastral)
+    if not situacao or "CANCELADO" in situacao or "SUSPENSO" in situacao:
+        recs.append("Regularizar o cadastro do imóvel no CAR/SICAR.")
+
+    if not recs and score_geral >= 80:
+        recs.append(
+            "Manter as boas práticas atuais e o monitoramento periódico do imóvel."
+        )
+
+    return recs
+
+
+def _gerar_diagnostico_imovel(
+    detalhe: ScoreImovel,
+    nivel_risco: str,
+    total_alertas: int,
+) -> str:
+    nome = detalhe.nome_imovel or detalhe.codigo_car or "Imóvel rural"
+    local = ", ".join(filter(None, [detalhe.municipio, detalhe.estado])) or "localidade não informada"
+    if total_alertas == 0:
+        return (
+            f"{nome} ({local}) apresenta nível de risco ambiental **{nivel_risco}** "
+            f"(score {detalhe.score_geral:.1f}, classificação {detalhe.classificacao}). "
+            "Nenhum alerta relevante foi detectado."
+        )
+    return (
+        f"{nome} ({local}) apresenta nível de risco ambiental **{nivel_risco}** "
+        f"(score {detalhe.score_geral:.1f}, classificação {detalhe.classificacao}) "
+        f"com {total_alertas} alerta(s) ativo(s) identificado(s)."
+    )
 
 
 def _distribuir(classificacoes: list[str]) -> list[ScoreDistribuicaoItem]:

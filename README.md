@@ -141,6 +141,7 @@ python -m nlp_processor.training.train
     - Para rodar a aplicação:
     ```bash
     python -m api/main.py
+    python celery_app.py
     ```
     ou
     ```bash
