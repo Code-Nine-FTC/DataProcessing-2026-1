@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -14,7 +14,9 @@ from api.schemas.chat import (
     FeedbackRequest,
 )
 from api.services.chat_service import ChatService
+from api.utils.auth import get_current_user, get_optional_user
 from models.database import SessionConnection
+from models.db_model import Usuario
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/chat", tags=["Chat Ambiental NLP"])
@@ -41,8 +43,9 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def enviar_mensagem(
     req: ChatMensagemRequest,
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[Usuario] = Depends(get_optional_user),
 ) -> ChatMensagemResponse:
-    return await _service.enviar_mensagem(req, session)
+    return await _service.enviar_mensagem(req, session, current_user)
 
 
 @router.get(
@@ -52,8 +55,9 @@ async def enviar_mensagem(
 )
 async def listar_chats(
     session: AsyncSession = Depends(get_session),
+    current_user: Usuario = Depends(get_current_user),
 ) -> List[ChatResumo]:
-    return await _service.listar_chats(session)
+    return await _service.listar_chats(session, current_user.id)
 
 
 @router.get(
@@ -87,8 +91,9 @@ async def geojson_resposta(
 async def historico_chat(
     chat_id: UUID,
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[Usuario] = Depends(get_optional_user),
 ) -> ChatHistoricoResponse:
-    return await _service.historico_chat(chat_id, session)
+    return await _service.historico_chat(chat_id, session, current_user)
 
 
 @router.delete(
@@ -99,8 +104,9 @@ async def historico_chat(
 async def desativar_chat(
     chat_id: UUID,
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[Usuario] = Depends(get_optional_user),
 ) -> dict:
-    return await _service.desativar_chat(chat_id, session)
+    return await _service.desativar_chat(chat_id, session, current_user)
 
 
 @router.post(
@@ -127,7 +133,10 @@ class ResumoResponse(BaseModel):
 async def resumo_chat(
     chat_id: UUID,
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[Usuario] = Depends(get_optional_user),
 ):
 
-    dados_relatorio = await _service.gerar_resumo_relatorio(chat_id, session)
+    dados_relatorio = await _service.gerar_resumo_relatorio(
+        chat_id, session, current_user
+    )
     return ResumoResponse(resumo=dados_relatorio["resumo"], fontes=dados_relatorio["fontes"])

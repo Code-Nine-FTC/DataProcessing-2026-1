@@ -9,6 +9,7 @@ from datetime import datetime
 from time import time
 import uuid
 
+from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from geoalchemy2.shape import to_shape
 from sqlalchemy import select
@@ -31,7 +32,7 @@ from api.utils.qgis_integracao import montar_integracao_qgis
 from api.utils.exceptions import NLPProcessingError, DatabaseConnectionError, DataNotFoundError
 from api.utils.fallback_logger import FallbackLogger
 from api.utils.fallback_metrics import FallbackMetrics
-from models.db_model import Chat, ConsultaUsuario, FeedbackResposta, RespostaSistema
+from models.db_model import Chat, ConsultaUsuario, FeedbackResposta, RespostaSistema, Usuario
 from nlp_processor.index import NLPProcessor
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,37 @@ _fallback_metrics = FallbackMetrics()
 
 
 class ChatService:
+    @staticmethod
+    def _assert_chat_access(chat: Chat, current_user: Optional[Usuario]) -> None:
+        if not chat.ativo:
+            raise HTTPException(status_code=404, detail="Chat não encontrado.")
+        if chat.usuario_id is None:
+            return
+        if current_user is None or chat.usuario_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Sem permissão para este chat.",
+            )
+
+    async def _prepare_chat_for_message(
+        self,
+        req: ChatMensagemRequest,
+        session: AsyncSession,
+        current_user: Optional[Usuario],
+    ) -> None:
+        if not req.chat_id:
+            return
+
+        chat = await session.get(Chat, req.chat_id)
+        if chat is None:
+            raise HTTPException(status_code=404, detail="Chat não encontrado.")
+
+        self._assert_chat_access(chat, current_user)
+
+        if chat.usuario_id is None and current_user is not None:
+            chat.usuario_id = current_user.id
+            await session.flush()
+
     # ------------------------------------------------------------------
     # Enviar mensagem
     # ------------------------------------------------------------------
@@ -50,10 +82,12 @@ class ChatService:
         self,
         req: ChatMensagemRequest,
         session: AsyncSession,
+        current_user: Optional[Usuario] = None,
     ) -> ChatMensagemResponse:
         start_time = time()
         try:
-            result = await self._process_with_fallback(req, session)
+            await self._prepare_chat_for_message(req, session, current_user)
+            result = await self._process_with_fallback(req, session, current_user)
             return self._build_success_response(result)
             
         except NLPProcessingError as e:
@@ -71,12 +105,19 @@ class ChatService:
         except Exception as e:
             return await self._handle_generic_fallback(req, e, start_time)
 
-    async def _process_with_fallback(self, req: ChatMensagemRequest, session: AsyncSession) -> dict:
+    async def _process_with_fallback(
+        self,
+        req: ChatMensagemRequest,
+        session: AsyncSession,
+        current_user: Optional[Usuario] = None,
+    ) -> dict:
+        usuario_id = current_user.id if current_user else None
         return await _processor.process(
             session=session,
             pergunta=req.pergunta,
             chat_id=req.chat_id,
             municipio=req.municipio,
+            usuario_id=usuario_id,
         )
 
     def _build_success_response(self, result: dict) -> ChatMensagemResponse:
@@ -171,10 +212,12 @@ class ChatService:
     # Listar chats
     # ------------------------------------------------------------------
 
-    async def listar_chats(self, session: AsyncSession) -> list[ChatResumo]:
+    async def listar_chats(
+        self, session: AsyncSession, usuario_id: UUID
+    ) -> list[ChatResumo]:
         stmt = (
             select(Chat)
-            .where(Chat.ativo == True)
+            .where(Chat.ativo == True, Chat.usuario_id == usuario_id)
             .order_by(Chat.created_at.desc().nullslast())
             .limit(50)
         )
@@ -189,12 +232,16 @@ class ChatService:
     # ------------------------------------------------------------------
 
     async def historico_chat(
-        self, chat_id: UUID, session: AsyncSession
+        self,
+        chat_id: UUID,
+        session: AsyncSession,
+        current_user: Optional[Usuario] = None,
     ) -> ChatHistoricoResponse:
         chat = await session.get(Chat, chat_id)
         if chat is None:
-            from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Chat não encontrado.")
+
+        self._assert_chat_access(chat, current_user)
 
         stmt = (
             select(ConsultaUsuario, RespostaSistema, FeedbackResposta)
@@ -291,13 +338,16 @@ class ChatService:
     # ------------------------------------------------------------------
 
     async def desativar_chat(
-        self, chat_id: UUID, session: AsyncSession
+        self,
+        chat_id: UUID,
+        session: AsyncSession,
+        current_user: Optional[Usuario] = None,
     ) -> dict:
         chat = await session.get(Chat, chat_id)
         if chat is None:
-            from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Chat não encontrado.")
 
+        self._assert_chat_access(chat, current_user)
         chat.ativo = False
         await session.commit()
         return {"mensagem": "Chat desativado com sucesso."}
@@ -326,10 +376,15 @@ class ChatService:
 # Gerar Resumo do Relatório 
 # ------------------------------------------------------------------
 
-    async def gerar_resumo_relatorio(self, chat_id: UUID, session: AsyncSession) -> dict:
+    async def gerar_resumo_relatorio(
+        self,
+        chat_id: UUID,
+        session: AsyncSession,
+        current_user: Optional[Usuario] = None,
+    ) -> dict:
         try:
             # 1. Pega o histórico completo
-            historico = await self.historico_chat(chat_id, session)
+            historico = await self.historico_chat(chat_id, session, current_user)
             
             if not historico.mensagens:
                 return {
@@ -371,9 +426,10 @@ class ChatService:
                 "fontes": fontes_acumuladas
             }
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Erro ao compilar relatório inteligente: {e}")
-            from fastapi import HTTPException
             raise HTTPException(
                 status_code=500, 
                 detail="Erro ao compilar as informações estruturadas do relatório."
