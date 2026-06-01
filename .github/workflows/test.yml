@@ -13,6 +13,12 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: test_db
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +43,12 @@ jobs:
   unit:
     needs: smoke
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: test_db
     strategy:
       matrix:
         python-version: ["3.12"]
@@ -65,6 +77,12 @@ jobs:
   integration:
     needs: unit
     runs-on: ubuntu-latest
+    env:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: test_db
     strategy:
       matrix:
         python-version: ["3.12"]
