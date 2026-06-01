@@ -7,8 +7,9 @@ from models.db_model import Base
 import asyncio
 from sqlalchemy import text
 from models.inserir_estado_municipio import run
-config = context.config
+from models.inserir_regiao_administrativa import run as run_ra
 
+config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 if config.config_file_name is not None:
@@ -16,8 +17,9 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+
 def include_object(object, name, type_, reflected, compare_to):
-    if type_ == "table" and name in ("spatial_ref_sys"):
+    if type_ == "table" and name in ("spatial_ref_sys",):
         return False
     if type_ == "index" and (name.startswith("idx_") or name.endswith("_geom_idx")):
         return False
@@ -33,9 +35,34 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         include_object=include_object,
     )
-
     with context.begin_transaction():
         context.run_migrations()
+
+
+def do_run_migrations(connection: AsyncConnection) -> None:
+    """Roda dentro de connection.run_sync() — contexto síncrono."""
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
+        include_object=include_object,
+    )
+
+    with context.begin_transaction():
+        print("-" * 50)
+        print("🔧 Verificando/Instalando extensões (PostGIS, Vector, Unaccent)...")
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent"))
+        print("✅ Extensões prontas!")
+        print("-" * 50)
+        print("🚀 Executando migrações de tabelas...")
+        context.run_migrations()
+        print("✅ Migrações concluídas!")
+        print("-" * 50)
+    # ETLs fora do bloco de transação do Alembic — usam engine própria (psycopg2)
+
 
 async def run_async_migrations() -> None:
     try:
@@ -47,42 +74,27 @@ async def run_async_migrations() -> None:
         await connectable.dispose()
 
     except ConnectionRefusedError as e:
-        print(f"Database connection refused: {e}")
-        print("Please check if the database server is running and the connection details are correct.")
+        print(f"❌ Conexão recusada: {e}")
+        print("Verifique se o banco está rodando e as credenciais estão corretas.")
         raise
     except Exception as e:
-        print(f"An error occurred while running migrations: {e}")
+        print(f"❌ Erro durante as migrações: {e}")
         raise
 
-def do_run_migrations(connection: AsyncConnection) -> None:
-
-    context.configure(
-        connection=connection,
-        target_metadata=target_metadata,
-        compare_type=True,
-        compare_server_default=True,
-        include_object=include_object,
-    )
-
-    with context.begin_transaction():
-        print("-"*50)
-        print("🔧 Verificando/Instalando extensões (PostGIS & Vector)...")
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        print("🔧 Verificando/Instalando extensão unaccent...")
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent"))
-        print("✅ Extensão unaccent conferida/instalada!")
-        print("-"*50)
-        print("🚀 Executando migrações de tabelas...")
-        context.run_migrations()
-        print("✅ Tudo pronto!")
-        print("-"*50)
-    print("📥 Inserindo dados de estado e municípios...")
+    # ETLs rodam APÓS a conexão assíncrona ser fechada — evita conflito de drivers
+    print("📥 Inserindo estado e municípios...")
     run()
-    print("✅ Dados inseridos com sucesso!")
-    print("-"*50)
+    print("✅ Estado e municípios inseridos!")
+    print("-" * 50)
+    print("📥 Inserindo Regiões Administrativas...")
+    run_ra()
+    print("✅ Regiões Administrativas inseridas!")
+    print("-" * 50)
+
+
 def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
+
 
 if context.is_offline_mode():
     run_migrations_offline()

@@ -23,5 +23,5 @@ def define_routes(app: FastAPI) -> None:
     app.include_router(validation_router)
     app.include_router(dashboard_router)
     app.include_router(admin_router)
-    app.include_router(chat_router, dependencies=[Depends(get_current_user)])
+    app.include_router(chat_router)
     app.include_router(dashboard_router, dependencies=[Depends(get_current_user)])

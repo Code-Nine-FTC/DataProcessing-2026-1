@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from typing import Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
@@ -10,6 +11,7 @@ from models.db_model import Usuario
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _bearer = HTTPBearer()
+_optional_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -35,6 +37,21 @@ async def get_current_user(
         )
 
     return usuario
+
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_optional_bearer),
+    session: AsyncSession = Depends(SessionConnection.session),
+) -> Optional[Usuario]:
+    """Retorna o usuário autenticado ou None quando não há token válido."""
+    if credentials is None:
+        return None
+
+    payload = decodificar_token(credentials.credentials)
+    if payload is None:
+        return None
+
+    return await AuthService(session).buscar_por_id(UUID(payload["sub"]))
 
 
 async def require_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:

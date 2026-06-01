@@ -83,14 +83,16 @@ def _compute_bbox(features: list[dict]) -> Optional[list[float]]:
 
 
 async def _load_or_create_chat(
-    session: AsyncSession, chat_id: Optional[UUID]
+    session: AsyncSession,
+    chat_id: Optional[UUID],
+    usuario_id: Optional[UUID] = None,
 ) -> Chat:
     if chat_id:
         result = await session.get(Chat, chat_id)
         if result:
             return result
 
-    chat = Chat()
+    chat = Chat(usuario_id=usuario_id)
     session.add(chat)
     await session.flush()
     return chat
@@ -187,6 +189,7 @@ class NLPProcessor:
         pergunta: str,
         chat_id: Optional[UUID] = None,
         municipio: Optional[str] = None,
+        usuario_id: Optional[UUID] = None,
     ) -> dict:
         """
         Processa uma pergunta e retorna a resposta estruturada para o frontend.
@@ -205,7 +208,7 @@ class NLPProcessor:
         """
         inicio_processamento = perf_counter()
         # 1. Obter/criar chat
-        chat = await _load_or_create_chat(session, chat_id)
+        chat = await _load_or_create_chat(session, chat_id, usuario_id=usuario_id)
 
         # 2. Carregar histórico
         historico = await _load_historico(session, chat.id)
