@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     JWT_SECRET: str = "change-me-in-production"
     JWT_EXPIRE_MINUTES: int = 60 * 8  # 8 horas
+    APP_ENV: str = "development"  # development | production
 
     @property
     def DATABASE_URL(self) -> str:
