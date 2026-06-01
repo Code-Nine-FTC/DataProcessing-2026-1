@@ -165,7 +165,7 @@ async def get_layer_geojson(
     if municipio_id is not None:
         params["municipio_id"] = municipio_id
         if layer_name == "municipios":
-            query = raw_query + " AND m.id = :municipio_id"
+            query = raw_query.format(**fmt_kwargs) + " AND m.id = :municipio_id"
         else:
             alias = _LAYER_ALIASES.get(layer_name, "m")
             fmt_kwargs["filter_clause"] = _municipio_filter_clause(alias)
