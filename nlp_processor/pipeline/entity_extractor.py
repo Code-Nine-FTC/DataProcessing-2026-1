@@ -1,27 +1,17 @@
 # -*- coding: utf-8 -*-
-"""
-Extrator de entidades para o pipeline NLP ambiental.
-Extrai: MUNICIPIO, DATA_INICIO, DATA_FIM, CATEGORIA_UC, FASE_TI, SENSOR.
-Não depende de modelos treinados — usa regex + gazetteer de municípios de SP.
-"""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Optional, Union, Dict, Any
+from nlp_processor.pipeline.preprocessor import AdvancedGeoASGPreprocessor
+from models.regioes_administrativas_sp_data import RA_METADATA
 
-from nlp_processor.pipeline.preprocessor import normalizar
 
-try:
-    from models.regioes_administrativas_sp_data import RA_METADATA
-except Exception:  # pragma: no cover - fallback se o módulo de dados não existir
-    RA_METADATA = []
+_PREPROCESSOR_INSTANCE = AdvancedGeoASGPreprocessor()
 
-# ---------------------------------------------------------------------------
-# Gazetteer de municípios do estado de São Paulo (nomes normalizados)
-# ---------------------------------------------------------------------------
-# Lista reduzida com os principais; o loader completo vem do banco em runtime.
+
 MUNICIPIOS_SP_BASE: list[str] = [
     "sao paulo", "campinas", "sao jose dos campos", "ribeirao preto",
     "sorocaba", "maua", "sao jose do rio preto", "santos", "mogi das cruzes",
@@ -46,14 +36,8 @@ MUNICIPIOS_SP_BASE: list[str] = [
     "sao miguel arcanjo", "paranapanema", "sarutaia",
 ]
 
-
-# ---------------------------------------------------------------------------
-# Padrões de datas
-# ---------------------------------------------------------------------------
 _DATE_PATTERNS = [
-    # dd/mm/yyyy ou dd-mm-yyyy
     (r"\b(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})\b", "%d/%m/%Y"),
-    # yyyy-mm-dd
     (r"\b(\d{4})[/\-](\d{2})[/\-](\d{2})\b", "%Y-%m-%d"),
 ]
 
@@ -65,9 +49,6 @@ _MONTH_MAP = {
 
 _YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
 
-# ---------------------------------------------------------------------------
-# Categorias de UC e padrões
-# ---------------------------------------------------------------------------
 _CATEGORIAS_UC = {
     r"\bparque\s+nacional\b": "Parque Nacional",
     r"\bparque\s+estadual\b": "Parque Estadual",
@@ -82,9 +63,6 @@ _CATEGORIAS_UC = {
     r"\bapa\s+estadual\b": "APA Estadual",
 }
 
-# ---------------------------------------------------------------------------
-# Fases de TI
-# ---------------------------------------------------------------------------
 _FASES_TI = {
     r"\bhomologada\b": "Homologada",
     r"\bdelimitada\b": "Delimitada",
@@ -93,165 +71,92 @@ _FASES_TI = {
     r"\bencaminhada\s+ri\b": "Encaminhada RI",
 }
 
-# ---------------------------------------------------------------------------
-# Sensores de queimada
-# ---------------------------------------------------------------------------
-_SENSORES = [
-    "aqua", "terra", "npp-375", "modis", "viirs", "goes-16",
-    "msg-3", "noaa-20",
-]
+_SENSORES = ["aqua", "terra", "npp-375", "modis", "viirs", "goes-16", "msg-3", "noaa-20"]
 
-
-# ---------------------------------------------------------------------------
-# Resultado da extração
-# ---------------------------------------------------------------------------
 @dataclass
 class Entidades:
     municipio: Optional[str] = None
-    regiao_administrativa: Optional[str] = None  # nome canônico (ex: "RA de Campinas")
-    data_inicio: Optional[str] = None      # YYYY-MM-DD
-    data_fim: Optional[str] = None         # YYYY-MM-DD
+    regiao_administrativa: Optional[str] = None
+    data_inicio: Optional[str] = None
+    data_fim: Optional[str] = None
     ano: Optional[int] = None
     categoria_uc: Optional[str] = None
     fase_ti: Optional[str] = None
     sensor: Optional[str] = None
-    grupo_snuc: Optional[str] = None       # 'PI' ou 'US'
+    grupo_snuc: Optional[str] = None
     palavras_chave: list[str] = field(default_factory=list)
     codigo_car: Optional[str] = None
+    limite: Optional[int] = 3  # Valor padrão caso o usuário não diga um número
+    is_ranking: bool = False   # Indica se a pergunta pede explicitamente um "ranking" ou "top"
 
-
-# ---------------------------------------------------------------------------
-# Utilitários
-# ---------------------------------------------------------------------------
 
 def _extrair_datas(texto_norm: str) -> tuple[Optional[str], Optional[str]]:
-    """Tenta encontrar até duas datas no texto e retorna (inicio, fim)."""
     encontradas: list[str] = []
-
-    # Padrão dd/mm/yyyy ou dd-mm-yyyy
     for match in re.finditer(r"\b(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})\b", texto_norm):
         d, m, y = match.group(1), match.group(2), match.group(3)
         encontradas.append(f"{y}-{m.zfill(2)}-{d.zfill(2)}")
 
-    # Padrão yyyy-mm-dd
     for match in re.finditer(r"\b(\d{4})[/\-](\d{2})[/\-](\d{2})\b", texto_norm):
         y, m, d = match.group(1), match.group(2), match.group(3)
         iso = f"{y}-{m}-{d}"
         if iso not in encontradas:
             encontradas.append(iso)
 
-    # Padrão "janeiro de 2024" / "em marco 2025"
     for nome_mes, num_mes in _MONTH_MAP.items():
-        for match in re.finditer(
-            rf"\b{nome_mes}\s+(?:de\s+)?(\d{{4}})\b", texto_norm
-        ):
+        for match in re.finditer(rf"\b{nome_mes}\s+(?:de\s+)?(\d{{4}})\b", texto_norm):
             ano = match.group(1)
             iso = f"{ano}-{str(num_mes).zfill(2)}-01"
             if iso not in encontradas:
                 encontradas.append(iso)
 
     encontradas = sorted(set(encontradas))
-    inicio = encontradas[0] if encontradas else None
-    fim = encontradas[-1] if len(encontradas) > 1 else None
-    return inicio, fim
-
+    return (encontradas[0] if encontradas else None, encontradas[-1] if len(encontradas) > 1 else None)
 
 def _extrair_periodo_relativo(texto_norm: str) -> tuple[Optional[str], Optional[str]]:
     hoje = datetime.utcnow().date()
-    if re.search(r"\bultim[oa]s?\s+semana(s)?\b", texto_norm) or re.search(
-        r"\bultim[oa]s?\s+7\s+dias\b", texto_norm
-    ):
-        inicio = hoje - timedelta(days=7)
-        return inicio.isoformat(), hoje.isoformat()
-
-    if re.search(r"\bultim[oa]s?\s+mes(es)?\b", texto_norm) or re.search(
-        r"\bultim[oa]s?\s+30\s+dias\b", texto_norm
-    ):
-        inicio = hoje - timedelta(days=30)
-        return inicio.isoformat(), hoje.isoformat()
-
-    if re.search(r"\bultim[oa]s?\s+ano(s)?\b", texto_norm) or re.search(
-        r"\bultim[oa]s?\s+12\s+meses\b", texto_norm
-    ):
-        inicio = hoje - timedelta(days=365)
-        return inicio.isoformat(), hoje.isoformat()
-
+    if re.search(r"\bultim[oa]s?\s+semana(s)?\b", texto_norm) or re.search(r"\bultim[oa]s?\s+7\s+dias\b", texto_norm):
+        return (hoje - timedelta(days=7)).isoformat(), hoje.isoformat()
+    if re.search(r"\bultim[oa]s?\s+mes(es)?\b", texto_norm) or re.search(r"\bultim[oa]s?\s+30\s+dias\b", texto_norm):
+        return (hoje - timedelta(days=30)).isoformat(), hoje.isoformat()
+    if re.search(r"\bultim[oa]s?\s+ano(s)?\b", texto_norm) or re.search(r"\bultim[oa]s?\s+12\s+meses\b", texto_norm):
+        return (hoje - timedelta(days=365)).isoformat(), hoje.isoformat()
     return None, None
-
 
 def _extrair_ano(texto_norm: str) -> Optional[int]:
     match = _YEAR_PATTERN.search(texto_norm)
     return int(match.group(1)) if match else None
 
-
-# ---------------------------------------------------------------------------
-# Regiões Administrativas (RA) de SP
-# ---------------------------------------------------------------------------
-# Aliases especiais que mapeiam siglas de Região Metropolitana para a RA
-# correspondente. As siglas RA são derivadas
-# automaticamente do RA_METADATA.
 _RM_ALIASES_SIGLA: dict[str, str] = {
-    "rmsp": "RA de São Paulo",
-    "rmbs": "RA da Baixada Santista",
-    "rmc": "RA de Campinas",
-    "rmrp": "RA de Ribeirão Preto",
-    "rmvp": "RA de São José dos Campos",
-    "rmvplm": "RA de São José dos Campos",
-    "rmvpln": "RA de São José dos Campos",
+    "rmsp": "RA de São Paulo", "rmbs": "RA da Baixada Santista", "rmc": "RA de Campinas",
+    "rmrp": "RA de Ribeirão Preto", "rmvp": "RA de São José dos Campos",
+    "rmvplm": "RA de São José dos Campos", "rmvpln": "RA de São José dos Campos",
 }
 
-
 def _ra_cidade_normalizada(ra_nome: str) -> str:
-    """Extrai a parte 'cidade' de um nome canônico de RA, normalizada.
-
-    Ex.: "RA de São Paulo" -> "sao paulo"
-         "RA da Baixada Santista" -> "baixada santista"
-         "RA Central" -> "central"
-    """
     base = ra_nome
     for prefixo in ("RA de ", "RA da ", "RA do ", "RA dos ", "RA das ", "RA "):
         if base.startswith(prefixo):
             base = base[len(prefixo):]
             break
-    return normalizar(base)
+    res = _PREPROCESSOR_INSTANCE.process(base)
+    return res["text_for_entities_and_rag"]
 
-
-# Mapa {cidade_normalizada: nome_canonico_da_RA} construído a partir do
-# RA_METADATA importado. Ordenado do maior para o menor para evitar match
-# parcial (ex.: "sao jose do rio preto" antes de "sao jose dos campos").
 _RA_CIDADE_TO_NOME: list[tuple[str, str]] = sorted(
-    [
-        (_ra_cidade_normalizada(meta["nome"]), meta["nome"])
-        for meta in RA_METADATA
-    ],
-    key=lambda item: len(item[0]),
-    reverse=True,
+    [(_ra_cidade_normalizada(meta["nome"]), meta["nome"]) for meta in RA_METADATA],
+    key=lambda item: len(item[0]), reverse=True,
 )
 
-# Siglas RA* (RACAM, RASP, RABS, ...) extraídas do RA_METADATA + siglas RM.
 _RA_SIGLAS: dict[str, str] = {
-    **{normalizar(meta["sigla"]): meta["nome"] for meta in RA_METADATA},
+    **{_PREPROCESSOR_INSTANCE.process(meta["sigla"])["text_for_entities_and_rag"]: meta["nome"] for meta in RA_METADATA},
     **_RM_ALIASES_SIGLA,
 }
 
-
 def _extrair_regiao_administrativa(texto_norm: str) -> tuple[Optional[str], str]:
-    """Tenta identificar uma RA mencionada no texto.
-
-    Retorna `(nome_canonico, texto_norm_sem_match)`. Quando uma RA é encontrada,
-    o trecho que a representa é removido do texto retornado, de modo que o
-    extrator de município não capture acidentalmente a cidade-sede da RA
-    (ex.: "RA de Campinas" não deve resultar em município = "Campinas").
-    """
-
     for sigla_norm, ra_nome in _RA_SIGLAS.items():
         padrao = rf"\b{re.escape(sigla_norm)}\b"
         if re.search(padrao, texto_norm):
             return ra_nome, re.sub(padrao, " ", texto_norm)
 
-    # 2. Padrões explícitos com prefixo ("ra de X", "regiao administrativa de X",
-    #    "regiao de X"). Iteramos das cidades mais longas para as mais curtas
-    #    para evitar match parcial entre nomes que compartilham prefixo.
     prefixos = (
         r"regiao\s+administrativa\s+(?:de\s+|da\s+|do\s+|dos\s+|das\s+)?",
         r"ra\s+(?:de\s+|da\s+|do\s+|dos\s+|das\s+)?",
@@ -262,26 +167,18 @@ def _extrair_regiao_administrativa(texto_norm: str) -> tuple[Optional[str], str]
             padrao = rf"\b{prefixo}{re.escape(cidade_norm)}\b"
             if re.search(padrao, texto_norm):
                 return ra_nome, re.sub(padrao, " ", texto_norm)
-
     return None, texto_norm
 
-
-def _extrair_municipio(
-    texto_norm: str,
-    municipios_extras: Optional[list[str]] = None,
-) -> Optional[str]:
+def _extrair_municipio(texto_norm: str, municipios_extras: Optional[list[str]] = None) -> Optional[str]:
     gazetteer = MUNICIPIOS_SP_BASE + (municipios_extras or [])
-    # Ordena do maior para menor para evitar match parcial
     for municipio in sorted(gazetteer, key=len, reverse=True):
         if municipio == "sao paulo" and re.search(
-            r"\b(estado|uf)\s+(?:de\s+)?sao\s+paulo\b|\bsao\s+paulo\s+(?:estado|uf)\b",
-            texto_norm,
+            r"\b(estado|uf)\s+(?:de\s+)?sao\s+paulo\b|\bsao\s+paulo\s+(?:estado|uf)\b", texto_norm
         ):
             continue
         if municipio in texto_norm:
             return municipio.title()
     return None
-
 
 def _extrair_categoria_uc(texto_norm: str) -> Optional[str]:
     for pattern, categoria in _CATEGORIAS_UC.items():
@@ -289,20 +186,17 @@ def _extrair_categoria_uc(texto_norm: str) -> Optional[str]:
             return categoria
     return None
 
-
 def _extrair_fase_ti(texto_norm: str) -> Optional[str]:
     for pattern, fase in _FASES_TI.items():
         if re.search(pattern, texto_norm):
             return fase
     return None
 
-
 def _extrair_sensor(texto_norm: str) -> Optional[str]:
     for sensor in _SENSORES:
         if sensor in texto_norm:
             return sensor.upper()
     return None
-
 
 def _extrair_grupo_snuc(texto_norm: str) -> Optional[str]:
     if re.search(r"protecao\s+integral\b", texto_norm):
@@ -311,28 +205,61 @@ def _extrair_grupo_snuc(texto_norm: str) -> Optional[str]:
         return "Uso Sustentável"
     return None
 
+def _extrair_codigo_car(texto_norm: str) -> Optional[str]:
+    def _valid(code: str) -> bool:
+        return len(code) >= 6 and any(ch.isdigit() for ch in code)
 
-# ---------------------------------------------------------------------------
-# Extrator principal
-# ---------------------------------------------------------------------------
+    m = re.search(r"\b([A-Za-z]{2}-\d{6,}-[A-Za-z0-9]+)\b", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+
+    m = re.search(r"codigo\s+car[:\s]*([A-Za-z0-9\-]+)", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+
+    m = re.search(r"\bcar[:\s]*([A-Za-z0-9\-]+)\b", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+
+    m = re.search(r"\b([A-Za-z]{2}\d{4,12}[A-Za-z]{0,2})\b", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+    return None
+
+def _extrair_limite(texto_norm: str) -> Optional[int]:
+    m = re.search(
+        r"\b(?:top|mais|maior|maiores|maxim[os|as]|máxim[os|as]|primeir[os|as])\s*[- ]*(\d+)\b", 
+        texto_norm
+    )
+    if m:
+        return int(m.group(1))
+    return 3 
+
+def _extrair_is_ranking(texto_norm: str) -> bool:
+    termos_ranking = [
+        "ranking", "lista", "posicao", "colocacao", "classificacao", 
+        "ordenado", "top", "maiores", "piores"
+    ]
+    return any(termo in texto_norm for termo in termos_ranking)
 
 def extrair_entidades(
-    texto: str,
+    texto: Union[str, Dict[str, Any]],
     municipios_extras: Optional[list[str]] = None,
 ) -> Entidades:
-    """
-    Extrai entidades de uma pergunta em linguagem natural.
+    if isinstance(texto, dict):
+        texto_norm = texto.get("text_for_entities_and_rag", "")
+        if not texto_norm:
+            texto_norm = texto.get("normalized_text", "")
+    else:
+        res_nlp = _PREPROCESSOR_INSTANCE.process(texto)
+        texto_norm = res_nlp["text_for_entities_and_rag"]
 
-    Args:
-        texto: Pergunta original do usuário.
-        municipios_extras: Lista de municípios adicionais (ex: carregados do banco).
-    """
-    texto_norm = normalizar(texto)
+    if not texto_norm or not str(texto_norm).strip():
+        return Entidades()
 
     data_inicio, data_fim = _extrair_datas(texto_norm)
     ano = _extrair_ano(texto_norm)
 
-    # Se só encontrou ano sem data completa, cria intervalo anual
     if ano and not data_inicio:
         data_inicio = f"{ano}-01-01"
         data_fim = f"{ano}-12-31"
@@ -357,35 +284,6 @@ def extrair_entidades(
         grupo_snuc=_extrair_grupo_snuc(texto_norm),
         palavras_chave=[w for w in texto_norm.split() if len(w) > 4],
         codigo_car=_extrair_codigo_car(texto_norm),
+        limite=_extrair_limite(texto_norm),
+        is_ranking=_extrair_is_ranking(texto_norm),
     )
-
-
-# ---------------------------------------------------------------------------
-# Extrair código CAR simples
-# Padrões suportados:
-# - "código car SP000123456" ou "codigo car: SP000123456"
-# - "CAR SP000123456"
-# - qualquer token alfanumérico com prefixo de 2 letras seguido por 6+ dígitos
-# ---------------------------------------------------------------------------
-def _extrair_codigo_car(texto_norm: str) -> Optional[str]:
-    def _valid(code: str) -> bool:
-        return len(code) >= 6 and any(ch.isdigit() for ch in code)
-
-    # Ex: SP-3500105-268208B9F3A84F508B9C79474EA557EC
-    m = re.search(r"\b([A-Za-z]{2}-\d{6,}-[A-Za-z0-9]+)\b", texto_norm)
-    if m and _valid(m.group(1)):
-        return m.group(1).upper()
-
-    m = re.search(r"codigo\s+car[:\s]*([A-Za-z0-9\-]+)", texto_norm)
-    if m and _valid(m.group(1)):
-        return m.group(1).upper()
-
-    m = re.search(r"\bcar[:\s]*([A-Za-z0-9\-]+)\b", texto_norm)
-    if m and _valid(m.group(1)):
-        return m.group(1).upper()
-
-    # fallback: token like BR01231SP or SP12345678
-    m = re.search(r"\b([A-Za-z]{2}\d{4,12}[A-Za-z]{0,2})\b", texto_norm)
-    if m and _valid(m.group(1)):
-        return m.group(1).upper()
-    return None

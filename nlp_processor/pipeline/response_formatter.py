@@ -1,83 +1,49 @@
 # -*- coding: utf-8 -*-
-"""
-Formata a resposta textual do agente com base nos resultados das consultas.
-Usa templates estruturados por intenção, citando as fontes.
-"""
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Any, Callable, Dict, List, Optional
 
 from nlp_processor.pipeline.entity_extractor import Entidades
 
-# ---------------------------------------------------------------------------
-# Helpers de formatação
-# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
-
-def _fmt_num(value: int | float, decimals: int = 0) -> str:
-    """Formata número no padrão brasileiro (1.234,56)."""
-    if decimals == 0:
-        formatted = f"{int(value):,}".replace(",", ".")
-        return formatted
-    formatted = f"{value:,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return formatted
-
-
-# ---------------------------------------------------------------------------
-# Templates por intenção
-# ---------------------------------------------------------------------------
-
-_TEMPLATES: dict[str, str] = {
+_TEMPLATES: Dict[str, str] = {
     "buscar_queimadas": (
-        "Com base nos dados do **{fonte_principal}**, foram identificados "
-        "**{total_fmt} focos de queimada**{escopo}. "
-        "{detalhe_periodo}"
-        "{contexto}"
-        "\n\n{fontes_citadas}"
+        "Com base nos dados do **{main_source}**, foram identificados "
+        "**{total_formatted} focos de queimada**{scope}. "
+        "{period_detail}"
     ),
     "buscar_desmatamentos": (
-        "De acordo com os alertas do **{fonte_principal}**, foram encontrados "
-        "**{total_fmt} alertas de desmatamento**{escopo}. "
-        "{detalhe_periodo}"
-        "{contexto}"
-        "\n\n{fontes_citadas}"
+        "De acordo com os alertas do **{main_source}**, foram encontrados "
+        "**{total_formatted} alertas de desmatamento**{scope}. "
+        "{period_detail}"
     ),
     "buscar_unidades_conservacao": (
-        "O sistema registra **{total_fmt} unidades de conservação**{escopo}, "
-        "conforme o Cadastro Nacional de Unidades de Conservação (CNUC) do **{fonte_principal}**. "
-        "{detalhe_categoria}"
-        "{contexto}"
-        "\n\n{fontes_citadas}"
+        "O sistema registra **{total_formatted} unidades de conservação**{scope}, "
+        "conforme o Cadastro Nacional de Unidades de Conservação (CNUC) do **{main_source}**. "
+        "{category_detail}"
     ),
     "buscar_terras_indigenas": (
-        "Segundo dados da **{fonte_principal}**, foram encontradas "
-        "**{total_fmt} terras indígenas**{escopo}. "
-        "{detalhe_fase}"
-        "{contexto}"
-        "\n\n{fontes_citadas}"
-    ),
-    "buscar_assentamentos": (
-        "Com base no acervo fundiário do **{fonte_principal}**, existem "
-        "**{total_fmt} assentamentos rurais**{escopo}. "
-        "{contexto}"
-        "\n\n{fontes_citadas}"
+        "Segundo dados da **{main_source}**, foram encontradas "
+        "**{total_formatted} terras indígenas**{scope}. "
+        "{phase_detail}"
     ),
     "buscar_quilombolas": (
-        "De acordo com o **{fonte_principal}**, foram identificados "
-        "**{total_fmt} territórios quilombolas**{escopo}. "
-        "{contexto}"
-        "\n\n{fontes_citadas}"
+        "De acordo com o **{main_source}**, foram identificados "
+        "**{total_formatted} territórios quilombolas**{scope}."
     ),
     "buscar_imoveis_rurais": (
-        "O Cadastro Ambiental Rural (**{fonte_principal}**) registra "
-        "**{total_fmt} imóveis rurais**{escopo}. "
-        "{contexto}"
-        "\n\n{fontes_citadas}"
+        "O Cadastro Ambiental Rural (**{main_source}**) registra "
+        "**{total_formatted} imóveis rurais**{scope}."
     ),
     "buscar_documentos": (
         "Com base na base de conhecimento documental do sistema:\n\n"
-        "{contexto}"
-        "\n\n{fontes_citadas}"
+        "{document_context}"
+    ),
+    "buscar_maiores_quantidades": (
+        "Análise agregada de densidade geoespacial via **{main_source}**:\n"
+        "Foram consolidados **{total_formatted} registros volumétricos**{scope}."
     ),
     "fora_escopo": (
         "Esta pergunta está fora do escopo do sistema. "
@@ -86,83 +52,9 @@ _TEMPLATES: dict[str, str] = {
         "unidades de conservação, terras indígenas, assentamentos rurais, "
         "territórios quilombolas e imóveis rurais (CAR)."
     ),
-    "sem_dados": (
-        "Com base nas fontes fornecidas ({fontes_citadas}), "
-        "não foram encontrados dados suficientes para responder a esta pergunta."
-    ),
 }
 
-
-def _formatar_escopo(entidades: Entidades) -> str:
-    partes = []
-    if entidades.municipio:
-        partes.append(f" no município de **{entidades.municipio}**")
-    elif entidades.regiao_administrativa:
-        partes.append(f" na **{entidades.regiao_administrativa}**")
-    else:
-        partes.append(" no estado de **São Paulo**")
-
-    if entidades.data_inicio and entidades.data_fim:
-        partes.append(f" entre {entidades.data_inicio} e {entidades.data_fim}")
-    elif entidades.data_inicio:
-        partes.append(f" a partir de {entidades.data_inicio}")
-    elif entidades.ano:
-        partes.append(f" em {entidades.ano}")
-
-    return "".join(partes)
-
-
-def _formatar_fontes(fontes: list[dict]) -> str:
-    if not fontes:
-        return ""
-    linhas = ["**Fontes consultadas:**"]
-    for f in fontes:
-        nome = f.get("nome", "")
-        orgao = f.get("orgao", "")
-        url = f.get("url", "")
-        linha = f"- {nome}"
-        if orgao:
-            linha += f" ({orgao})"
-        if url:
-            linha += f" — {url}"
-        linhas.append(linha)
-    return "\n".join(linhas)
-
-
-def _fonte_principal(fontes: list[dict]) -> str:
-    return fontes[0]["nome"] if fontes else "fonte desconhecida"
-
-
-def _aplicar_feedback_contexto(
-    texto: str,
-    feedback_contexto: dict[str, Any] | None,
-) -> str:
-    if not feedback_contexto:
-        return texto
-
-    avaliacao = feedback_contexto.get("avaliacao")
-    if avaliacao == -1:
-        return (
-            "Considerando que o feedback anterior foi negativo, vou reformular a "
-            "resposta de forma mais objetiva e com foco direto na nova solicitação.\n\n"
-            f"{texto}"
-        )
-    if avaliacao == 1:
-        return (
-            "Considerando que o feedback anterior foi positivo, vou manter a linha "
-            "de resposta e complementar o que foi pedido agora.\n\n"
-            f"{texto}"
-        )
-    return texto
-
-
-def _anexar_descricao(texto: str, descricao_consulta: str | None) -> str:
-    if not descricao_consulta:
-        return texto
-    return f"{texto}\n\n{descricao_consulta}"
-
-
-_TIPO_IMOVEL_POR_INTENCAO = {
+_PROPERTY_TYPE_BY_INTENT: Dict[str, str] = {
     "buscar_imoveis_queimada": "imovel_rural_queimada",
     "buscar_imoveis_desmatamento": "imovel_rural_desmatamento",
     "buscar_imoveis_quilombo": "imovel_rural_quilombo",
@@ -170,247 +62,278 @@ _TIPO_IMOVEL_POR_INTENCAO = {
 }
 
 
-def _detalhar_passivos_imovel(
-    features: list[dict] | None,
-    limite_por_tipo: int = 5,
-) -> str:
-    """Para `buscar_passivos_imovel`: lista nomes de UCs/TIs/quilombos com sobreposição."""
+def _format_number(value: int | float, decimals: int = 0) -> str:
+    if decimals == 0:
+        return f"{int(value):,}".replace(",", ".")
+    formatted = f"{value:,.{decimals}f}"
+    return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _format_scope(entities: Entidades) -> str:
+    parts = []
+    if entities.municipio:
+        parts.append(f" no município de **{entities.municipio}**")
+    elif entities.regiao_administrativa:
+        parts.append(f" na **{entities.regiao_administrativa}**")
+    else:
+        parts.append(" no estado de **São Paulo**")
+
+    if entities.data_inicio and entities.data_fim:
+        parts.append(f" entre {entities.data_inicio} e {entities.data_fim}")
+    elif entities.data_inicio:
+        parts.append(f" a partir de {entities.data_inicio}")
+    elif entities.ano:
+        parts.append(f" em {entities.ano}")
+
+    return "".join(parts)
+
+
+def _format_sources(sources: List[Dict[str, Any]]) -> str:
+    if not sources:
+        return ""
+    lines = ["**Fontes consultadas:**"]
+    for source in sources:
+        name = source.get("nome", "")
+        agency = source.get("orgao", "")
+        url = source.get("url", "")
+        line = f"- {name}"
+        if agency:
+            line += f" ({agency})"
+        if url:
+            line += f" — {url}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _get_main_source(sources: List[Dict[str, Any]]) -> str:
+    return sources[0]["nome"] if sources else "fonte desconhecida"
+
+
+def _apply_context_feedback(text: str, feedback_context: Optional[Dict[str, Any]]) -> str:
+    if not feedback_context:
+        return text
+    evaluation = feedback_context.get("avaliacao")
+    if evaluation == -1:
+        return (
+            "Considerando que o feedback anterior foi negativo, vou reformular a "
+            "resposta de forma mais objetiva e com foco direto na nova solicitação.\n\n"
+            f"{text}"
+        )
+    if evaluation == 1:
+        return (
+            "Considerando que o feedback anterior foi positivo, vou manter a linha "
+            "de resposta e complementar o que foi pedido agora.\n\n"
+            f"{text}"
+        )
+    return text
+
+
+def _append_query_description(text: str, query_description: Optional[str]) -> str:
+    if not query_description:
+        return text
+    return f"{text}\n\n{query_description}"
+
+
+def _detail_property_liabilities(features: Optional[List[Dict[str, Any]]], limit: int = 5) -> str:
     if not features:
         return ""
-
-    grupos: list[tuple[str, str]] = [
+    groups = [
         ("unidade_conservacao", "Unidades de Conservação"),
         ("terra_indigena", "Terras Indígenas"),
         ("quilombo", "Territórios Quilombolas"),
     ]
-
-    blocos: list[str] = []
-    for tipo, titulo in grupos:
+    blocks = []
+    for group_type, title in groups:
         items = [
             f.get("properties", {})
             for f in features
-            if f.get("properties", {}).get("tipo") == tipo
+            if f.get("properties", {}).get("tipo") == group_type
         ]
         if not items:
             continue
-
-        cabecalho = (
-            f"**{titulo} ({_fmt_num(len(items))}):**"
-            if len(items) <= limite_por_tipo
-            else f"**{titulo} (top {limite_por_tipo} de {_fmt_num(len(items))}):**"
-        )
-        linhas = [cabecalho]
-        for prop in items[:limite_por_tipo]:
-            partes = [str(prop.get("nome") or "(sem nome)")]
-            categoria = prop.get("categoria")
-            if categoria:
-                partes.append(str(categoria))
-            pct = prop.get("percentual_sobreposicao")
-            if pct:
-                partes.append(f"{pct:.2f}% sobreposto".replace(".", ","))
-            area = prop.get("area_intersecao_ha")
+        header = f"**{title} ({_format_number(len(items))}):**" if len(items) <= limit else f"**{title} (top {limit} de {_format_number(len(items))}):**"
+        lines = [header]
+        for props in items[:limit]:
+            parts = [str(props.get("nome") or "(sem nome)")]
+            category = props.get("categoria")
+            if category:
+                parts.append(str(category))
+            percentage = props.get("percentual_sobreposicao")
+            if percentage:
+                parts.append(f"{percentage:.2f}% sobreposto".replace(".", ","))
+            area = props.get("area_intersecao_ha")
             if area:
-                partes.append(f"{area:.2f} ha intersectados".replace(".", ","))
-            linhas.append("- " + " — ".join(partes))
-        if len(items) > limite_por_tipo:
-            linhas.append(f"- … e mais {_fmt_num(len(items) - limite_por_tipo)} no mapa.")
-        blocos.append("\n".join(linhas))
+                parts.append(f"{area:.2f} ha intersectados".replace(".", ","))
+            lines.append("- " + " — ".join(parts))
+        if len(items) > limit:
+            lines.append(f"- … e mais {_format_number(len(items) - limit)} no mapa.")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
-    return "\n\n".join(blocos)
 
-
-def _listar_imoveis_afetados(
-    features: list[dict] | None,
-    intencao: str,
-    limite: int = 10,
-) -> str:
-    """Gera bloco markdown com codigo_car dos imóveis retornados pela tool de relação."""
-    tipo_alvo = _TIPO_IMOVEL_POR_INTENCAO.get(intencao)
-    if not features or not tipo_alvo:
+def _list_affected_properties(features: Optional[List[Dict[str, Any]]], intent: str, limit: int = 10) -> str:
+    target_type = _PROPERTY_TYPE_BY_INTENT.get(intent)
+    if not features or not target_type:
         return ""
-
-    imoveis = [
+    properties = [
         f.get("properties", {})
         for f in features
-        if f.get("properties", {}).get("tipo") == tipo_alvo
+        if f.get("properties", {}).get("tipo") == target_type
     ]
-    if not imoveis:
+    if not properties:
         return ""
-
-    titulo = (
-        f"**Imóveis afetados (top {min(len(imoveis), limite)} de {_fmt_num(len(imoveis))}):**"
-        if len(imoveis) > limite
-        else f"**Imóveis afetados ({_fmt_num(len(imoveis))}):**"
-    )
-    linhas = [titulo]
-    for prop in imoveis[:limite]:
-        codigo = prop.get("codigo_car") or "(sem CAR)"
-        partes = [f"`{codigo}`"]
-        nome = prop.get("nome_imovel")
-        if nome:
-            partes.append(str(nome))
-
-        if intencao == "buscar_imoveis_queimada":
-            n = prop.get("num_queimadas")
-            if n:
-                partes.append(f"{_fmt_num(n)} foco(s)")
-            risco = prop.get("nivel_risco_ambiental")
-            if risco:
-                partes.append(f"risco {risco}")
-        elif intencao == "buscar_imoveis_desmatamento":
-            n = prop.get("num_alertas_desmatamento")
-            if n:
-                partes.append(f"{_fmt_num(n)} alerta(s)")
-            area = prop.get("area_total_intersecao_ha")
+    title = f"**Imóveis afetados (top {min(len(properties), limit)} de {_format_number(len(properties))}):**" if len(properties) > limit else f"**Imóveis afetados ({_format_number(len(properties))}):**"
+    lines = [title]
+    for props in properties[:limit]:
+        car_code = props.get("codigo_car") or "(sem CAR)"
+        parts = [f"`{car_code}`"]
+        name = props.get("nome_imovel")
+        if name:
+            parts.append(str(name))
+        if intent == "buscar_imoveis_queimada":
+            count = props.get("num_queimadas")
+            if count:
+                parts.append(f"{_format_number(count)} foco(s)")
+            risk = props.get("nivel_risco_ambiental")
+            if risk:
+                parts.append(f"risco {risk}")
+        elif intent == "buscar_imoveis_desmatamento":
+            count = props.get("num_alertas_desmatamento")
+            if count:
+                parts.append(f"{_format_number(count)} alerta(s)")
+            area = props.get("area_total_intersecao_ha")
             if area:
-                partes.append(f"{area:.2f} ha intersectados".replace(".", ","))
-        elif intencao in ("buscar_imoveis_quilombo", "buscar_imoveis_ti"):
-            pct = prop.get("percentual_sobreposicao")
-            if pct:
-                partes.append(f"{pct:.1f}% sobreposto".replace(".", ","))
-
-        linhas.append("- " + " — ".join(partes))
-
-    if len(imoveis) > limite:
-        linhas.append(f"- … e mais {_fmt_num(len(imoveis) - limite)} imóvel(is) no mapa.")
-
-    return "\n".join(linhas)
+                parts.append(f"{area:.2f} ha intersectados".replace(".", ","))
+        elif intent in ("buscar_imoveis_quilombo", "buscar_imoveis_ti"):
+            percentage = props.get("percentual_sobreposicao")
+            if percentage:
+                parts.append(f"{percentage:.1f}% sobreposto".replace(".", ","))
+        lines.append("- " + " — ".join(parts))
+    if len(properties) > limit:
+        lines.append(f"- … e mais {_format_number(len(properties) - limit)} imóvel(is) no mapa.")
+    return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Função principal
-# ---------------------------------------------------------------------------
+def _handle_disabled_settlements(entities: Entidades, features: Optional[List[Dict[str, Any]]], total_features: int, sources: List[Dict[str, Any]], scope: str, document_context: str) -> str:
+    return "A consulta de assentamentos rurais está desativada no momento, pois a fonte não está disponível."
 
-def formatar_resposta(
-    intencao: str,
-    entidades: Entidades,
+
+def _handle_wildfire_focus_property(entities: Entidades, features: Optional[List[Dict[str, Any]]], total_features: int, sources: List[Dict[str, Any]], scope: str, document_context: str) -> str:
+    if total_features == 0:
+        return f"Não foram encontrados focos de queimada cadastrados para o imóvel rural **{entities.codigo_car or '(codigo nao informado)'}**{scope}."
+    period = ""
+    if entities.data_inicio and entities.data_fim:
+        period = f" no período entre {entities.data_inicio} e {entities.data_fim}"
+    elif entities.data_inicio:
+        period = f" a partir de {entities.data_inicio}"
+    car_code = entities.codigo_car or "(codigo nao informado)"
+    total_focus = sum(1 for f in (features or []) if f.get("properties", {}).get("tipo") == "queimada")
+    if not features:
+        total_focus = total_features
+    return f"Na propriedade rural **{car_code}**, foram identificados " f"**{_format_number(total_focus)} focos de queimada**{period}."
+
+
+def _handle_property_liabilities(entities: Entidades, features: Optional[List[Dict[str, Any]]], total_features: int, sources: List[Dict[str, Any]], scope: str, document_context: str) -> str:
+    if total_features == 0:
+        return f"Nenhum passivo ambiental ou sobreposição com áreas protegidas foi identificado para o imóvel **{entities.codigo_car or '(codigo nao informado)'}**."
+    text = f"Passivos ambientais encontrados para a propriedade rural **{entities.codigo_car or '(codigo nao informado)'}**."
+    details = _detail_property_liabilities(features)
+    if details:
+        text = f"{text}\n\n{details}"
+    return text
+
+
+def _handle_relational_properties(entities: Entidades, features: Optional[List[Dict[str, Any]]], total_features: int, sources: List[Dict[str, Any]], scope: str, document_context: str, intent: str = "") -> str:
+    if total_features == 0:
+        cleaned_intent = intent.replace("buscar_imoveis_", "")
+        return f"Nenhum imóvel rural cruzando com dados de {cleaned_intent} foi encontrado{scope}."
+    text = f"Foram encontrados imóveis afetados associados à consulta de {intent.replace('buscar_imoveis_', '')}{scope}."
+    properties_list = _list_affected_properties(features, intent)
+    if properties_list:
+        text = f"{text}\n\n{properties_list}"
+    return text
+
+
+_STRATEGY_MAP: Dict[str, Callable[[Entidades, Optional[List[Dict[str, Any]]], int, List[Dict[str, Any]], str, str], str]] = {
+    "buscar_assentamentos": _handle_disabled_settlements,
+    "buscar_focos_queimada_imovel": _handle_wildfire_focus_property,
+    "buscar_passivos_imovel": _handle_property_liabilities,
+    "buscar_imoveis_queimada": lambda e, f, t, s, sc, dc: _handle_relational_properties(e, f, t, s, sc, dc, "buscar_imoveis_queimada"),
+    "buscar_imoveis_desmatamento": lambda e, f, t, s, sc, dc: _handle_relational_properties(e, f, t, s, sc, dc, "buscar_imoveis_desmatamento"),
+    "buscar_imoveis_quilombo": lambda e, f, t, s, sc, dc: _handle_relational_properties(e, f, t, s, sc, dc, "buscar_imoveis_quilombo"),
+    "buscar_imoveis_ti": lambda e, f, t, s, sc, dc: _handle_relational_properties(e, f, t, s, sc, dc, "buscar_imoveis_ti"),
+}
+
+
+def format_pipeline_response(
+    intents: List[tuple[str, float]],
+    entities: Entidades,
     total_features: int,
-    fontes: list[dict],
-    contexto_documental: str,
-    confianca: float,
-    descricao_consulta: str | None = None,
-    feedback_contexto: dict[str, Any] | None = None,
-    features: list[dict] | None = None,
+    sources: List[Dict[str, Any]],
+    document_context: str,
+    query_description: Optional[str] = None,
+    feedback_context: Optional[Dict[str, Any]] = None,
+    features: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    """
-    Gera o texto de resposta formatado em Markdown.
-    """
-    fontes_str = _formatar_fontes(fontes)
-    escopo = _formatar_escopo(entidades)
+    if not intents:
+        return _apply_context_feedback(_TEMPLATES["fora_escopo"], feedback_context)
 
-    if intencao == "buscar_assentamentos":
-        return _aplicar_feedback_contexto(
-            "A consulta de assentamentos rurais está desativada no momento, pois a fonte não está disponível.",
-            feedback_contexto,
-        )
+    scope = _format_scope(entities)
+    response_segments: List[str] = []
 
-    if intencao == "buscar_focos_queimada_imovel":
-        periodo = ""
-        if entidades.data_inicio and entidades.data_fim:
-            periodo = f" no período entre {entidades.data_inicio} e {entidades.data_fim}"
-        elif entidades.data_inicio:
-            periodo = f" a partir de {entidades.data_inicio}"
+    for intent, confidence in intents:
+        if intent == "fora_escopo":
+            continue
 
-        codigo = entidades.codigo_car or "(codigo nao informado)"
-        total_focos = sum(
-            1
-            for feature in (features or [])
-            if feature.get("properties", {}).get("tipo") == "queimada"
-        )
-        if not features:
-            total_focos = total_features
-        texto = (
-            f"Na propriedade rural **{codigo}**, foram identificados "
-            f"**{_fmt_num(total_focos)} focos de queimada**{periodo}."
-        )
-        texto = _anexar_descricao(texto, descricao_consulta)
-        if fontes_str:
-            texto = f"{texto}\n\n{fontes_str}"
-        return _aplicar_feedback_contexto(texto, feedback_contexto)
+        if intent in _STRATEGY_MAP:
+            strategy_text = _STRATEGY_MAP[intent](entities, features, total_features, sources, scope, document_context)
+            if strategy_text:
+                response_segments.append(strategy_text)
+            continue
 
-    if intencao == "buscar_passivos_imovel":
-        # A tool já monta um cabeçalho com nome/CAR/município/área e a lista
-        # de passivos. Se faltar (caso de erro/imóvel não encontrado), cai num
-        # texto mínimo com o código.
-        if descricao_consulta:
-            texto = descricao_consulta
-        else:
-            codigo = entidades.codigo_car or "(codigo nao informado)"
-            texto = (
-                f"Passivos ambientais encontrados para a propriedade rural **{codigo}**."
+        if total_features == 0:
+            cleaned_intent = intent.replace("buscar_", "")
+            response_segments.append(f"Não foram mapeados dados de {cleaned_intent}{scope} para os filtros selecionados.")
+            continue
+
+        template = _TEMPLATES.get(intent)
+        if not template:
+            continue
+
+        try:
+            formatted_segment = template.format(
+                total=total_features,
+                total_formatted=_format_number(total_features),
+                scope=scope,
+                main_source=_get_main_source(sources),
+                document_context="",
+                period_detail=f"O período analisado vai de {entities.data_inicio} a {entities.data_fim}. " if entities.data_inicio and entities.data_fim else "",
+                category_detail=f"Filtro por categoria: **{entities.categoria_uc}**. " if entities.categoria_uc else "",
+                phase_detail=f"Fase de demarcação: **{entities.fase_ti}**. " if entities.fase_ti else "",
             )
-        detalhamento = _detalhar_passivos_imovel(features)
-        if detalhamento:
-            texto = f"{texto}\n\n{detalhamento}"
-        if fontes_str:
-            texto = f"{texto}\n\n{fontes_str}"
-        return _aplicar_feedback_contexto(texto, feedback_contexto)
+            response_segments.append(formatted_segment)
+        except KeyError:
+            response_segments.append(f"Consulta executada para a intenção: {intent}{scope}.")
 
-    # Intenções de relação (imóveis × queimada/desmatamento/quilombo/TI):
-    # a tool retorna uma descrição rica com contagens já formatadas.
-    if intencao in (
-        "buscar_imoveis_queimada",
-        "buscar_imoveis_desmatamento",
-        "buscar_imoveis_quilombo",
-        "buscar_imoveis_ti",
-    ) and total_features > 0:
-        texto = descricao_consulta or (
-            f"Foram encontrados {_fmt_num(total_features)} resultados{escopo}."
-        )
-        listagem_imoveis = _listar_imoveis_afetados(features, intencao)
-        if listagem_imoveis:
-            texto = f"{texto}\n\n{listagem_imoveis}"
-        if fontes_str:
-            texto = f"{texto}\n\n{fontes_str}"
-        return _aplicar_feedback_contexto(texto, feedback_contexto)
+    if not response_segments:
+        primary_intent = intents[0][0]
+        if primary_intent == "fora_escopo":
+            return _apply_context_feedback(_TEMPLATES["fora_escopo"], feedback_context)
+        if query_description:
+            return _apply_context_feedback(query_description, feedback_context)
+        
+        source_names = ", ".join(s["nome"] for s in sources) if sources else "fontes oficiais"
+        return _apply_context_feedback(f"Não foram localizados registros nas {source_names} para esta solicitação.", feedback_context)
 
-    # Sem dados
-    if intencao != "fora_escopo" and intencao != "buscar_documentos" and total_features == 0:
-        if descricao_consulta:
-            return _aplicar_feedback_contexto(descricao_consulta, feedback_contexto)
+    final_text = "\n\n".join(response_segments)
 
-        nomes = ", ".join(f["nome"] for f in fontes) if fontes else "fontes do sistema"
-        return _aplicar_feedback_contexto(
-            _TEMPLATES["sem_dados"].format(fontes_citadas=nomes or "fontes do sistema"),
-            feedback_contexto,
-        )
+    if document_context:
+        final_text += f"\n\n**Contexto documental:** {document_context[:500]}..."
 
-    if intencao == "fora_escopo":
-        return _aplicar_feedback_contexto(_TEMPLATES["fora_escopo"], feedback_contexto)
+    final_text = _append_query_description(final_text, query_description)
 
-    ctx_bloco = ""
-    if contexto_documental:
-        ctx_bloco = f"\n\n**Contexto documental:** {contexto_documental[:500]}..."
+    cited_sources_string = _format_sources(sources)
+    if cited_sources_string:
+        final_text += f"\n\n{cited_sources_string}"
 
-    template = _TEMPLATES.get(intencao, _TEMPLATES["sem_dados"])
-
-    try:
-        texto = template.format(
-            total=total_features,
-            total_fmt=_fmt_num(total_features),
-            escopo=escopo,
-            fonte_principal=_fonte_principal(fontes),
-            fontes_citadas=fontes_str,
-            contexto=ctx_bloco,
-            detalhe_periodo=(
-                f"O período analisado vai de {entidades.data_inicio} a {entidades.data_fim}. "
-                if entidades.data_inicio and entidades.data_fim
-                else ""
-            ),
-            detalhe_categoria=(
-                f"Filtro por categoria: **{entidades.categoria_uc}**. "
-                if entidades.categoria_uc
-                else ""
-            ),
-            detalhe_fase=(
-                f"Fase de demarcação: **{entidades.fase_ti}**. "
-                if entidades.fase_ti
-                else ""
-            ),
-        )
-        texto = _anexar_descricao(texto, descricao_consulta)
-        return _aplicar_feedback_contexto(texto, feedback_contexto)
-    except KeyError:
-        texto = f"Foram encontrados {_fmt_num(total_features)} resultado(s){escopo}.\n\n{fontes_str}"
-        texto = _anexar_descricao(texto, descricao_consulta)
-        return _aplicar_feedback_contexto(texto, feedback_contexto)
+    return _apply_context_feedback(final_text, feedback_context)

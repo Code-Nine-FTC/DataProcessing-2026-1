@@ -74,6 +74,7 @@ from models.db_model import (
     TerraIndigena,
     TerritorioQuilombola,
     UnidadeConservacao,
+
 )
 
 # ---------------------------------------------------------------------------
@@ -2363,7 +2364,99 @@ async def buscar_imoveis_com_camadas_estaduais(
         "sql_executado": sql_executado,
     }
 
+async def buscar_maiores_quantidades(
+    session: AsyncSession,
+    municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    features: list[dict[str, Any]] = []
+    fontes: dict[str, dict[str, Any]] = {}
+    sql_executado_partes: list[str] = []
+    temas_detectados: list[str] = []
 
+    pipeline_intents: list[tuple[str, float]] = kwargs.get("intents", [])
+    intent_names = [name for name, _ in pipeline_intents]
+    
+    limit_alvo = kwargs.get("limit_dinamico", 3)
+    is_ranking_request = kwargs.get("is_ranking", False)
+
+    import json
+    from sqlalchemy import func, select
+
+    MAPEAMENTO_TEMAS = {
+        "buscar_unidades_conservacao": (UnidadeConservacao, func.sum(func.ST_Area(func.ST_Intersection(Municipio.geom, UnidadeConservacao.geom))), "extensão de Unidades de Conservação", "ha protegidos", True, "CNUC", "MMA"),
+        "buscar_terras_indigenas": (TerraIndigena, func.sum(func.ST_Area(func.ST_Intersection(Municipio.geom, TerraIndigena.geom))), "extensão de Terras Indígenas", "ha protegidos", True, "Infraestrutura FUNAI", "FUNAI"),
+        "buscar_quilombolas": (TerritorioQuilombola, func.sum(func.ST_Area(func.ST_Intersection(Municipio.geom, TerritorioQuilombola.geom))), "extensão de Territórios Quilombolas", "ha declarados", True, "Territórios Quilombolas", "INCRA"),
+        "buscar_desmatamentos": (DesmatamentoAlerta, func.sum(DesmatamentoAlerta.area_ha), "alertas de desmatamento", "ha desmatados", False, "Alertas de Desmatamento", "MapBiomas / INPE"),
+        "buscar_queimadas": (QueimadaEvento, func.count(QueimadaEvento.id), "focos de queimada", "focos detectados", False, "BDQueimadas", "INPE")
+    }
+
+    try:
+        for target_intent, config in MAPEAMENTO_TEMAS.items():
+            if target_intent in intent_names or len(intent_names) <= 1:
+                model_table, agg_formula, label, unidade, precisa_intersecao, fonte_nome, fonte_orgao = config
+                
+                stmt = select(
+                    Municipio.id,
+                    Municipio.nome,
+                    agg_formula.label("valor_analitico"),
+                    func.ST_AsGeoJSON(Municipio.geom).label("geojson")
+                )
+
+                if precisa_intersecao:
+                    stmt = stmt.join(model_table, func.ST_Intersects(Municipio.geom, model_table.geom))
+                else:
+                    stmt = stmt.join(model_table, func.ST_Contains(Municipio.geom, model_table.geom))
+
+                stmt = stmt.group_by(Municipio.id, Municipio.nome)
+                
+                # AQUI ESTÁ O SEU LIMITE DINÂMICO (1, 2, 3, 5, etc.) vindo direto do usuário
+                stmt = stmt.order_by(agg_formula.desc()).limit(limit_alvo)
+
+                if municipio:
+                    stmt = stmt.where(func.lower(Municipio.nome) == normalizar(municipio))
+
+                sql_executado_partes.append(_stmt_sql(stmt))
+                result = await session.execute(stmt)
+                rows = result.all()
+
+                if rows:
+                    temas_detectados.append(label)
+                    fontes[target_intent] = {"nome": fonte_nome, "orgao": fonte_orgao, "url": ""}
+
+                for index, row in enumerate(rows, start=1):
+                    raw_val = row.valor_analitico or 0
+                    final_val = _round_float(raw_val / 10000, 2) if unidade in ("ha protegidos", "ha declarados") else raw_val
+                    
+                    # Máscara textual dinâmica para mudar o tom da resposta na mesma função
+                    if is_ranking_request:
+                        texto_analise = f"Posição #{index} no ranking de {label}: {final_val} {unidade}"
+                    elif limit_alvo == 1:
+                        texto_analise = f"Maior quantidade absoluta em {label}: {final_val} {unidade}"
+                    else:
+                        texto_analise = f"[{index}ª] Maior quantidade em {label}: {final_val} {unidade}"
+
+                    features.append({
+                        "type": "Feature",
+                        "geometry": json.loads(row.geojson) if row.geojson else None,
+                        "properties": {
+                            "tipo": "ranking_criticidade" if is_ranking_request else "densidade_volumetrica",
+                            "nome": row.nome,
+                            "analise": texto_analise
+                        }
+                    })
+
+    except Exception:
+        logger.exception("Erro ao executar buscar_maiores_quantidades unificado")
+
+    return {
+        "features": features,
+        "bbox": _build_bbox(features) if features else None,
+        "fontes": list(fontes.values()),
+        "descricao": f"Análise quantitativa executada para: {', '.join(temas_detectados)}.",
+        "sql_executado": "\n\n---\n\n".join(sql_executado_partes) if sql_executado_partes else None,
+    }
 # ---------------------------------------------------------------------------
 # Registro: nome da ferramenta → função Python
 # ---------------------------------------------------------------------------
@@ -2384,4 +2477,5 @@ TOOL_FUNCTIONS = {
     "buscar_imoveis_com_camadas_estaduais": buscar_imoveis_com_camadas_estaduais,
     "buscar_passivos_em_imovel": buscar_passivos_em_imovel,
     "buscar_focos_queimada_imovel": buscar_focos_queimada_imovel,
+    "buscar_maiores_quantidades": buscar_maiores_quantidades,
 }

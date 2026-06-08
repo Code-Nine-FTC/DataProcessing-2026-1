@@ -1,32 +1,15 @@
-# -*- coding: utf-8 -*-
-"""
-Script de treinamento do classificador de intenções.
-
-Execução:
-    python -m nlp_processor.training.train
-
-O script:
-  1. Carrega os exemplos de nlp_processor/training/train_data.py
-  2. Aplica normalização de texto
-  3. Vetoriza com TF-IDF (n-gramas 1-2)
-  4. Treina Logistic Regression com validação cruzada
-  5. Salva os artefatos em nlp_processor/models/
-"""
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import joblib
-import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.pipeline import FeatureUnion, Pipeline
 
-from nlp_processor.pipeline.preprocessor import normalizar
 from nlp_processor.training.train_data import TRAIN_DATA
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -36,71 +19,96 @@ MODELS_DIR = Path(__file__).parent.parent / "models"
 VECTORIZER_PATH = MODELS_DIR / "vectorizer.joblib"
 CLASSIFIER_PATH = MODELS_DIR / "intent_classifier.joblib"
 
+MIN_F1_THRESHOLD = 0.70
+CV_SPLITS = 5
 
-def _preparar_dados() -> tuple[list[str], list[str]]:
-    textos = [normalizar(t) for t, _ in TRAIN_DATA]
-    rotulos = [r for _, r in TRAIN_DATA]
-    return textos, rotulos
+_preprocessor = None
 
 
-def treinar() -> None:
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+def _get_preprocessor():
+    global _preprocessor
+    if _preprocessor is None:
+        from nlp_processor.pipeline.preprocessor import AdvancedGeoASGPreprocessor
+        _preprocessor = AdvancedGeoASGPreprocessor()
+    return _preprocessor
 
-    textos, rotulos = _preparar_dados()
 
-    logger.info("Total de exemplos: %d", len(textos))
-    logger.info("Intenções detectadas: %s", sorted(set(rotulos)))
+def _preprocess(text: str) -> str:
+    return _get_preprocessor().process(text)["text_for_entities_and_rag"]
 
-    # Pipeline: TF-IDF por palavra + TF-IDF por trigrama de caractere (melhor generalização)
-    # + LogReg com regularização mais forte (C baixo) para evitar overfitting
-    word_vec = TfidfVectorizer(
+
+def _load_training_data() -> tuple[list[str], list[str]]:
+    texts = [_preprocess(text) for text, _ in TRAIN_DATA]
+    labels = [label for _, label in TRAIN_DATA]
+    return texts, labels
+
+
+def _build_feature_extractor() -> FeatureUnion:
+    word_vectorizer = TfidfVectorizer(
         ngram_range=(1, 2),
         analyzer="word",
         min_df=1,
         sublinear_tf=True,
         strip_accents="unicode",
     )
-    char_vec = TfidfVectorizer(
+    char_vectorizer = TfidfVectorizer(
         ngram_range=(3, 4),
         analyzer="char_wb",
         min_df=2,
         sublinear_tf=True,
         strip_accents="unicode",
     )
-    features = FeatureUnion([("word", word_vec), ("char", char_vec)])
-    classifier = LogisticRegression(
+    return FeatureUnion([("word", word_vectorizer), ("char", char_vectorizer)])
+
+
+def _build_classifier() -> LogisticRegression:
+    return LogisticRegression(
         max_iter=1000,
-        C=0.5,          # regularização mais forte — reduz overfitting
+        C=0.5,
         class_weight="balanced",
         solver="lbfgs",
     )
 
-    # Validação cruzada (5-fold estratificado)
-    pipeline = Pipeline([("features", features), ("clf", classifier)])
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    scores = cross_val_score(pipeline, textos, rotulos, cv=cv, scoring="f1_macro")
-    logger.info("F1-macro (CV 5-fold): %.3f ± %.3f", scores.mean(), scores.std())
 
-    if scores.mean() < 0.70:
+def _evaluate(pipeline: Pipeline, texts: list[str], labels: list[str]) -> float:
+    cv = StratifiedKFold(n_splits=CV_SPLITS, shuffle=True, random_state=42)
+    scores = cross_val_score(pipeline, texts, labels, cv=cv, scoring="f1_macro")
+    logger.info("F1-macro (CV %d-fold): %.3f ± %.3f", CV_SPLITS, scores.mean(), scores.std())
+
+    if scores.mean() < MIN_F1_THRESHOLD:
         logger.warning(
-            "F1-macro abaixo de 0.70 (%.3f). "
-            "Adicione mais exemplos de treinamento em train_data.py.",
+            "F1-macro abaixo de %.2f (%.3f). Adicione mais exemplos em train_data.py.",
+            MIN_F1_THRESHOLD,
             scores.mean(),
         )
 
-    # Treino final no corpus completo
-    X = features.fit_transform(textos)
-    classifier.fit(X, rotulos)
+    return scores.mean()
 
-    # Relatório final (treino — serve para detectar classes problemáticas)
-    preds = classifier.predict(X)
-    logger.info("\n%s", classification_report(rotulos, preds, target_names=sorted(set(rotulos))))
 
-    # Salva pipeline completo (features + classifier) em dois artefatos
-    # para manter compatibilidade com IntentClassifier.predict()
+def _fit_and_save(features: FeatureUnion, classifier: LogisticRegression, texts: list[str], labels: list[str]) -> None:
+    X = features.fit_transform(texts)
+    classifier.fit(X, labels)
+
+    predictions = classifier.predict(X)
+    logger.info("\n%s", classification_report(labels, predictions, target_names=sorted(set(labels))))
+
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(features, VECTORIZER_PATH)
     joblib.dump(classifier, CLASSIFIER_PATH)
     logger.info("Artefatos salvos em: %s", MODELS_DIR)
+
+
+def treinar() -> None:
+    texts, labels = _load_training_data()
+
+    logger.info("Total de exemplos: %d", len(texts))
+    logger.info("Intenções detectadas: %s", sorted(set(labels)))
+
+    features = _build_feature_extractor()
+    classifier = _build_classifier()
+
+    _evaluate(Pipeline([("features", features), ("clf", classifier)]), texts, labels)
+    _fit_and_save(features, classifier, texts, labels)
 
 
 if __name__ == "__main__":
