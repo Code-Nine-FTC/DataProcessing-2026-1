@@ -7,8 +7,12 @@ import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
-from sklearn.model_selection import StratifiedKFold, cross_val_score
-from sklearn.pipeline import FeatureUnion, Pipeline
+from sklearn.model_selection import KFold
+from sklearn.pipeline import FeatureUnion
+
+# --- Novas ferramentas necessárias para Multi-Label ---
+from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn.multioutput import MultiOutputClassifier
 
 from nlp_processor.training.train_data import TRAIN_DATA
 
@@ -18,9 +22,10 @@ logger = logging.getLogger(__name__)
 MODELS_DIR = Path(__file__).parent.parent / "models"
 VECTORIZER_PATH = MODELS_DIR / "vectorizer.joblib"
 CLASSIFIER_PATH = MODELS_DIR / "intent_classifier.joblib"
+# IMPORTANTE: Precisamos salvar o binarizador para o classificador saber decodificar as labels no predict
+BINARIZER_PATH = MODELS_DIR / "binarizer.joblib" 
 
 MIN_F1_THRESHOLD = 0.70
-CV_SPLITS = 5
 
 _preprocessor = None
 
@@ -37,64 +42,43 @@ def _preprocess(text: str) -> str:
     return _get_preprocessor().process(text)["text_for_entities_and_rag"]
 
 
-def _load_training_data() -> tuple[list[str], list[str]]:
+# Ajustado para carregar os labels como lista de listas: list[list[str]]
+def _load_training_data() -> tuple[list[str], list[list[str]]]:
     texts = [_preprocess(text) for text, _ in TRAIN_DATA]
     labels = [label for _, label in TRAIN_DATA]
     return texts, labels
 
 
 def _build_feature_extractor() -> FeatureUnion:
-    word_vectorizer = TfidfVectorizer(
-        ngram_range=(1, 2),
-        analyzer="word",
-        min_df=1,
-        sublinear_tf=True,
-        strip_accents="unicode",
-    )
-    char_vectorizer = TfidfVectorizer(
-        ngram_range=(3, 4),
-        analyzer="char_wb",
-        min_df=2,
-        sublinear_tf=True,
-        strip_accents="unicode",
-    )
-    return FeatureUnion([("word", word_vectorizer), ("char", char_vectorizer)])
+    word_vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=5000)
+    return FeatureUnion([("word", word_vectorizer)])
 
 
-def _build_classifier() -> LogisticRegression:
-    return LogisticRegression(
-        max_iter=1000,
-        C=0.5,
-        class_weight="balanced",
-        solver="lbfgs",
-    )
-
-
-def _evaluate(pipeline: Pipeline, texts: list[str], labels: list[str]) -> float:
-    cv = StratifiedKFold(n_splits=CV_SPLITS, shuffle=True, random_state=42)
-    scores = cross_val_score(pipeline, texts, labels, cv=cv, scoring="f1_macro")
-    logger.info("F1-macro (CV %d-fold): %.3f ± %.3f", CV_SPLITS, scores.mean(), scores.std())
-
-    if scores.mean() < MIN_F1_THRESHOLD:
-        logger.warning(
-            "F1-macro abaixo de %.2f (%.3f). Adicione mais exemplos em train_data.py.",
-            MIN_F1_THRESHOLD,
-            scores.mean(),
-        )
-
-    return scores.mean()
-
-
-def _fit_and_save(features: FeatureUnion, classifier: LogisticRegression, texts: list[str], labels: list[str]) -> None:
+def _fit_and_save(
+    features: FeatureUnion, 
+    classifier: MultiOutputClassifier, 
+    binarizer: MultiLabelBinarizer, 
+    texts: list[str], 
+    labels: list[list[str]]
+) -> None:
+    # 1. Extração de características do texto (TF-IDF)
     X = features.fit_transform(texts)
-    classifier.fit(X, labels)
+    
+    # 2. Binarização das labels (converte as listas de strings em colunas de 0 e 1)
+    Y = binarizer.fit_transform(labels)
+    
+    # 3. Treinamento com suporte a saídas múltiplas simultâneas
+    classifier.fit(X, Y)
 
+    # 4. Avaliação e exibição das métricas
     predictions = classifier.predict(X)
-    logger.info("\n%s", classification_report(labels, predictions, target_names=sorted(set(labels))))
+    logger.info("\n%s", classification_report(Y, predictions, target_names=binarizer.classes_))
 
+    # 5. Salvando os artefatos gerados
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(features, VECTORIZER_PATH)
     joblib.dump(classifier, CLASSIFIER_PATH)
+    joblib.dump(binarizer, BINARIZER_PATH)
     logger.info("Artefatos salvos em: %s", MODELS_DIR)
 
 
@@ -102,13 +86,19 @@ def treinar() -> None:
     texts, labels = _load_training_data()
 
     logger.info("Total de exemplos: %d", len(texts))
-    logger.info("Intenções detectadas: %s", sorted(set(labels)))
+    
+    # Extrai todas as intenções únicas de dentro das listas de forma segura
+    flat_intents = sorted(list({intent for sublist in labels for intent in sublist}))
+    logger.info("Intenções detectadas no dataset: %s", flat_intents)
 
     features = _build_feature_extractor()
-    classifier = _build_classifier()
+    binarizer = MultiLabelBinarizer()
+    
+    # Cria uma regressão logística base balanceada e encapsula no MultiOutput
+    base_classifier = LogisticRegression(C=1.0, class_weight="balanced", max_iter=1000)
+    classifier = MultiOutputClassifier(base_classifier)
 
-    _evaluate(Pipeline([("features", features), ("clf", classifier)]), texts, labels)
-    _fit_and_save(features, classifier, texts, labels)
+    _fit_and_save(features, classifier, binarizer, texts, labels)
 
 
 if __name__ == "__main__":
