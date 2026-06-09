@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -25,6 +25,10 @@ FEEDBACK_VALIDADE_MINUTOS = 30
 
 _preprocessor = AdvancedGeoASGPreprocessor()
 _MUNICIPIOS_NORMALIZADOS_CACHE: Optional[list[str]] = None
+
+# ---------------------------------------------------------------------------
+# Vocabulários de detecção
+# ---------------------------------------------------------------------------
 
 _ESCOPO_AMBIENTAL_TOKENS = frozenset({
     "ambiental", "ambientais", "meio ambiente",
@@ -60,30 +64,6 @@ _TOKENS_ESCOPO_MUNICIPAL = frozenset({
     "municipio", "municipios", "cidade", "cidades",
 })
 
-_INTENTS_PROMOVEM_RANKING = frozenset({
-    "buscar_queimadas", "buscar_desmatamentos", "buscar_terras_indigenas",
-    "buscar_unidades_conservacao", "buscar_quilombolas", "buscar_assentamentos",
-    "buscar_queimadas_em_quilombolas",
-})
-
-_TOKENS_CAMADA_ESTADUAL_EXPLICITA = frozenset({
-    "camada estadual", "camadas estaduais", "datageo", "camada ambiental estadual",
-    "camadas ambientais estaduais", "camada de vegetacao", "vegetacao nativa",
-})
-
-_INTENTS_SUPRIMIR_CAMADAS_ESTADUAIS = frozenset({
-    "buscar_queimadas", "buscar_desmatamentos", "buscar_terras_indigenas",
-    "buscar_unidades_conservacao", "buscar_quilombolas", "buscar_assentamentos",
-    "buscar_queimadas_em_quilombolas", "buscar_maiores_quantidades",
-    "buscar_imoveis_queimada", "buscar_imoveis_desmatamento",
-    "buscar_imoveis_quilombo", "buscar_imoveis_ti",
-})
-
-_TOKENS_QUILOMBOLA_FOCO = frozenset({
-    "quilombola", "quilombolas", "territorio quilombola", "territorios quilombolas",
-    "area quilombola", "areas quilombolas",
-})
-
 _TOKENS_IMOVEL = frozenset({
     "imovel", "imoveis", "fazenda", "fazendas",
     "propriedade", "propriedades", "sitio", "sitios",
@@ -101,25 +81,35 @@ _TOKENS_QUEIMADA_IMOVEL = frozenset({
     "foco", "focos", "queimada", "incendio", "incendios",
 })
 
+_TOKENS_SOBREPOSICAO = frozenset({
+    "sobreposicao", "sobrepoe", "sobrepoem", "sobreposto", "sobrepostos",
+    "sobreposta", "sobrepostas", "sobrepor",
+    "intersecao", "interseccao", "intersecoes", "interseccoes",
+    "intersecta", "intersectam", "cruzamento", "cruzam",
+})
+
 _TOKENS_LOCALIZACAO = frozenset({
     "imovel", "imoveis", "fazenda", "fazendas", "propriedade", "propriedades",
     "sitio", "sitios", "sicar", "mapa", "geografia", "geometria",
     "localize", "localizar", "mostre", "mostrar", "exibir", "exiba",
 })
 
+# Mapeamento intent rankeável → tema para buscar_maiores_quantidades
+_TEMA_POR_INTENT: dict[str, str] = {
+    "buscar_queimadas":           "queimadas",
+    "buscar_desmatamentos":       "desmatamentos",
+    "buscar_terras_indigenas":    "terras_indigenas",
+    "buscar_unidades_conservacao": "unidades_conservacao",
+    "buscar_quilombolas":         "quilombolas",
+}
+
+# Promoções para sub-intents de imóvel quando código CAR está ausente mas texto menciona imóvel
 _PROMOCOES_IMOVEL: list[tuple[frozenset[str], str]] = [
     (frozenset({"queimada", "queimadas", "incendio", "incendios", "foco", "focos"}), "buscar_imoveis_queimada"),
     (frozenset({"desmatamento", "desmatamentos", "desmatado", "desmatada", "supressao", "deter", "prodes"}), "buscar_imoveis_desmatamento"),
     (frozenset({"quilombo", "quilombos", "quilombola", "quilombolas"}), "buscar_imoveis_quilombo"),
     (frozenset({"terra indigena", "terras indigenas", "indigena", "indigenas"}), "buscar_imoveis_ti"),
 ]
-
-_REBAIXAMENTOS: dict[str, str] = {
-    "buscar_imoveis_queimada": "buscar_queimadas",
-    "buscar_imoveis_desmatamento": "buscar_desmatamentos",
-    "buscar_imoveis_quilombo": "buscar_quilombolas",
-    "buscar_imoveis_ti": "buscar_terras_indigenas",
-}
 
 _FALLBACKS_POR_TOKEN: list[tuple[frozenset[str], str]] = [
     (_TOKENS_IMOVEL, "buscar_imoveis_rurais"),
@@ -131,8 +121,34 @@ _FALLBACKS_POR_TOKEN: list[tuple[frozenset[str], str]] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _texto_contem(texto: str, tokens: frozenset[str]) -> bool:
     return any(t in texto for t in tokens)
+
+
+def _fora_escopo(texto_norm: str, entidades: Entidades) -> bool:
+    if entidades.codigo_car or entidades.municipio or entidades.regiao_administrativa:
+        return False
+    return not _texto_contem(texto_norm, _ESCOPO_AMBIENTAL_TOKENS)
+
+
+def _inferir_intencao_por_vocabulario(texto_norm: str, entidades: Entidades) -> str:
+    for tokens, alvo in _FALLBACKS_POR_TOKEN:
+        if _texto_contem(texto_norm, tokens):
+            return alvo
+    if entidades.municipio:
+        return "buscar_queimadas"
+    return "buscar_documentos"
+
+
+def _deve_promover_ranking(texto_norm: str) -> bool:
+    return (
+        _texto_contem(texto_norm, _TOKENS_SUPERLATIVO_RANKING)
+        and _texto_contem(texto_norm, _TOKENS_ESCOPO_MUNICIPAL)
+    )
 
 
 def _extrair_feedback_contexto(
@@ -143,7 +159,6 @@ def _extrair_feedback_contexto(
     if not historico or not isinstance(historico, list):
         return {}
 
-    # Varredura reversa segura por índice para evitar travamentos de iteração externa
     ultima_assistente = None
     for i in range(len(historico) - 1, -1, -1):
         msg = historico[i]
@@ -157,7 +172,7 @@ def _extrair_feedback_contexto(
     feedback = ultima_assistente.get("feedback")
     if isinstance(feedback, dict):
         feedback = feedback.get("avaliacao")
-        
+
     try:
         feedback_int = int(feedback) if feedback is not None else 0
     except (ValueError, TypeError):
@@ -193,7 +208,7 @@ async def _carregar_municipios_normalizados(session: AsyncSession) -> list[str]:
     for (nome,) in result.all():
         nomes.add(normalizar(nome))
     _MUNICIPIOS_NORMALIZADOS_CACHE = sorted(nomes)
-    logger.info("Carregados %d municípios normalizados do banco e salvos no cache.", len(_MUNICIPIOS_NORMALIZADOS_CACHE))
+    logger.info("Carregados %d municípios normalizados do banco.", len(_MUNICIPIOS_NORMALIZADOS_CACHE))
     return _MUNICIPIOS_NORMALIZADOS_CACHE
 
 
@@ -205,106 +220,83 @@ def _serializar_filtros(entidades_json: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in entidades_json.items() if k != "palavras_chave" and v is not None}
 
 
-def _fora_escopo(texto_norm: str, entidades: Entidades) -> bool:
-    if entidades.codigo_car or entidades.municipio or entidades.regiao_administrativa:
-        return False
-    return not _texto_contem(texto_norm, _ESCOPO_AMBIENTAL_TOKENS)
-
-
-def _resolver_intencao_por_car(texto_norm: str, entidades: Entidades, intencao_principal: str) -> Optional[str]:
-    if not entidades.codigo_car:
-        return None
-    if _texto_contem(texto_norm, _TOKENS_PASSIVO):
-        return "buscar_passivos_imovel"
-    if _texto_contem(texto_norm, _TOKENS_QUEIMADA_IMOVEL):
-        return "buscar_focos_queimada_imovel"
-    if _texto_contem(texto_norm, _TOKENS_LOCALIZACAO):
-        return "buscar_imoveis_rurais"
-    return "buscar_imoveis_rurais"
-
-
-def _aplicar_promocao_imovel(texto_norm: str, intencao: str) -> Optional[str]:
-    if not _texto_contem(texto_norm, _TOKENS_IMOVEL):
-        return None
-    for tokens, alvo in _PROMOCOES_IMOVEL:
-        if intencao != alvo and _texto_contem(texto_norm, tokens):
-            return alvo
-    return None
-
-
-def _aplicar_rebaixamento(texto_norm: str, intencao: str) -> Optional[str]:
-    if intencao in _REBAIXAMENTOS and not _texto_contem(texto_norm, _TOKENS_IMOVEL):
-        return _REBAIXAMENTOS[intencao]
-    return None
-
-
-def _inferir_intencao_por_vocabulario(texto_norm: str, entidades: Entidades) -> str:
-    for tokens, alvo in _FALLBACKS_POR_TOKEN:
-        if _texto_contem(texto_norm, tokens):
-            return alvo
-    if entidades.municipio:
-        return "buscar_queimadas"
-    return "buscar_documentos"
-
+# ---------------------------------------------------------------------------
+# Resolução de intenção — lógica de negócio única e limpa
+# ---------------------------------------------------------------------------
 
 def _resolver_intencao_final(
     texto_norm: str,
     entidades: Entidades,
-    intencoes_classificadas: list[tuple[str, float]],
-) -> list[tuple[str, float]]:
-    intencao_principal, confianca = intencoes_classificadas[0]
+    intent_classificado: str,
+    confianca: float,
+) -> tuple[str, float]:
+    """Retorna a intenção final (string única) e sua confiança.
+
+    Ordem de prioridade:
+    1. Fora de escopo
+    2. Override por código CAR
+    3. Sobreposição entre duas camadas territoriais
+    4. Promoção para ranking municipal (independente da confiança)
+    5. Baixa confiança → fallback por vocabulário
+    6. Promoção de imóvel (sem CAR mas texto menciona imóvel)
+    7. Intent classificado (aceito sem alteração)
+    """
 
     if _fora_escopo(texto_norm, entidades):
         logger.info("Pergunta marcada como fora_escopo.")
-        return [("fora_escopo", 1.0)]
+        return "fora_escopo", 1.0
 
-    override_car = _resolver_intencao_por_car(texto_norm, entidades, intencao_principal)
-    if override_car:
-        logger.info("Intent override por CAR (%s): %s.", entidades.codigo_car, override_car)
-        return [(override_car, confianca)]
-
-    intents_classificados = {i for i, _ in intencoes_classificadas}
-
-    promocao = _aplicar_promocao_imovel(texto_norm, intencao_principal)
-    # Só promove se o alvo ainda não está na lista classificada — evita colapsar multi-intents
-    if promocao and promocao not in intents_classificados:
-        logger.info("Promoção de intent: %s -> %s.", intencao_principal, promocao)
-        return [(promocao, confianca)]
-
-    rebaixamento = _aplicar_rebaixamento(texto_norm, intencao_principal)
-    if rebaixamento:
-        logger.info("Rebaixamento de intent: %s -> %s.", intencao_principal, rebaixamento)
-        return [(rebaixamento, confianca)]
-
-    if intencao_principal == "buscar_queimadas" and _texto_contem(texto_norm, _TOKENS_QUILOMBOLA_FOCO):
-        logger.info("Promoção por contexto quilombola: buscar_queimadas -> buscar_queimadas_em_quilombolas.")
-        return [("buscar_queimadas_em_quilombolas", confianca)]
+    if entidades.codigo_car:
+        if _texto_contem(texto_norm, _TOKENS_PASSIVO):
+            override = "buscar_passivos_imovel"
+        elif _texto_contem(texto_norm, _TOKENS_QUEIMADA_IMOVEL):
+            override = "buscar_focos_queimada_imovel"
+        else:
+            override = "buscar_imoveis_rurais"
+        logger.info("Override por CAR (%s): %s.", entidades.codigo_car, override)
+        return override, confianca
 
     if (
-        intencao_principal in _INTENTS_SUPRIMIR_CAMADAS_ESTADUAIS
-        and not _texto_contem(texto_norm, _TOKENS_CAMADA_ESTADUAL_EXPLICITA)
+        entidades.tema_sobreposicao_a
+        and entidades.tema_sobreposicao_b
+        and _texto_contem(texto_norm, _TOKENS_SOBREPOSICAO)
     ):
-        intencoes_classificadas = [
-            (i, c) for i, c in intencoes_classificadas if i != "buscar_camadas_estaduais"
-        ]
-        if intencoes_classificadas:
-            intencao_principal = intencoes_classificadas[0][0]
+        logger.info(
+            "Sobreposição de áreas: %s x %s.",
+            entidades.tema_sobreposicao_a,
+            entidades.tema_sobreposicao_b,
+        )
+        return "buscar_sobreposicao_areas", confianca
+
+    if _deve_promover_ranking(texto_norm):
+        if entidades.tema_ranking is None:
+            entidades.tema_ranking = _TEMA_POR_INTENT.get(intent_classificado)
+        entidades.is_ranking = True
+        logger.info("Promoção para buscar_maiores_quantidades (tema=%s).", entidades.tema_ranking)
+        return "buscar_maiores_quantidades", confianca
 
     if confianca < CONFIDENCE_THRESHOLD:
         inferida = _inferir_intencao_por_vocabulario(texto_norm, entidades)
-        logger.info("Confiança baixa (%.2f) — inferindo intent: %s.", confianca, inferida)
-        intencao_principal = inferida
-        intencoes_classificadas = [(inferida, confianca)]
+        logger.info("Confiança baixa (%.2f) — intent inferido por vocabulário: %s.", confianca, inferida)
+        return inferida, confianca
 
-    if (
-        intencao_principal in _INTENTS_PROMOVEM_RANKING
-        and _texto_contem(texto_norm, _TOKENS_SUPERLATIVO_RANKING)
-        and _texto_contem(texto_norm, _TOKENS_ESCOPO_MUNICIPAL)
-    ):
-        logger.info("Promoção para buscar_maiores_quantidades por vocabulário de ranking municipal.")
-        return [("buscar_maiores_quantidades", confianca), (intencao_principal, confianca)]
+    if _texto_contem(texto_norm, _TOKENS_IMOVEL):
+        for tokens, alvo in _PROMOCOES_IMOVEL:
+            if _texto_contem(texto_norm, tokens) and intent_classificado != alvo:
+                logger.info("Promoção de intent por contexto de imóvel: %s -> %s.", intent_classificado, alvo)
+                return alvo, confianca
 
-    return intencoes_classificadas
+    return intent_classificado, confianca
+
+
+def _determinar_status(intent: str, features: list, contexto_documental: str) -> str:
+    if intent == "fora_escopo":
+        return "fora_escopo"
+    if intent == "buscar_documentos" and contexto_documental:
+        return "sucesso"
+    if not features:
+        return "sem_resultado"
+    return "sucesso"
 
 
 def _build_resultado_erro(
@@ -331,16 +323,9 @@ def _build_resultado_erro(
     }
 
 
-def _determinar_status(intencoes: list[tuple[str, float]], features: list, contexto_documental: str) -> str:
-    intencao_principal = intencoes[0][0] if intencoes else "fora_escopo"
-    if intencao_principal == "fora_escopo":
-        return "fora_escopo"
-    if intencao_principal != "buscar_documentos" and not features:
-        return "sem_resultado"
-    if not features and not contexto_documental:
-        return "sem_resultado"
-    return "sucesso"
-
+# ---------------------------------------------------------------------------
+# Ponto de entrada principal
+# ---------------------------------------------------------------------------
 
 async def run_agent(
     session: AsyncSession,
@@ -363,8 +348,8 @@ async def run_agent(
     preprocessed = _preprocessor.process(pergunta)
     texto_norm = preprocessed["text_for_entities_and_rag"].lower()
 
-    intencoes_classificadas = classifier.predict_multiple(preprocessed)
-    logger.info("Intenções detectadas: %s", intencoes_classificadas)
+    intent_bruto, confianca_bruta = classifier.predict(preprocessed)
+    logger.info("Intent classificado: %s (confiança: %.2f)", intent_bruto, confianca_bruta)
 
     municipios_extras: list[str] = []
     try:
@@ -381,8 +366,8 @@ async def run_agent(
     entidades_json = _serializar_entidades(entidades)
     filtros_json = _serializar_filtros(entidades_json)
 
-    intencoes_resolvidas = _resolver_intencao_final(texto_norm, entidades, intencoes_classificadas)
-    intencao_principal, confianca_principal = intencoes_resolvidas[0]
+    intent_final, confianca_final = _resolver_intencao_final(texto_norm, entidades, intent_bruto, confianca_bruta)
+    logger.info("Intent final: %s | contexto_espacial: %s", intent_final, entidades.contexto_espacial)
 
     query_embedding: list[float] = []
     try:
@@ -390,12 +375,11 @@ async def run_agent(
     except Exception:
         logger.warning("Não foi possível gerar embedding — RAG desativado.")
 
-    # Log de diagnóstico para identificar gargalo de consulta lenta SQL/Geométrica
-    logger.info("Executando consulta assíncrona no banco de dados para a intent: %s...", intencao_principal)
+    logger.info("Executando consulta para intent=%s contexto=%s ...", intent_final, entidades.contexto_espacial)
     try:
         resultado = await executar_consulta(
             session=session,
-            intents=intencoes_resolvidas,
+            intent=intent_final,
             entities=entidades,
             query_embedding=query_embedding,
         )
@@ -406,8 +390,8 @@ async def run_agent(
             inicio=inicio,
             texto="Ocorreu um erro ao consultar os dados. Tente novamente.",
             mensagem="Erro ao executar consulta no banco.",
-            intencao=intencao_principal,
-            confianca=confianca_principal,
+            intencao=intent_final,
+            confianca=confianca_final,
             entidades_json=entidades_json,
             filtros_json=filtros_json,
         )
@@ -415,12 +399,13 @@ async def run_agent(
     features = resultado["features"]
     fontes = resultado["fontes"]
     contexto_documental = resultado["contexto_documental"]
-    status = _determinar_status(intencoes_resolvidas, features, contexto_documental)
+    effective_tool = resultado.get("effective_tool", intent_final)
+    status = _determinar_status(intent_final, features, contexto_documental)
 
-    feedback_contexto = _extrair_feedback_contexto(historico, intencao_atual=intencao_principal)
+    feedback_contexto = _extrair_feedback_contexto(historico, intencao_atual=intent_final)
 
     texto = format_pipeline_response(
-        intents=intencoes_resolvidas,
+        effective_tool=effective_tool,
         entities=entidades,
         total_features=len(features),
         sources=fontes,
@@ -428,7 +413,6 @@ async def run_agent(
         query_description=resultado.get("descricao"),
         feedback_context=feedback_contexto or None,
         features=features,
-        per_intent=resultado.get("per_intent"),
     )
 
     return {
@@ -437,8 +421,8 @@ async def run_agent(
         "bbox": resultado.get("bbox"),
         "fontes": fontes,
         "status": status,
-        "intencao": intencao_principal,
-        "intencao_score": confianca_principal,
+        "intencao": intent_final,
+        "intencao_score": confianca_final,
         "entidades_detectadas_json": entidades_json,
         "filtros_detectados_json": filtros_json,
         "sql_executado": resultado.get("sql_executado"),

@@ -2594,106 +2594,664 @@ async def _buscar_municipios_ti_uc(
     }
 
 
+async def buscar_queimadas_em_unidades_conservacao(
+    session: AsyncSession,
+    municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    bioma: Optional[str] = None,
+    categoria: Optional[str] = None,
+    esfera: Optional[str] = None,
+    limite: int = 500,
+) -> dict:
+    """Busca focos de queimada que intersectam unidades de conservação em SP."""
+    sql_partes: list[str] = []
+    stmt = (
+        select(
+            QueimadaEvento.id,
+            QueimadaEvento.data_ocorrencia,
+            QueimadaEvento.fonte_sensor,
+            QueimadaEvento.intensidade,
+            QueimadaEvento.bioma,
+            QueimadaEvento.risco_fogo,
+            UnidadeConservacao.id.label("uc_id"),
+            UnidadeConservacao.nome.label("uc_nome"),
+            UnidadeConservacao.categoria.label("uc_categoria"),
+            Municipio.nome.label("municipio_nome"),
+            _geom_as_geojson(QueimadaEvento.geom).label("geom_json"),
+            FonteDado.nome.label("fonte_nome"),
+            FonteDado.orgao_responsavel,
+            FonteDado.url_origem,
+        )
+        .join(UnidadeConservacao, func.ST_Intersects(QueimadaEvento.geom, UnidadeConservacao.geom))
+        .join(Municipio, QueimadaEvento.municipio_id == Municipio.id, isouter=True)
+        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
+        .join(Dataset, QueimadaEvento.dataset_id == Dataset.id, isouter=True)
+        .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
+        .where(Estado.sigla == "SP")
+    )
+
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 focos em UCs em {municipio}.",
+                    "sql_executado": municipio_sql}
+        stmt = stmt.where(Municipio.id == municipio_id)
+        sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 focos em UCs na {regiao_administrativa}.",
+                    "sql_executado": ra_sql}
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
+
+    if bioma:
+        stmt = stmt.where(func.lower(QueimadaEvento.bioma).contains(_normalizar_parametro(bioma)))
+    if data_inicio:
+        stmt = stmt.where(QueimadaEvento.data_ocorrencia >= datetime.fromisoformat(data_inicio))
+    if data_fim:
+        stmt = stmt.where(QueimadaEvento.data_ocorrencia <= datetime.fromisoformat(data_fim))
+    if categoria:
+        stmt = stmt.where(func.lower(UnidadeConservacao.categoria).contains(categoria.lower()))
+    if esfera:
+        stmt = stmt.where(func.lower(UnidadeConservacao.esfera) == esfera.lower())
+
+    stmt = stmt.order_by(QueimadaEvento.data_ocorrencia.desc()).limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
+    rows = (await session.execute(stmt)).all()
+
+    features: list[dict] = []
+    fontes: dict[str, dict] = {}
+    ucs_vistas: set = set()
+
+    for row in rows:
+        if not row.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geom_json),
+            "properties": {
+                "tipo": "queimada_em_uc",
+                "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
+                "fonte_sensor": row.fonte_sensor,
+                "intensidade": _round_float(row.intensidade, 2),
+                "bioma": row.bioma,
+                "risco_fogo": _round_float(row.risco_fogo, 2),
+                "unidade_conservacao": row.uc_nome,
+                "categoria_uc": row.uc_categoria,
+                "municipio": row.municipio_nome,
+            },
+        })
+        ucs_vistas.add(row.uc_id)
+        if row.fonte_nome:
+            fontes[row.fonte_nome] = {"nome": row.fonte_nome, "orgao": row.orgao_responsavel, "url": row.url_origem}
+
+    if ucs_vistas:
+        stmt_uc = (
+            select(
+                UnidadeConservacao.id,
+                UnidadeConservacao.nome,
+                UnidadeConservacao.categoria,
+                UnidadeConservacao.area_ha,
+                _geom_clipped_to_sp(UnidadeConservacao.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
+            )
+            .where(UnidadeConservacao.id.in_(list(ucs_vistas)))
+        )
+        for uc in (await session.execute(stmt_uc)).all():
+            if uc.geom_json:
+                features.append({
+                    "type": "Feature",
+                    "geometry": json.loads(uc.geom_json),
+                    "properties": {
+                        "tipo": "unidade_conservacao_relacionada",
+                        "nome": uc.nome,
+                        "categoria": uc.categoria,
+                        "area_ha": _round_float(uc.area_ha, 4),
+                    },
+                })
+
+    total_focos = sum(1 for f in features if f["properties"]["tipo"] == "queimada_em_uc")
+    escopo_txt = _escopo_textual(municipio, regiao_administrativa)
+
+    return {
+        "total": total_focos,
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": list(fontes.values()),
+        "descricao": (
+            f"Encontrados **{_fmt_int(total_focos)} focos de queimada** em "
+            f"**{_fmt_int(len(ucs_vistas))} unidades de conservação**{escopo_txt}."
+        ),
+        "sql_executado": sql_executado,
+    }
+
+
+async def buscar_queimadas_em_terras_indigenas(
+    session: AsyncSession,
+    municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    bioma: Optional[str] = None,
+    limite: int = 500,
+) -> dict:
+    """Busca focos de queimada que intersectam terras indígenas em SP."""
+    sql_partes: list[str] = []
+    stmt = (
+        select(
+            QueimadaEvento.id,
+            QueimadaEvento.data_ocorrencia,
+            QueimadaEvento.fonte_sensor,
+            QueimadaEvento.intensidade,
+            QueimadaEvento.bioma,
+            QueimadaEvento.risco_fogo,
+            TerraIndigena.id.label("ti_id"),
+            TerraIndigena.nome.label("ti_nome"),
+            Municipio.nome.label("municipio_nome"),
+            _geom_as_geojson(QueimadaEvento.geom).label("geom_json"),
+            FonteDado.nome.label("fonte_nome"),
+            FonteDado.orgao_responsavel,
+            FonteDado.url_origem,
+        )
+        .join(TerraIndigena, func.ST_Intersects(QueimadaEvento.geom, TerraIndigena.geom))
+        .join(Municipio, QueimadaEvento.municipio_id == Municipio.id, isouter=True)
+        .join(Estado, Municipio.estado_id == Estado.id, isouter=True)
+        .join(Dataset, QueimadaEvento.dataset_id == Dataset.id, isouter=True)
+        .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
+        .where(Estado.sigla == "SP")
+    )
+
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 focos em TIs em {municipio}.",
+                    "sql_executado": municipio_sql}
+        stmt = stmt.where(Municipio.id == municipio_id)
+        sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 focos em TIs na {regiao_administrativa}.",
+                    "sql_executado": ra_sql}
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
+
+    if bioma:
+        stmt = stmt.where(func.lower(QueimadaEvento.bioma).contains(_normalizar_parametro(bioma)))
+    if data_inicio:
+        stmt = stmt.where(QueimadaEvento.data_ocorrencia >= datetime.fromisoformat(data_inicio))
+    if data_fim:
+        stmt = stmt.where(QueimadaEvento.data_ocorrencia <= datetime.fromisoformat(data_fim))
+
+    stmt = stmt.order_by(QueimadaEvento.data_ocorrencia.desc()).limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
+    rows = (await session.execute(stmt)).all()
+
+    features: list[dict] = []
+    fontes: dict[str, dict] = {}
+    tis_vistas: set = set()
+
+    for row in rows:
+        if not row.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geom_json),
+            "properties": {
+                "tipo": "queimada_em_ti",
+                "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
+                "fonte_sensor": row.fonte_sensor,
+                "intensidade": _round_float(row.intensidade, 2),
+                "bioma": row.bioma,
+                "risco_fogo": _round_float(row.risco_fogo, 2),
+                "terra_indigena": row.ti_nome,
+                "municipio": row.municipio_nome,
+            },
+        })
+        tis_vistas.add(row.ti_id)
+        if row.fonte_nome:
+            fontes[row.fonte_nome] = {"nome": row.fonte_nome, "orgao": row.orgao_responsavel, "url": row.url_origem}
+
+    if tis_vistas:
+        stmt_ti = (
+            select(
+                TerraIndigena.id,
+                TerraIndigena.nome,
+                TerraIndigena.area_ha,
+                _geom_clipped_to_sp(TerraIndigena.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
+            )
+            .where(TerraIndigena.id.in_(list(tis_vistas)))
+        )
+        for ti in (await session.execute(stmt_ti)).all():
+            if ti.geom_json:
+                features.append({
+                    "type": "Feature",
+                    "geometry": json.loads(ti.geom_json),
+                    "properties": {"tipo": "terra_indigena_relacionada", "nome": ti.nome, "area_ha": _round_float(ti.area_ha, 4)},
+                })
+
+    total_focos = sum(1 for f in features if f["properties"]["tipo"] == "queimada_em_ti")
+    escopo_txt = _escopo_textual(municipio, regiao_administrativa)
+
+    return {
+        "total": total_focos,
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": list(fontes.values()),
+        "descricao": (
+            f"Encontrados **{_fmt_int(total_focos)} focos de queimada** em "
+            f"**{_fmt_int(len(tis_vistas))} terras indígenas**{escopo_txt}."
+        ),
+        "sql_executado": sql_executado,
+    }
+
+
+async def buscar_desmatamentos_em_unidades_conservacao(
+    session: AsyncSession,
+    municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    tipo_alerta: Optional[str] = None,
+    categoria: Optional[str] = None,
+    limite: int = 300,
+) -> dict:
+    """Busca alertas de desmatamento que intersectam unidades de conservação em SP."""
+    sql_partes: list[str] = []
+    stmt = (
+        select(
+            DesmatamentoAlerta.id,
+            DesmatamentoAlerta.data_ocorrencia,
+            DesmatamentoAlerta.tipo_alerta,
+            DesmatamentoAlerta.area_ha,
+            UnidadeConservacao.id.label("uc_id"),
+            UnidadeConservacao.nome.label("uc_nome"),
+            UnidadeConservacao.categoria.label("uc_categoria"),
+            Municipio.nome.label("municipio_nome"),
+            _geom_as_geojson(DesmatamentoAlerta.geom).label("geom_json"),
+            FonteDado.nome.label("fonte_nome"),
+            FonteDado.orgao_responsavel,
+            FonteDado.url_origem,
+        )
+        .join(UnidadeConservacao, func.ST_Intersects(DesmatamentoAlerta.geom, UnidadeConservacao.geom))
+        .join(Dataset, DesmatamentoAlerta.dataset_id == Dataset.id, isouter=True)
+        .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
+        .join(Municipio, DesmatamentoAlerta.municipio_id == Municipio.id, isouter=True)
+        .where(
+            func.ST_Intersects(
+                DesmatamentoAlerta.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
+    )
+
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 alertas em UCs em {municipio}.",
+                    "sql_executado": municipio_sql}
+        stmt = stmt.where(Municipio.id == municipio_id)
+        sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 alertas em UCs na {regiao_administrativa}.",
+                    "sql_executado": ra_sql}
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
+
+    if data_inicio:
+        stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
+    if data_fim:
+        stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia <= date.fromisoformat(data_fim))
+    if tipo_alerta:
+        stmt = stmt.where(func.lower(DesmatamentoAlerta.tipo_alerta) == tipo_alerta.lower())
+    if categoria:
+        stmt = stmt.where(func.lower(UnidadeConservacao.categoria).contains(categoria.lower()))
+
+    stmt = stmt.order_by(DesmatamentoAlerta.data_ocorrencia.desc()).limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
+    rows = (await session.execute(stmt)).all()
+
+    features: list[dict] = []
+    fontes: dict[str, dict] = {}
+    ucs_vistas: set = set()
+
+    for row in rows:
+        if not row.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geom_json),
+            "properties": {
+                "tipo": "desmatamento_em_uc",
+                "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
+                "tipo_alerta": row.tipo_alerta,
+                "area_ha": _round_float(row.area_ha, 4),
+                "unidade_conservacao": row.uc_nome,
+                "categoria_uc": row.uc_categoria,
+                "municipio": row.municipio_nome,
+            },
+        })
+        ucs_vistas.add(row.uc_id)
+        if row.fonte_nome:
+            fontes[row.fonte_nome] = {"nome": row.fonte_nome, "orgao": row.orgao_responsavel, "url": row.url_origem}
+
+    total_alertas = sum(1 for f in features if f["properties"]["tipo"] == "desmatamento_em_uc")
+    escopo_txt = _escopo_textual(municipio, regiao_administrativa)
+
+    return {
+        "total": total_alertas,
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": list(fontes.values()),
+        "descricao": (
+            f"Encontrados **{_fmt_int(total_alertas)} alertas de desmatamento** em "
+            f"**{_fmt_int(len(ucs_vistas))} unidades de conservação**{escopo_txt}."
+        ),
+        "sql_executado": sql_executado,
+    }
+
+
+async def buscar_desmatamentos_em_terras_indigenas(
+    session: AsyncSession,
+    municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    tipo_alerta: Optional[str] = None,
+    limite: int = 300,
+) -> dict:
+    """Busca alertas de desmatamento que intersectam terras indígenas em SP."""
+    sql_partes: list[str] = []
+    stmt = (
+        select(
+            DesmatamentoAlerta.id,
+            DesmatamentoAlerta.data_ocorrencia,
+            DesmatamentoAlerta.tipo_alerta,
+            DesmatamentoAlerta.area_ha,
+            TerraIndigena.id.label("ti_id"),
+            TerraIndigena.nome.label("ti_nome"),
+            Municipio.nome.label("municipio_nome"),
+            _geom_as_geojson(DesmatamentoAlerta.geom).label("geom_json"),
+            FonteDado.nome.label("fonte_nome"),
+            FonteDado.orgao_responsavel,
+            FonteDado.url_origem,
+        )
+        .join(TerraIndigena, func.ST_Intersects(DesmatamentoAlerta.geom, TerraIndigena.geom))
+        .join(Dataset, DesmatamentoAlerta.dataset_id == Dataset.id, isouter=True)
+        .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
+        .join(Municipio, DesmatamentoAlerta.municipio_id == Municipio.id, isouter=True)
+        .where(
+            func.ST_Intersects(
+                DesmatamentoAlerta.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
+    )
+
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 alertas em TIs em {municipio}.",
+                    "sql_executado": municipio_sql}
+        stmt = stmt.where(Municipio.id == municipio_id)
+        sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 alertas em TIs na {regiao_administrativa}.",
+                    "sql_executado": ra_sql}
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
+
+    if data_inicio:
+        stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
+    if data_fim:
+        stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia <= date.fromisoformat(data_fim))
+    if tipo_alerta:
+        stmt = stmt.where(func.lower(DesmatamentoAlerta.tipo_alerta) == tipo_alerta.lower())
+
+    stmt = stmt.order_by(DesmatamentoAlerta.data_ocorrencia.desc()).limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
+    rows = (await session.execute(stmt)).all()
+
+    features: list[dict] = []
+    fontes: dict[str, dict] = {}
+    tis_vistas: set = set()
+
+    for row in rows:
+        if not row.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geom_json),
+            "properties": {
+                "tipo": "desmatamento_em_ti",
+                "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
+                "tipo_alerta": row.tipo_alerta,
+                "area_ha": _round_float(row.area_ha, 4),
+                "terra_indigena": row.ti_nome,
+                "municipio": row.municipio_nome,
+            },
+        })
+        tis_vistas.add(row.ti_id)
+        if row.fonte_nome:
+            fontes[row.fonte_nome] = {"nome": row.fonte_nome, "orgao": row.orgao_responsavel, "url": row.url_origem}
+
+    total_alertas = sum(1 for f in features if f["properties"]["tipo"] == "desmatamento_em_ti")
+    escopo_txt = _escopo_textual(municipio, regiao_administrativa)
+
+    return {
+        "total": total_alertas,
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": list(fontes.values()),
+        "descricao": (
+            f"Encontrados **{_fmt_int(total_alertas)} alertas de desmatamento** em "
+            f"**{_fmt_int(len(tis_vistas))} terras indígenas**{escopo_txt}."
+        ),
+        "sql_executado": sql_executado,
+    }
+
+
+async def buscar_desmatamentos_em_quilombolas(
+    session: AsyncSession,
+    municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    tipo_alerta: Optional[str] = None,
+    limite: int = 300,
+) -> dict:
+    """Busca alertas de desmatamento que intersectam territórios quilombolas em SP."""
+    sql_partes: list[str] = []
+    stmt = (
+        select(
+            DesmatamentoAlerta.id,
+            DesmatamentoAlerta.data_ocorrencia,
+            DesmatamentoAlerta.tipo_alerta,
+            DesmatamentoAlerta.area_ha,
+            TerritorioQuilombola.id.label("quilombo_id"),
+            TerritorioQuilombola.nome.label("quilombo_nome"),
+            Municipio.nome.label("municipio_nome"),
+            _geom_as_geojson(DesmatamentoAlerta.geom).label("geom_json"),
+            FonteDado.nome.label("fonte_nome"),
+            FonteDado.orgao_responsavel,
+            FonteDado.url_origem,
+        )
+        .join(TerritorioQuilombola, func.ST_Intersects(DesmatamentoAlerta.geom, TerritorioQuilombola.geom))
+        .join(Dataset, DesmatamentoAlerta.dataset_id == Dataset.id, isouter=True)
+        .join(FonteDado, Dataset.fonte_dado_id == FonteDado.id, isouter=True)
+        .join(Municipio, DesmatamentoAlerta.municipio_id == Municipio.id, isouter=True)
+        .where(
+            func.ST_Intersects(
+                DesmatamentoAlerta.geom,
+                select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery(),
+            )
+        )
+    )
+
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 alertas em quilombolas em {municipio}.",
+                    "sql_executado": municipio_sql}
+        stmt = stmt.where(Municipio.id == municipio_id)
+        sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {"total": 0, "features": [], "bbox": None, "fontes": [],
+                    "descricao": f"Encontrados 0 alertas em quilombolas na {regiao_administrativa}.",
+                    "sql_executado": ra_sql}
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
+
+    if data_inicio:
+        stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia >= date.fromisoformat(data_inicio))
+    if data_fim:
+        stmt = stmt.where(DesmatamentoAlerta.data_ocorrencia <= date.fromisoformat(data_fim))
+    if tipo_alerta:
+        stmt = stmt.where(func.lower(DesmatamentoAlerta.tipo_alerta) == tipo_alerta.lower())
+
+    stmt = stmt.order_by(DesmatamentoAlerta.data_ocorrencia.desc()).limit(limite)
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
+    rows = (await session.execute(stmt)).all()
+
+    features: list[dict] = []
+    fontes: dict[str, dict] = {}
+    quilombos_vistos: set = set()
+
+    for row in rows:
+        if not row.geom_json:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geom_json),
+            "properties": {
+                "tipo": "desmatamento_em_quilombola",
+                "data_ocorrencia": str(row.data_ocorrencia) if row.data_ocorrencia else None,
+                "tipo_alerta": row.tipo_alerta,
+                "area_ha": _round_float(row.area_ha, 4),
+                "territorio_quilombola": row.quilombo_nome,
+                "municipio": row.municipio_nome,
+            },
+        })
+        quilombos_vistos.add(row.quilombo_id)
+        if row.fonte_nome:
+            fontes[row.fonte_nome] = {"nome": row.fonte_nome, "orgao": row.orgao_responsavel, "url": row.url_origem}
+
+    total_alertas = sum(1 for f in features if f["properties"]["tipo"] == "desmatamento_em_quilombola")
+    escopo_txt = _escopo_textual(municipio, regiao_administrativa)
+
+    return {
+        "total": total_alertas,
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": list(fontes.values()),
+        "descricao": (
+            f"Encontrados **{_fmt_int(total_alertas)} alertas de desmatamento** em "
+            f"**{_fmt_int(len(quilombos_vistos))} territórios quilombolas**{escopo_txt}."
+        ),
+        "sql_executado": sql_executado,
+    }
+
+
 async def buscar_maiores_quantidades(
     session: AsyncSession,
     municipio: Optional[str] = None,
     regiao_administrativa: Optional[str] = None,
-    **kwargs: Any,
+    tema: Optional[str] = None,
+    limite: int = 3,
+    is_ranking: bool = False,
+    bioma: Optional[str] = None,
 ) -> dict[str, Any]:
+    """Ranking municipal de dados ambientais.
+
+    Args:
+        tema: filtra para um tipo específico de dado. None agrega todos os temas.
+              Valores: "queimadas" | "desmatamentos" | "unidades_conservacao" |
+                       "terras_indigenas" | "quilombolas" | None
+    """
     features: list[dict[str, Any]] = []
     fontes: dict[str, dict[str, Any]] = {}
     sql_executado_partes: list[str] = []
     temas_detectados: list[str] = []
 
-    pipeline_intents: list[tuple[str, float]] = kwargs.get("intents", [])
-    intent_names = [name for name, _ in pipeline_intents]
-
-    limit_alvo = kwargs.get("limit_dinamico", 3)
-    is_ranking_request = kwargs.get("is_ranking", False)
-    bioma_filter: Optional[str] = kwargs.get("bioma")
-
-    if (
-        "buscar_terras_indigenas" in intent_names
-        and "buscar_unidades_conservacao" in intent_names
-    ):
-        try:
-            return await _buscar_municipios_ti_uc(session, limit_alvo)
-        except Exception:
-            logger.exception("Erro ao executar consulta combinada TI+UC")
-
     def _area_intersecao_ha(geom_a: Any, geom_b: Any) -> Any:
-        return func.sum(
-            func.ST_Area(
-                func.ST_Transform(func.ST_Intersection(geom_a, geom_b), 31983)
-            )
-        )
+        return func.sum(func.ST_Area(func.ST_Transform(func.ST_Intersection(geom_a, geom_b), 31983)))
 
-    MAPEAMENTO_TEMAS = {
-        "buscar_unidades_conservacao": (UnidadeConservacao, _area_intersecao_ha(Municipio.geom, UnidadeConservacao.geom), "extensão de Unidades de Conservação", "ha protegidos", True, "CNUC", "MMA"),
-        "buscar_terras_indigenas": (TerraIndigena, _area_intersecao_ha(Municipio.geom, TerraIndigena.geom), "extensão de Terras Indígenas", "ha protegidos", True, "Infraestrutura FUNAI", "FUNAI"),
-        "buscar_quilombolas": (TerritorioQuilombola, _area_intersecao_ha(Municipio.geom, TerritorioQuilombola.geom), "extensão de Territórios Quilombolas", "ha declarados", True, "Territórios Quilombolas", "INCRA"),
-        "buscar_desmatamentos": (DesmatamentoAlerta, func.sum(DesmatamentoAlerta.area_ha), "alertas de desmatamento", "ha desmatados", False, "Alertas de Desmatamento", "MapBiomas / INPE"),
-        "buscar_queimadas": (QueimadaEvento, func.count(QueimadaEvento.id), "focos de queimada", "focos detectados", False, "BDQueimadas", "INPE"),
+    # Mapeamento tema → (tabela, agregação, rótulo, unidade, usa_intersects, fonte, órgão)
+    MAPEAMENTO_TEMAS: dict[str, tuple] = {
+        "unidades_conservacao": (UnidadeConservacao, _area_intersecao_ha(Municipio.geom, UnidadeConservacao.geom), "extensão de Unidades de Conservação", "ha protegidos", True, "CNUC", "MMA"),
+        "terras_indigenas": (TerraIndigena, _area_intersecao_ha(Municipio.geom, TerraIndigena.geom), "extensão de Terras Indígenas", "ha protegidos", True, "Infraestrutura FUNAI", "FUNAI"),
+        "quilombolas": (TerritorioQuilombola, _area_intersecao_ha(Municipio.geom, TerritorioQuilombola.geom), "extensão de Territórios Quilombolas", "ha declarados", True, "Territórios Quilombolas", "INCRA"),
+        "desmatamentos": (DesmatamentoAlerta, func.sum(DesmatamentoAlerta.area_ha), "alertas de desmatamento", "ha desmatados", False, "Alertas de Desmatamento", "MapBiomas / INPE"),
+        "queimadas": (QueimadaEvento, func.count(QueimadaEvento.id), "focos de queimada", "focos detectados", False, "BDQueimadas", "INPE"),
     }
 
+    temas_a_executar = {tema: MAPEAMENTO_TEMAS[tema]} if tema and tema in MAPEAMENTO_TEMAS else MAPEAMENTO_TEMAS
+
     try:
-        for target_intent, config in MAPEAMENTO_TEMAS.items():
-            if target_intent in intent_names or len(intent_names) <= 1:
-                model_table, agg_formula, label, unidade, precisa_intersecao, fonte_nome, fonte_orgao = config
-                
-                stmt = select(
-                    Municipio.id,
-                    Municipio.nome,
-                    agg_formula.label("valor_analitico"),
-                    _geom_as_geojson(Municipio.geom).label("geojson")
-                )
+        for tema_key, config in temas_a_executar.items():
+            model_table, agg_formula, label, unidade, precisa_intersecao, fonte_nome, fonte_orgao = config
 
-                if precisa_intersecao:
-                    stmt = stmt.join(model_table, func.ST_Intersects(Municipio.geom, model_table.geom))
-                else:
-                    stmt = stmt.join(model_table, func.ST_Contains(Municipio.geom, model_table.geom))
+            stmt = select(
+                Municipio.id,
+                Municipio.nome,
+                agg_formula.label("valor_analitico"),
+                _geom_as_geojson(Municipio.geom).label("geojson"),
+            )
 
-                stmt = stmt.group_by(Municipio.id, Municipio.nome)
+            join_cond = func.ST_Intersects if precisa_intersecao else func.ST_Contains
+            stmt = stmt.join(model_table, join_cond(Municipio.geom, model_table.geom))
+            stmt = stmt.group_by(Municipio.id, Municipio.nome)
 
-                if target_intent == "buscar_queimadas" and bioma_filter:
-                    stmt = stmt.where(func.lower(QueimadaEvento.bioma).contains(_normalizar_parametro(bioma_filter)))
+            if tema_key == "queimadas" and bioma:
+                stmt = stmt.where(func.lower(QueimadaEvento.bioma).contains(_normalizar_parametro(bioma)))
 
-                stmt = stmt.order_by(agg_formula.desc()).limit(limit_alvo)
+            if municipio:
+                stmt = stmt.where(func.lower(Municipio.nome) == _normalizar_parametro(municipio))
 
-                if municipio:
-                    stmt = stmt.where(func.lower(Municipio.nome) == _normalizar_parametro(municipio))
+            stmt = stmt.order_by(agg_formula.desc()).limit(limite)
+            sql_executado_partes.append(_stmt_sql(stmt))
 
-                sql_executado_partes.append(_stmt_sql(stmt))
-                result = await session.execute(stmt)
-                rows = result.all()
+            rows = (await session.execute(stmt)).all()
+            if not rows:
+                continue
 
-                if rows:
-                    temas_detectados.append(label)
-                    fontes[target_intent] = {"nome": fonte_nome, "orgao": fonte_orgao, "url": ""}
+            temas_detectados.append(label)
+            fontes[tema_key] = {"nome": fonte_nome, "orgao": fonte_orgao, "url": ""}
 
-                for index, row in enumerate(rows, start=1):
-                    raw_val = row.valor_analitico or 0
-                    final_val = _round_float(raw_val / 10000, 2) if unidade in ("ha protegidos", "ha declarados") else raw_val
+            for index, row in enumerate(rows, start=1):
+                raw_val = row.valor_analitico or 0
+                final_val = _round_float(raw_val / 10000, 2) if unidade in ("ha protegidos", "ha declarados") else raw_val
+                texto_analise = f"#{index} em {label}: {final_val} {unidade}"
 
-                    if is_ranking_request:
-                        texto_analise = f"#{index} em {label}: {final_val} {unidade}"
-                    elif limit_alvo == 1:
-                        texto_analise = f"Maior concentração de {label}: {final_val} {unidade}"
-                    else:
-                        texto_analise = f"#{index} em {label}: {final_val} {unidade}"
-
-                    features.append({
-                        "type": "Feature",
-                        "geometry": json.loads(row.geojson) if row.geojson else None,
-                        "properties": {
-                            "tipo": "ranking_criticidade" if is_ranking_request else "densidade_volumetrica",
-                            "nome": row.nome,
-                            "analise": texto_analise,
-                        }
-                    })
+                features.append({
+                    "type": "Feature",
+                    "geometry": json.loads(row.geojson) if row.geojson else None,
+                    "properties": {
+                        "tipo": "ranking_criticidade" if is_ranking else "densidade_volumetrica",
+                        "nome": row.nome,
+                        "analise": texto_analise,
+                    },
+                })
 
     except Exception:
-        logger.exception("Erro ao executar buscar_maiores_quantidades unificado")
+        logger.exception("Erro ao executar buscar_maiores_quantidades")
 
     mun_vistos: list[tuple[str, str]] = []
     seen_nomes: set[str] = set()
@@ -2706,12 +3264,12 @@ async def buscar_maiores_quantidades(
 
     if mun_vistos:
         temas_str = ", ".join(temas_detectados) if temas_detectados else "dados ambientais"
-        linhas_desc = [f"**Municípios em destaque — {temas_str} (SP):**"]
+        linhas = [f"**Municípios em destaque — {temas_str} (SP):**"]
         for nome, analise in mun_vistos:
-            linhas_desc.append(f"- **{nome}**: {analise}")
-        descricao_final = "\n".join(linhas_desc)
+            linhas.append(f"- **{nome}**: {analise}")
+        descricao_final = "\n".join(linhas)
     else:
-        descricao_final = f"Análise quantitativa executada para: {', '.join(temas_detectados)}."
+        descricao_final = "Nenhum dado encontrado para a análise quantitativa solicitada."
 
     return {
         "features": features,
@@ -2720,13 +3278,144 @@ async def buscar_maiores_quantidades(
         "descricao": descricao_final,
         "sql_executado": "\n\n---\n\n".join(sql_executado_partes) if sql_executado_partes else None,
     }
+
+
+_OVERLAP_THEMES: dict[str, tuple] = {
+    "unidades_conservacao": (UnidadeConservacao, "Unidades de Conservação", "CNUC", "MMA"),
+    "terras_indigenas": (TerraIndigena, "Terras Indígenas", "Infraestrutura FUNAI", "FUNAI"),
+    "quilombolas": (TerritorioQuilombola, "Territórios Quilombolas", "Territórios Quilombolas", "INCRA"),
+    "assentamentos": (AssentamentoRural, "Assentamentos Rurais", "Assentamentos INCRA", "INCRA"),
+    "imoveis_rurais": (ImovelRural, "Imóveis Rurais (CAR)", "SICAR", "Serviço Florestal Brasileiro"),
+}
+
+
+async def buscar_sobreposicao_areas(
+    session: AsyncSession,
+    tema_a: Optional[str] = None,
+    tema_b: Optional[str] = None,
+    municipio: Optional[str] = None,
+    regiao_administrativa: Optional[str] = None,
+    limite: int = 5,
+) -> dict:
+    """Rankeia municípios pela área de sobreposição entre duas camadas territoriais."""
+    if tema_a not in _OVERLAP_THEMES or tema_b not in _OVERLAP_THEMES or tema_a == tema_b:
+        return {
+            "total": 0,
+            "features": [],
+            "bbox": None,
+            "fontes": [],
+            "descricao": "Não foi possível identificar duas camadas distintas para a análise de sobreposição.",
+            "sql_executado": None,
+        }
+
+    sql_partes: list[str] = []
+    model_a, label_a, fonte_a_nome, fonte_a_orgao = _OVERLAP_THEMES[tema_a]
+    model_b, label_b, fonte_b_nome, fonte_b_orgao = _OVERLAP_THEMES[tema_b]
+
+    intersecao = func.ST_Intersection(
+        func.ST_Intersection(model_a.geom, model_b.geom), Municipio.geom
+    )
+    area_m2 = func.sum(func.ST_Area(func.ST_Transform(intersecao, 31983)))
+
+    stmt = (
+        select(
+            Municipio.id,
+            Municipio.nome,
+            area_m2.label("area_m2"),
+            _geom_as_geojson(Municipio.geom).label("geom_json"),
+        )
+        .join(model_a, func.ST_Intersects(Municipio.geom, model_a.geom))
+        .join(
+            model_b,
+            and_(
+                func.ST_Intersects(model_a.geom, model_b.geom),
+                func.ST_Intersects(Municipio.geom, model_b.geom),
+            ),
+        )
+        .group_by(Municipio.id, Municipio.nome)
+        .having(area_m2 > 0)
+        .order_by(area_m2.desc())
+        .limit(limite)
+    )
+
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 municípios com sobreposição entre {label_a} e {label_b} em {municipio}.",
+                "sql_executado": municipio_sql,
+            }
+        stmt = stmt.where(Municipio.id == municipio_id)
+        sql_partes.append(municipio_sql)
+    elif regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 municípios com sobreposição entre {label_a} e {label_b} na {regiao_administrativa}.",
+                "sql_executado": ra_sql,
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+        sql_partes.append(ra_sql)
+
+    sql_executado = _join_sql(*sql_partes, _stmt_sql(stmt))
+    rows = (await session.execute(stmt)).all()
+
+    features: list[dict] = []
+    for index, row in enumerate(rows, start=1):
+        if not row.geom_json:
+            continue
+        area_ha = _round_float((row.area_m2 or 0) / 10000, 2)
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(row.geom_json),
+            "properties": {
+                "tipo": "sobreposicao_areas",
+                "nome": row.nome,
+                "area_sobreposicao_ha": area_ha,
+                "analise": f"#{index} — {area_ha} ha de sobreposição entre {label_a} e {label_b}",
+            },
+        })
+
+    fontes = [
+        {"nome": fonte_a_nome, "orgao": fonte_a_orgao, "url": ""},
+        {"nome": fonte_b_nome, "orgao": fonte_b_orgao, "url": ""},
+    ]
+    escopo_txt = _escopo_textual(municipio, regiao_administrativa)
+
+    return {
+        "total": len(features),
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": fontes,
+        "descricao": (
+            f"Encontrados {_fmt_int(len(features))} municípios com sobreposição entre "
+            f"**{label_a}** e **{label_b}**{escopo_txt}."
+        ),
+        "sql_executado": sql_executado,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Registro: nome da ferramenta → função Python
 # ---------------------------------------------------------------------------
 
 TOOL_FUNCTIONS = {
     "buscar_queimadas": buscar_queimadas,
+    "buscar_queimadas_em_unidades_conservacao": buscar_queimadas_em_unidades_conservacao,
+    "buscar_queimadas_em_terras_indigenas": buscar_queimadas_em_terras_indigenas,
+    "buscar_queimadas_em_quilombolas": buscar_queimadas_em_quilombolas,
     "buscar_desmatamentos": buscar_desmatamentos,
+    "buscar_desmatamentos_em_unidades_conservacao": buscar_desmatamentos_em_unidades_conservacao,
+    "buscar_desmatamentos_em_terras_indigenas": buscar_desmatamentos_em_terras_indigenas,
+    "buscar_desmatamentos_em_quilombolas": buscar_desmatamentos_em_quilombolas,
     "buscar_unidades_conservacao": buscar_unidades_conservacao,
     "buscar_terras_indigenas": buscar_terras_indigenas,
     "buscar_assentamentos": buscar_assentamentos,
@@ -2741,5 +3430,6 @@ TOOL_FUNCTIONS = {
     "buscar_passivos_em_imovel": buscar_passivos_em_imovel,
     "buscar_focos_queimada_imovel": buscar_focos_queimada_imovel,
     "buscar_maiores_quantidades": buscar_maiores_quantidades,
-    "buscar_queimadas_em_quilombolas": buscar_queimadas_em_quilombolas,
+    "buscar_sobreposicao_areas": buscar_sobreposicao_areas,
+    "buscar_documentos_rag": buscar_documentos_rag,
 }
