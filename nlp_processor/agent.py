@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nlp_processor.pipeline.intent_classifier import get_classifier
 from nlp_processor.pipeline.entity_extractor import Entidades, extrair_entidades
 from nlp_processor.pipeline.embedder import get_embedder
-from nlp_processor.pipeline.preprocessor import AdvancedGeoASGPreprocessor
+from nlp_processor.pipeline.preprocessor import AdvancedGeoASGPreprocessor, normalizar
 from nlp_processor.pipeline.query_builder import executar_consulta
 from nlp_processor.pipeline.response_formatter import format_pipeline_response
 from models.db_model import Municipio
@@ -24,11 +24,15 @@ CONFIDENCE_THRESHOLD = 0.20
 FEEDBACK_VALIDADE_MINUTOS = 30
 
 _preprocessor = AdvancedGeoASGPreprocessor()
+_MUNICIPIOS_NORMALIZADOS_CACHE: Optional[list[str]] = None
 
 _ESCOPO_AMBIENTAL_TOKENS = frozenset({
     "ambiental", "ambientais", "meio ambiente",
     "queimada", "queimadas", "incendio", "incendios", "foco", "focos", "fogo",
+    "queimou", "queimaram", "queimam", "queimando", "incendiou", "incendiaram",
     "desmatamento", "desmatamentos", "desmatado", "desmatada", "supressao",
+    "desmatou", "desmatam", "desmata", "desmatar", "desmato", "desmataram",
+    "corte de vegetacao", "supressao vegetal", "perda de vegetacao",
     "prodes", "deter",
     "sicar", "car", "imovel", "imoveis", "propriedade", "propriedades",
     "fazenda", "fazendas", "sitio", "sitios", "rural", "rurais",
@@ -39,6 +43,25 @@ _ESCOPO_AMBIENTAL_TOKENS = frozenset({
     "parque", "apa", "resex", "rebio", "estacao ecologica", "flona", "rppn",
     "assentamento", "assentamentos", "bacia", "risco", "camada", "camadas",
     "municipio", "municipios", "cidade", "estado de sao paulo", "sao paulo",
+    "regiao administrativa", "regioes administrativas", "ra de", "ranking",
+})
+
+_TOKENS_CAMADA_ESTADUAL_EXPLICITA = frozenset({
+    "camada estadual", "camadas estaduais", "datageo", "camada ambiental estadual",
+    "camadas ambientais estaduais", "camada de vegetacao", "vegetacao nativa",
+})
+
+_INTENTS_SUPRIMIR_CAMADAS_ESTADUAIS = frozenset({
+    "buscar_queimadas", "buscar_desmatamentos", "buscar_terras_indigenas",
+    "buscar_unidades_conservacao", "buscar_quilombolas", "buscar_assentamentos",
+    "buscar_queimadas_em_quilombolas", "buscar_maiores_quantidades",
+    "buscar_imoveis_queimada", "buscar_imoveis_desmatamento",
+    "buscar_imoveis_quilombo", "buscar_imoveis_ti",
+})
+
+_TOKENS_QUILOMBOLA_FOCO = frozenset({
+    "quilombola", "quilombolas", "territorio quilombola", "territorios quilombolas",
+    "area quilombola", "areas quilombolas",
 })
 
 _TOKENS_IMOVEL = frozenset({
@@ -97,16 +120,30 @@ def _extrair_feedback_contexto(
     intencao_atual: Optional[str] = None,
     agora: Optional[datetime] = None,
 ) -> dict[str, int]:
-    ultima_assistente = next(
-        (m for m in reversed(historico) if m.get("role") == "assistant"), None
-    )
+    if not historico or not isinstance(historico, list):
+        return {}
+
+    # Varredura reversa segura por índice para evitar travamentos de iteração externa
+    ultima_assistente = None
+    for i in range(len(historico) - 1, -1, -1):
+        msg = historico[i]
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
+            ultima_assistente = msg
+            break
+
     if not ultima_assistente:
         return {}
 
     feedback = ultima_assistente.get("feedback")
     if isinstance(feedback, dict):
         feedback = feedback.get("avaliacao")
-    if feedback not in (-1, 1):
+        
+    try:
+        feedback_int = int(feedback) if feedback is not None else 0
+    except (ValueError, TypeError):
+        return {}
+
+    if feedback_int not in (-1, 1):
         return {}
 
     intencao_anterior = ultima_assistente.get("intencao")
@@ -121,19 +158,23 @@ def _extrair_feedback_contexto(
             logger.info("Feedback descartado: fora da janela de %d min.", FEEDBACK_VALIDADE_MINUTOS)
             return {}
 
-    logger.info("Feedback do turno anterior aplicado: avaliacao=%s.", feedback)
-    return {"avaliacao": int(feedback)}
+    logger.info("Feedback do turno anterior aplicado: avaliacao=%d.", feedback_int)
+    return {"avaliacao": feedback_int}
 
 
 async def _carregar_municipios_normalizados(session: AsyncSession) -> list[str]:
+    global _MUNICIPIOS_NORMALIZADOS_CACHE
+    if _MUNICIPIOS_NORMALIZADOS_CACHE is not None:
+        return _MUNICIPIOS_NORMALIZADOS_CACHE
+
     stmt = select(Municipio.nome).where(Municipio.nome.is_not(None))
     result = await session.execute(stmt)
     nomes: set[str] = set()
     for (nome,) in result.all():
-        processed = _preprocessor.process(nome)
-        nomes.add(processed["text_for_entities_and_rag"])
-    logger.info("Carregados %d municípios normalizados do banco.", len(nomes))
-    return sorted(nomes)
+        nomes.add(normalizar(nome))
+    _MUNICIPIOS_NORMALIZADOS_CACHE = sorted(nomes)
+    logger.info("Carregados %d municípios normalizados do banco e salvos no cache.", len(_MUNICIPIOS_NORMALIZADOS_CACHE))
+    return _MUNICIPIOS_NORMALIZADOS_CACHE
 
 
 def _serializar_entidades(entidades: Entidades) -> dict[str, Any]:
@@ -202,8 +243,11 @@ def _resolver_intencao_final(
         logger.info("Intent override por CAR (%s): %s.", entidades.codigo_car, override_car)
         return [(override_car, confianca)]
 
+    intents_classificados = {i for i, _ in intencoes_classificadas}
+
     promocao = _aplicar_promocao_imovel(texto_norm, intencao_principal)
-    if promocao:
+    # Só promove se o alvo ainda não está na lista classificada — evita colapsar multi-intents
+    if promocao and promocao not in intents_classificados:
         logger.info("Promoção de intent: %s -> %s.", intencao_principal, promocao)
         return [(promocao, confianca)]
 
@@ -211,6 +255,20 @@ def _resolver_intencao_final(
     if rebaixamento:
         logger.info("Rebaixamento de intent: %s -> %s.", intencao_principal, rebaixamento)
         return [(rebaixamento, confianca)]
+
+    if intencao_principal == "buscar_queimadas" and _texto_contem(texto_norm, _TOKENS_QUILOMBOLA_FOCO):
+        logger.info("Promoção por contexto quilombola: buscar_queimadas -> buscar_queimadas_em_quilombolas.")
+        return [("buscar_queimadas_em_quilombolas", confianca)]
+
+    if (
+        intencao_principal in _INTENTS_SUPRIMIR_CAMADAS_ESTADUAIS
+        and not _texto_contem(texto_norm, _TOKENS_CAMADA_ESTADUAL_EXPLICITA)
+    ):
+        intencoes_classificadas = [
+            (i, c) for i, c in intencoes_classificadas if i != "buscar_camadas_estaduais"
+        ]
+        if intencoes_classificadas:
+            intencao_principal = intencoes_classificadas[0][0]
 
     if confianca < CONFIDENCE_THRESHOLD:
         inferida = _inferir_intencao_por_vocabulario(texto_norm, entidades)
@@ -266,15 +324,15 @@ async def run_agent(
     embedder = get_embedder()
 
     if not classifier.is_ready():
-        logger.error("Modelo de intenções não treinado.")
+        logger.error("Modelo de intenções não carregado ou não treinado.")
         return _build_resultado_erro(
             inicio=inicio,
             texto="Ocorreu um erro interno. Tente novamente.",
-            mensagem="Modelo de intenções não treinado.",
+            mensagem="Modelo de intenções não treinado ou arquivos corrompidos.",
         )
 
     preprocessed = _preprocessor.process(pergunta)
-    texto_norm = preprocessed["text_for_entities_and_rag"]
+    texto_norm = preprocessed["text_for_entities_and_rag"].lower()
 
     intencoes_classificadas = classifier.predict_multiple(preprocessed)
     logger.info("Intenções detectadas: %s", intencoes_classificadas)
@@ -303,6 +361,8 @@ async def run_agent(
     except Exception:
         logger.warning("Não foi possível gerar embedding — RAG desativado.")
 
+    # Log de diagnóstico para identificar gargalo de consulta lenta SQL/Geométrica
+    logger.info("Executando consulta assíncrona no banco de dados para a intent: %s...", intencao_principal)
     try:
         resultado = await executar_consulta(
             session=session,
@@ -310,8 +370,9 @@ async def run_agent(
             entities=entidades,
             query_embedding=query_embedding,
         )
+        logger.info("Consulta executada com sucesso.")
     except Exception:
-        logger.exception("Erro ao executar consulta no banco.")
+        logger.exception("Erro ao executar consulta no banco de dados.")
         return _build_resultado_erro(
             inicio=inicio,
             texto="Ocorreu um erro ao consultar os dados. Tente novamente.",
@@ -338,6 +399,7 @@ async def run_agent(
         query_description=resultado.get("descricao"),
         feedback_context=feedback_contexto or None,
         features=features,
+        per_intent=resultado.get("per_intent"),
     )
 
     return {

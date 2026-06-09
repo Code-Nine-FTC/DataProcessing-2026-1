@@ -45,6 +45,10 @@ _TEMPLATES: Dict[str, str] = {
         "Análise agregada de densidade geoespacial via **{main_source}**:\n"
         "Foram consolidados **{total_formatted} registros volumétricos**{scope}."
     ),
+    "buscar_queimadas_em_quilombolas": (
+        "Foram identificados **{total_formatted} focos de queimada em territórios quilombolas**{scope}. "
+        "{period_detail}"
+    ),
     "fora_escopo": (
         "Esta pergunta está fora do escopo do sistema. "
         "O assistente é especializado em análises geográficas e ambientais "
@@ -214,6 +218,37 @@ def _list_affected_properties(features: Optional[List[Dict[str, Any]]], intent: 
     return "\n".join(lines)
 
 
+def _handle_maiores_quantidades(
+    entities: Entidades,
+    features: Optional[List[Dict[str, Any]]],
+    total_features: int,
+    sources: List[Dict[str, Any]],
+    scope: str,
+    document_context: str,
+) -> str:
+    if not features:
+        return "Nenhum dado encontrado para a análise quantitativa solicitada."
+
+    mun_entries: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for f in features:
+        props = f.get("properties", {})
+        nome = str(props.get("nome") or "").strip()
+        analise = str(props.get("analise") or "").strip()
+        if nome and nome not in seen:
+            mun_entries.append((nome, analise))
+            seen.add(nome)
+
+    if not mun_entries:
+        return "Nenhum município identificado na análise quantitativa."
+
+    main_source = _get_main_source(sources)
+    linhas = [f"**Municípios em destaque**{scope} (via {main_source}):"]
+    for nome, analise in mun_entries:
+        linhas.append(f"- **{nome}**: {analise}")
+    return "\n".join(linhas)
+
+
 def _handle_disabled_settlements(entities: Entidades, features: Optional[List[Dict[str, Any]]], total_features: int, sources: List[Dict[str, Any]], scope: str, document_context: str) -> str:
     return "A consulta de assentamentos rurais está desativada no momento, pois a fonte não está disponível."
 
@@ -258,6 +293,7 @@ _STRATEGY_MAP: Dict[str, Callable[[Entidades, Optional[List[Dict[str, Any]]], in
     "buscar_assentamentos": _handle_disabled_settlements,
     "buscar_focos_queimada_imovel": _handle_wildfire_focus_property,
     "buscar_passivos_imovel": _handle_property_liabilities,
+    "buscar_maiores_quantidades": _handle_maiores_quantidades,
     "buscar_imoveis_queimada": lambda e, f, t, s, sc, dc: _handle_relational_properties(e, f, t, s, sc, dc, "buscar_imoveis_queimada"),
     "buscar_imoveis_desmatamento": lambda e, f, t, s, sc, dc: _handle_relational_properties(e, f, t, s, sc, dc, "buscar_imoveis_desmatamento"),
     "buscar_imoveis_quilombo": lambda e, f, t, s, sc, dc: _handle_relational_properties(e, f, t, s, sc, dc, "buscar_imoveis_quilombo"),
@@ -274,6 +310,7 @@ def format_pipeline_response(
     query_description: Optional[str] = None,
     feedback_context: Optional[Dict[str, Any]] = None,
     features: Optional[List[Dict[str, Any]]] = None,
+    per_intent: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
     if not intents:
         return _apply_context_feedback(_TEMPLATES["fora_escopo"], feedback_context)
@@ -285,15 +322,34 @@ def format_pipeline_response(
         if intent == "fora_escopo":
             continue
 
+        intent_data = (per_intent or {}).get(intent, {})
+        intent_total = intent_data.get("total", total_features)
+        intent_sources = intent_data.get("fontes") or sources
+
         if intent in _STRATEGY_MAP:
-            strategy_text = _STRATEGY_MAP[intent](entities, features, total_features, sources, scope, document_context)
+            strategy_text = _STRATEGY_MAP[intent](entities, features, intent_total, intent_sources, scope, document_context)
             if strategy_text:
                 response_segments.append(strategy_text)
             continue
 
-        if total_features == 0:
+        if intent_total == 0:
             cleaned_intent = intent.replace("buscar_", "")
-            response_segments.append(f"Não foram mapeados dados de {cleaned_intent}{scope} para os filtros selecionados.")
+            has_date_filter = bool(entities.data_inicio or entities.ano)
+            if has_date_filter:
+                if entities.ano:
+                    periodo = f" em {entities.ano}"
+                elif entities.data_inicio and entities.data_fim:
+                    periodo = f" entre {entities.data_inicio} e {entities.data_fim}"
+                else:
+                    periodo = f" a partir de {entities.data_inicio}"
+                escopo_sem_data = scope.split(" entre ")[0].split(" em ")[0]
+                response_segments.append(
+                    f"Não foram encontrados dados de {cleaned_intent}{escopo_sem_data}."
+                    f" Não há registros disponíveis{periodo} na base de dados."
+                    f" Tente consultar sem especificar um período para visualizar os registros mais recentes."
+                )
+            else:
+                response_segments.append(f"Não foram mapeados dados de {cleaned_intent}{scope} para os filtros selecionados.")
             continue
 
         template = _TEMPLATES.get(intent)
@@ -302,10 +358,10 @@ def format_pipeline_response(
 
         try:
             formatted_segment = template.format(
-                total=total_features,
-                total_formatted=_format_number(total_features),
+                total=intent_total,
+                total_formatted=_format_number(intent_total),
                 scope=scope,
-                main_source=_get_main_source(sources),
+                main_source=_get_main_source(intent_sources),
                 document_context="",
                 period_detail=f"O período analisado vai de {entities.data_inicio} a {entities.data_fim}. " if entities.data_inicio and entities.data_fim else "",
                 category_detail=f"Filtro por categoria: **{entities.categoria_uc}**. " if entities.categoria_uc else "",

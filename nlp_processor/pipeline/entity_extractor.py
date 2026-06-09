@@ -36,6 +36,53 @@ MUNICIPIOS_SP_BASE: list[str] = [
     "sao miguel arcanjo", "paranapanema", "sarutaia",
 ]
 
+_MUNICIPIO_DISPLAY: dict[str, str] = {
+    "sao paulo": "São Paulo",
+    "sao jose dos campos": "São José dos Campos",
+    "ribeirao preto": "Ribeirão Preto",
+    "sao jose do rio preto": "São José do Rio Preto",
+    "mogi das cruzes": "Mogi das Cruzes",
+    "jundiai": "Jundiaí",
+    "carapicuiba": "Carapicuíba",
+    "taboao da serra": "Taboão da Serra",
+    "embu das artes": "Embu das Artes",
+    "itaquaquecetuba": "Itaquaquecetuba",
+    "mogi guacu": "Mogi Guaçu",
+    "marilia": "Marília",
+    "presidente prudente": "Presidente Prudente",
+    "araras": "Araras",
+    "araraquara": "Araraquara",
+    "sao carlos": "São Carlos",
+    "taubate": "Taubaté",
+    "indaiatuba": "Indaiatuba",
+    "aracatuba": "Araçatuba",
+    "jaboticabal": "Jaboticabal",
+    "cacapava": "Caçapava",
+    "sao joao da boa vista": "São João da Boa Vista",
+    "caraguatatuba": "Caraguatatuba",
+    "sao sebastiao": "São Sebastião",
+    "guaruja": "Guarujá",
+    "mongagua": "Mongaguá",
+    "itanhaem": "Itanhaém",
+    "peruibe": "Peruíbe",
+    "pariquera-acu": "Pariquera-Açu",
+    "cananeia": "Cananéia",
+    "itapirapua paulista": "Itapirapuã Paulista",
+    "barra do chapeu": "Barra do Chapéu",
+    "apiai": "Apiaí",
+    "capao bonito": "Capão Bonito",
+    "itapetininga": "Itapetininga",
+    "altinopolis": "Altinópolis",
+    "votuporanga": "Votuporanga",
+    "fernandopolis": "Fernandópolis",
+    "penapolis": "Penápolis",
+    "avare": "Avaré",
+    "cerqueira cesar": "Cerqueira César",
+    "itarare": "Itararé",
+    "itaporanga": "Itaporanga",
+    "sao miguel arcanjo": "São Miguel Arcanjo",
+}
+
 _DATE_PATTERNS = [
     (r"\b(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})\b", "%d/%m/%Y"),
     (r"\b(\d{4})[/\-](\d{2})[/\-](\d{2})\b", "%Y-%m-%d"),
@@ -73,6 +120,25 @@ _FASES_TI = {
 
 _SENSORES = ["aqua", "terra", "npp-375", "modis", "viirs", "goes-16", "msg-3", "noaa-20"]
 
+_TIPOS_ALERTA = [
+    (r"\bprodes\s+mata\s+atlantica\b", "PRODES Mata Atlântica"),
+    (r"\bprodes\s+cerrado\b", "PRODES Cerrado"),
+    (r"\bprodes\b", "PRODES"),
+    (r"\bdeter\b", "DETER"),
+]
+
+_ESFERAS_UC = [
+    (r"\bfederal(?:is)?\b", "Federal"),
+    (r"\bestadual(?:is)?\b", "Estadual"),
+    (r"\bmunicipal(?:is)?\b", "Municipal"),
+]
+
+_BIOMAS_SP = [
+    (r"\bmata\s+atlantica\b", "Mata Atlântica"),
+    (r"\bcerrado\b", "Cerrado"),
+    (r"\bcaatinga\b", "Caatinga"),
+]
+
 @dataclass
 class Entidades:
     municipio: Optional[str] = None
@@ -86,8 +152,11 @@ class Entidades:
     grupo_snuc: Optional[str] = None
     palavras_chave: list[str] = field(default_factory=list)
     codigo_car: Optional[str] = None
-    limite: Optional[int] = 3  # Valor padrão caso o usuário não diga um número
-    is_ranking: bool = False   # Indica se a pergunta pede explicitamente um "ranking" ou "top"
+    limite: Optional[int] = 3
+    is_ranking: bool = False
+    tipo_alerta: Optional[str] = None
+    esfera_uc: Optional[str] = None
+    bioma: Optional[str] = None
 
 
 def _extrair_datas(texto_norm: str) -> tuple[Optional[str], Optional[str]]:
@@ -170,14 +239,15 @@ def _extrair_regiao_administrativa(texto_norm: str) -> tuple[Optional[str], str]
     return None, texto_norm
 
 def _extrair_municipio(texto_norm: str, municipios_extras: Optional[list[str]] = None) -> Optional[str]:
+    texto_lower = texto_norm.lower()
     gazetteer = MUNICIPIOS_SP_BASE + (municipios_extras or [])
     for municipio in sorted(gazetteer, key=len, reverse=True):
         if municipio == "sao paulo" and re.search(
-            r"\b(estado|uf)\s+(?:de\s+)?sao\s+paulo\b|\bsao\s+paulo\s+(?:estado|uf)\b", texto_norm
+            r"\b(estado|uf)\s+(?:de\s+)?sao\s+paulo\b|\bsao\s+paulo\s+(?:estado|uf)\b", texto_lower
         ):
             continue
-        if municipio in texto_norm:
-            return municipio.title()
+        if municipio in texto_lower:
+            return _MUNICIPIO_DISPLAY.get(municipio, municipio.title())
     return None
 
 def _extrair_categoria_uc(texto_norm: str) -> Optional[str]:
@@ -209,10 +279,17 @@ def _extrair_codigo_car(texto_norm: str) -> Optional[str]:
     def _valid(code: str) -> bool:
         return len(code) >= 6 and any(ch.isdigit() for ch in code)
 
-    m = re.search(r"\b([A-Za-z]{2}-\d{6,}-[A-Za-z0-9]+)\b", texto_norm)
+    # Formato oficial SICAR: UF-CODIBGE-HASH (ex: SP-3500709-F80A461130164CF9A0B0FEAB5611FA40)
+    m = re.search(r"\b([A-Za-z]{2}-\d{5,7}-[A-Za-z0-9]{6,})\b", texto_norm)
     if m and _valid(m.group(1)):
         return m.group(1).upper()
 
+    # Formato sem hifens (caso o preprocessor os tenha removido): SP3500709F80A...
+    m = re.search(r"\b([A-Za-z]{2}\d{5,7}[A-Fa-f0-9]{20,})\b", texto_norm)
+    if m and _valid(m.group(1)):
+        return m.group(1).upper()
+
+    # Formato precedido por "código CAR" ou "CAR:" com hifens explícitos
     m = re.search(r"codigo\s+car[:\s]*([A-Za-z0-9\-]+)", texto_norm)
     if m and _valid(m.group(1)):
         return m.group(1).upper()
@@ -221,9 +298,29 @@ def _extrair_codigo_car(texto_norm: str) -> Optional[str]:
     if m and _valid(m.group(1)):
         return m.group(1).upper()
 
-    m = re.search(r"\b([A-Za-z]{2}\d{4,12}[A-Za-z]{0,2})\b", texto_norm)
+    # Formato simplificado sem hash (ex: SP000123456 usado em testes)
+    m = re.search(r"\b([A-Za-z]{2}\d{6,12})\b", texto_norm)
     if m and _valid(m.group(1)):
         return m.group(1).upper()
+
+    return None
+
+def _extrair_tipo_alerta(texto_norm: str) -> Optional[str]:
+    for pattern, valor in _TIPOS_ALERTA:
+        if re.search(pattern, texto_norm):
+            return valor
+    return None
+
+def _extrair_esfera_uc(texto_norm: str) -> Optional[str]:
+    for pattern, valor in _ESFERAS_UC:
+        if re.search(pattern, texto_norm):
+            return valor
+    return None
+
+def _extrair_bioma(texto_norm: str) -> Optional[str]:
+    for pattern, valor in _BIOMAS_SP:
+        if re.search(pattern, texto_norm):
+            return valor
     return None
 
 def _extrair_limite(texto_norm: str) -> Optional[int]:
@@ -257,6 +354,8 @@ def extrair_entidades(
     if not texto_norm or not str(texto_norm).strip():
         return Entidades()
 
+    texto_norm = texto_norm.lower()
+
     data_inicio, data_fim = _extrair_datas(texto_norm)
     ano = _extrair_ano(texto_norm)
 
@@ -286,4 +385,7 @@ def extrair_entidades(
         codigo_car=_extrair_codigo_car(texto_norm),
         limite=_extrair_limite(texto_norm),
         is_ranking=_extrair_is_ranking(texto_norm),
+        tipo_alerta=_extrair_tipo_alerta(texto_norm),
+        esfera_uc=_extrair_esfera_uc(texto_norm),
+        bioma=_extrair_bioma(texto_norm),
     )

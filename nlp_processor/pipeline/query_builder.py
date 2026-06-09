@@ -22,12 +22,25 @@ INTENT_TO_TOOL_MAP: Dict[str, str] = {
     "buscar_assentamentos": "buscar_assentamentos",
     "buscar_quilombolas": "buscar_territorios_quilombolas",
     "buscar_imoveis_rurais": "buscar_imoveis_rurais",
+    "buscar_imoveis_queimada": "buscar_imoveis_por_queimada",
+    "buscar_imoveis_desmatamento": "buscar_imoveis_por_desmatamento",
+    "buscar_imoveis_quilombo": "buscar_imoveis_por_quilombo",
+    "buscar_imoveis_ti": "buscar_imoveis_por_terra_indigena",
     "buscar_camadas_estaduais": "buscar_camadas_estaduais",
     "buscar_imoveis_em_camadas": "buscar_imoveis_com_camadas_estaduais",
     "buscar_passivos_imovel": "buscar_passivos_em_imovel",
     "buscar_focos_queimada_imovel": "buscar_focos_queimada_imovel",
     "buscar_documentos": "buscar_documentos_rag",
     "buscar_maiores_quantidades": "buscar_maiores_quantidades",
+    "buscar_queimadas_em_quilombolas": "buscar_queimadas_em_quilombolas",
+}
+
+_ABSORBED_BY_MAIORES_QUANTIDADES: Set[str] = {
+    "buscar_queimadas",
+    "buscar_desmatamentos",
+    "buscar_terras_indigenas",
+    "buscar_unidades_conservacao",
+    "buscar_quilombolas",
 }
 
 CAR_SCOPED_INTENTS: Set[str] = {
@@ -71,11 +84,15 @@ def _extract_intent_specific_arguments(intent: str, entities: Entidades) -> Dict
         "categoria_uc": ["buscar_unidades_conservacao"],
         "grupo_snuc": ["buscar_unidades_conservacao"],
         "fase_ti": ["buscar_terras_indigenas"],
+        "tipo_alerta": ["buscar_desmatamentos"],
+        "esfera_uc": ["buscar_unidades_conservacao"],
+        "bioma": ["buscar_queimadas", "buscar_queimadas_em_quilombolas", "buscar_maiores_quantidades"],
     }
 
     alias_config = {
         "categoria_uc": "categoria",
         "fase_ti": "fase",
+        "esfera_uc": "esfera",
     }
 
     for entity_attr, valid_intents in mapping_config.items():
@@ -103,14 +120,23 @@ async def executar_consulta(
 ) -> Dict[str, Any]:
     features: List[Dict[str, Any]] = []
     sources: Dict[str, Dict[str, Any]] = {}
-    description_segments: List[str] = []
+    per_intent: Dict[str, Dict[str, Any]] = {}
     sql_segments: List[str] = []
     error_messages: List[str] = []
     bbox = None
     document_context = ""
 
+    maiores_quantidades_presente = any(i == "buscar_maiores_quantidades" for i, _ in intents)
+
     for intent, confidence in intents:
         if intent == "fora_escopo":
+            continue
+
+        if maiores_quantidades_presente and intent in _ABSORBED_BY_MAIORES_QUANTIDADES:
+            continue
+
+        if intent == "buscar_passivos_imovel" and not entities.codigo_car:
+            logger.info("Intenção 'buscar_passivos_imovel' ignorada: nenhum código CAR detectado.")
             continue
 
         tool_name = INTENT_TO_TOOL_MAP.get(intent)
@@ -123,33 +149,33 @@ async def executar_consulta(
 
         tool_args = build_tool_arguments(intent, entities)
 
-        # AJUSTE PARA MAIORES QUANTIDADES: Injeta os parâmetros analíticos necessários via kwargs
         if intent == "buscar_maiores_quantidades":
             tool_args["intents"] = intents
-            
-            # Se o extrator de entidades capturar um limite numérico na pergunta (ex: "top 5"), 
-            # você pode usar entities.limite se houver, ou um fallback dinâmico:
             tool_args["limit_dinamico"] = getattr(entities, "limite", 3)
-            
-            # Sinaliza se a intenção da pergunta é explicitamente montar um ranking/posição
             tool_args["is_ranking"] = getattr(entities, "is_ranking", False)
 
         try:
             result = await tool_function(session, **tool_args)
-            features.extend(result.get("features", []))
-            
+            intent_features = result.get("features", [])
+            intent_fontes = result.get("fontes", [])
+
+            features.extend(intent_features)
+
             if result.get("bbox"):
                 bbox = result["bbox"]
-                
-            for source in result.get("fontes", []):
+
+            for source in intent_fontes:
                 sources[source["nome"]] = source
-                
-            if result.get("descricao"):
-                description_segments.append(result["descricao"])
-                
+
             if result.get("sql_executado"):
                 sql_segments.append(result["sql_executado"])
-                
+
+            per_intent[intent] = {
+                "total": result.get("total", len(intent_features)),
+                "fontes": intent_fontes,
+                "descricao": result.get("descricao", ""),
+            }
+
         except Exception:
             logger.exception("Error executing database tool: %s", tool_name)
             error_messages.append(f"Error executing tool '{tool_name}'.")
@@ -158,13 +184,13 @@ async def executar_consulta(
         try:
             rag_result = await buscar_documentos_rag(session, query_embedding, limite=4)
             document_context = rag_result.get("contexto_textual", "")
-            
+
             for source in rag_result.get("fontes", []):
                 sources[source["nome"]] = source
-                
+
             if rag_result.get("sql_executado"):
                 sql_segments.append(rag_result["sql_executado"])
-                
+
         except Exception:
             logger.exception("Error during RAG document search execution")
             error_messages.append("Error during RAG search.")
@@ -173,7 +199,8 @@ async def executar_consulta(
         "features": features,
         "bbox": bbox,
         "fontes": list(sources.values()),
-        "descricao": " ".join(description_segments),
+        "per_intent": per_intent,
+        "descricao": " ".join(d["descricao"] for d in per_intent.values() if d.get("descricao")),
         "contexto_documental": document_context,
         "sql_executado": "\n\n".join(sql_segments) if sql_segments else None,
         "mensagem_erro": " ".join(error_messages) if error_messages else None,
