@@ -45,8 +45,13 @@ def _load_training_data() -> tuple[list[str], list[str]]:
 
 
 def _build_feature_extractor() -> FeatureUnion:
-    word_vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=5000)
-    return FeatureUnion([("word", word_vectorizer)])
+    word_vectorizer = TfidfVectorizer(
+        analyzer="word", ngram_range=(1, 2), min_df=1, sublinear_tf=True, max_features=5000
+    )
+    char_vectorizer = TfidfVectorizer(
+        analyzer="char_wb", ngram_range=(3, 5), min_df=1, sublinear_tf=True, max_features=8000
+    )
+    return FeatureUnion([("word", word_vectorizer), ("char", char_vectorizer)])
 
 
 def _cross_validate(texts: list[str], labels: list[str], n_splits: int = 5) -> float:

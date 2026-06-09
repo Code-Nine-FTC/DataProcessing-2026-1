@@ -5,6 +5,22 @@ from typing import Dict, List, Set, Tuple
 import spacy
 from spellchecker import SpellChecker
 
+_LEXICO_DOMINIO: Set[str] = {
+    "desmatamento", "desmatamentos", "desmatado", "desmatada", "desmatados",
+    "desmatadas", "desmatar", "desmata", "desmatam", "desmatou", "desmataram",
+    "supressao", "queimada", "queimadas", "queimar", "queimou", "queimaram",
+    "incendio", "incendios", "foco", "focos", "fogo",
+    "ranking", "bioma", "biomas",
+    "sobreposicao", "sobreposicoes", "sobreposto", "sobrepostos", "sobreposta",
+    "sobrepostas", "sobrepoe", "sobrepoem", "sobrepor",
+    "intersecao", "interseccao", "intersecoes", "interseccoes",
+    "intersecta", "intersectam", "cruzamento",
+    "assentamento", "assentamentos", "quilombola", "quilombolas", "quilombo",
+    "quilombos", "indigena", "indigenas", "conservacao", "municipio",
+    "municipios", "homologada", "delimitada", "declarada",
+}
+
+
 # ==========================================
 # INTERFACES BASE (Princípio SOLID - OCP)
 # ==========================================
@@ -160,7 +176,7 @@ class SpellingAndEnelvoCorrector(TextTransformationStep):
             # Limpa caracteres estruturais para validação ortográfica
             clean_word = re.sub(r"[^\w]", "", word).lower()
             # Se a palavra contiver "emoji", "chavevirg" ou for um termo técnico do sistema, o corretor IGNORA-A (não mexe, não apaga)
-            if clean_word in self.protected_terms or "emoji" in clean_word or "chavevirg" in clean_word or len(clean_word) <= 3:
+            if clean_word in self.protected_terms or "emoji" in clean_word or "chavevirg" in clean_word or len(clean_word) <= 3 or word != word.lower():
                 corrected_words.append(word)
             else:
                 correction = self.spell.correction(clean_word)
@@ -281,7 +297,9 @@ class AdvancedGeoASGPreprocessor:
             # --- Termos técnicos curtos protegidos ---
             "wfs", "wms", "gis", "sig", "pid", "shp", "kml", "geojson",
         }
-        
+
+        self.system_vocabulary.update(_LEXICO_DOMINIO)
+
         # Customização de Stopwords Críticas para Dados Ambientais / Geoespaciais de SP
         # Impedimos que "de", "do", "da" (essenciais para nomes de cidades e termos como "Área de Preservação") sumam.
         self.critical_geo_particles = {"de", "da", "do"}

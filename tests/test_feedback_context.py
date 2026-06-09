@@ -19,13 +19,21 @@ async def _run_agent_with_feedback(monkeypatch, historico):
     async def fake_carregar_municipios(session):
         return []
 
-    async def fake_executar_consulta(session, intencao, entidades, query_embedding):
+    async def fake_executar_plano(session, tarefas, query_embedding, needs_rag, session_factory):
+        _, entidades = tarefas[0]
         return {
-            "features": [{"type": "Feature", "geometry": None, "properties": {}}],
-            "fontes": [{"nome": "INPE", "orgao": "INPE"}],
-            "contexto_documental": "",
+            "blocos": [{
+                "effective_tool": "buscar_queimadas",
+                "entities": entidades,
+                "total_features": 1,
+                "sources": [{"nome": "INPE", "orgao": "INPE"}],
+                "document_context": "",
+                "query_description": "Encontrados 1 focos de queimada.",
+                "features": [{"type": "Feature", "geometry": None, "properties": {}}],
+                "bbox": None,
+            }],
+            "document_context": "",
             "sql_executado": "SELECT 1",
-            "mensagem_erro": None,
         }
 
     monkeypatch.setattr("nlp_processor.agent.get_classifier", lambda: _ClassifierStub())
@@ -35,7 +43,7 @@ async def _run_agent_with_feedback(monkeypatch, historico):
         "nlp_processor.agent.extrair_entidades",
         lambda pergunta, municipios_extras: Entidades(municipio="Campinas"),
     )
-    monkeypatch.setattr("nlp_processor.agent.executar_consulta", fake_executar_consulta)
+    monkeypatch.setattr("nlp_processor.agent.executar_plano", fake_executar_plano)
 
     return await run_agent(
         session=None,

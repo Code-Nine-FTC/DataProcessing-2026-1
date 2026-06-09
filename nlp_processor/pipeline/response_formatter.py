@@ -81,6 +81,11 @@ _TEMPLATES: Dict[str, str] = {
     ),
 }
 
+_MENSAGEM_SEM_DOCUMENTO = (
+    "Não encontrei conteúdo relevante na base de conhecimento documental do sistema "
+    "para responder a essa pergunta."
+)
+
 _PROPERTY_TYPE_BY_TOOL: Dict[str, str] = {
     "buscar_imoveis_por_queimada":       "imovel_rural_queimada",
     "buscar_imoveis_por_desmatamento":   "imovel_rural_desmatamento",
@@ -387,28 +392,23 @@ _STRATEGY_MAP: Dict[str, Callable] = {
 # Ponto de entrada principal
 # ---------------------------------------------------------------------------
 
-def format_pipeline_response(
-    effective_tool: str,
-    entities: Entidades,
-    total_features: int,
-    sources: List[Dict[str, Any]],
-    document_context: str,
-    query_description: Optional[str] = None,
-    feedback_context: Optional[Dict[str, Any]] = None,
-    features: Optional[List[Dict[str, Any]]] = None,
-) -> str:
-    """Formata a resposta final com base na ferramenta efetiva chamada pelo query_builder."""
+def _render_bloco(bloco: Dict[str, Any]) -> str:
+    effective_tool = bloco["effective_tool"]
+    entities = bloco["entities"]
+    total_features = bloco["total_features"]
+    sources = bloco.get("sources", [])
+    document_context = bloco.get("document_context", "")
+    query_description = bloco.get("query_description")
+    features = bloco.get("features")
     scope = _format_scope(entities)
 
     if effective_tool == "fora_escopo":
-        return _apply_context_feedback(_TEMPLATES["fora_escopo"], feedback_context)
+        return _TEMPLATES["fora_escopo"]
 
     if effective_tool == "buscar_documentos_rag":
-        body = (
-            _apply_template(effective_tool, total_features, sources, scope, entities, document_context)
-            if document_context
-            else _build_zero_results_message(effective_tool, entities, scope)
-        )
+        if not document_context:
+            return _MENSAGEM_SEM_DOCUMENTO
+        body = _apply_template(effective_tool, total_features, sources, scope, entities, document_context)
     elif effective_tool in _STRATEGY_MAP:
         body = _STRATEGY_MAP[effective_tool](entities, features, total_features, sources, scope, document_context)
     elif total_features == 0:
@@ -419,11 +419,58 @@ def format_pipeline_response(
     if _should_append_description(effective_tool, total_features):
         body = _append_query_description(body, query_description)
 
-    cited_sources = _format_sources(sources)
-    if cited_sources:
-        body += f"\n\n{cited_sources}"
+    return body
 
-    return _apply_context_feedback(body, feedback_context)
+
+def _dedupe_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    visto: Dict[str, Dict[str, Any]] = {}
+    for source in sources:
+        nome = source.get("nome")
+        if nome and nome not in visto:
+            visto[nome] = source
+    return list(visto.values())
+
+
+def compor_resposta(
+    blocos: List[Dict[str, Any]],
+    feedback_context: Optional[Dict[str, Any]] = None,
+) -> str:
+    if not blocos:
+        return _apply_context_feedback(_TEMPLATES["fora_escopo"], feedback_context)
+
+    corpos = [corpo for corpo in (_render_bloco(bloco) for bloco in blocos) if corpo]
+    texto = "\n\n".join(corpos)
+
+    fontes: List[Dict[str, Any]] = []
+    for bloco in blocos:
+        fontes.extend(bloco.get("sources", []))
+    citacao = _format_sources(_dedupe_sources(fontes))
+    if citacao:
+        texto += f"\n\n{citacao}"
+
+    return _apply_context_feedback(texto, feedback_context)
+
+
+def format_pipeline_response(
+    effective_tool: str,
+    entities: Entidades,
+    total_features: int,
+    sources: List[Dict[str, Any]],
+    document_context: str,
+    query_description: Optional[str] = None,
+    feedback_context: Optional[Dict[str, Any]] = None,
+    features: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    bloco = {
+        "effective_tool": effective_tool,
+        "entities": entities,
+        "total_features": total_features,
+        "sources": sources,
+        "document_context": document_context,
+        "query_description": query_description,
+        "features": features,
+    }
+    return compor_resposta([bloco], feedback_context)
 
 
 def _apply_template(

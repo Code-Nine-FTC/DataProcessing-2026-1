@@ -20,6 +20,7 @@ from nlp_processor.pipeline.preprocessor import normalizar
 logger = logging.getLogger(__name__)
 
 COMPLEX_POLYGON_TOLERANCE = 0.0002
+RELEVANCIA_MINIMA_RAG = 0.30
 
 def _normalizar_parametro(texto: str) -> str:
     if not texto or not isinstance(texto, str):
@@ -1591,7 +1592,7 @@ async def buscar_documentos_rag(
     from pgvector.sqlalchemy import Vector
 
     # Cosine distance search usando pgvector
-    distance_expr = DocumentoTrecho.embedding.op("<->", return_type=Float())(
+    distance_expr = DocumentoTrecho.embedding.op("<=>", return_type=Float())(
         cast(query_embedding, Vector(768))
     )
 
@@ -1621,12 +1622,15 @@ async def buscar_documentos_rag(
     trechos = []
     fontes: dict[str, dict] = {}
     for row in rows:
+        relevancia = _round_float(1 - float(row.distancia), 4) if row.distancia is not None else None
+        if relevancia is None or relevancia < RELEVANCIA_MINIMA_RAG:
+            continue
         trechos.append({
             "titulo": row.titulo,
             "tipo": row.tipo,
             "url": row.url_origem,
             "texto": row.texto,
-            "relevancia": _round_float(1 - float(row.distancia), 4) if row.distancia is not None else None,
+            "relevancia": relevancia,
         })
         if row.fonte_nome:
             fontes[row.fonte_nome] = {

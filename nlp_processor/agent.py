@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import re
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from time import perf_counter
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import logging
 from sqlalchemy import select
@@ -14,8 +15,8 @@ from nlp_processor.pipeline.intent_classifier import get_classifier
 from nlp_processor.pipeline.entity_extractor import Entidades, extrair_entidades
 from nlp_processor.pipeline.embedder import get_embedder
 from nlp_processor.pipeline.preprocessor import AdvancedGeoASGPreprocessor, normalizar
-from nlp_processor.pipeline.query_builder import executar_consulta
-from nlp_processor.pipeline.response_formatter import format_pipeline_response
+from nlp_processor.pipeline.query_builder import executar_plano
+from nlp_processor.pipeline.response_formatter import compor_resposta
 from models.db_model import Municipio
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,31 @@ _FALLBACKS_POR_TOKEN: list[tuple[frozenset[str], str]] = [
     (frozenset({"unidade de conservacao", "unidades de conservacao", "parque", "apa", "resex", "rebio", "estacao ecologica", "flona", "rppn"}), "buscar_unidades_conservacao"),
 ]
 
+# Intenções resolvidas de forma holística: a pergunta inteira vira uma única tarefa.
+_INTENTS_HOLISTICOS: frozenset[str] = frozenset({
+    "buscar_sobreposicao_areas",
+    "buscar_maiores_quantidades",
+    "buscar_passivos_imovel",
+    "buscar_focos_queimada_imovel",
+    "fora_escopo",
+})
+
+_CONECTORES_RE = re.compile(
+    r"\s+e\s+|\s*;\s*|\s+tambem\s+|\s+alem\s+de\s+|\s+bem\s+como\s+|\s+assim\s+como\s+"
+)
+
+# Estados, regiões e gentílicos fora de São Paulo: o sistema cobre apenas SP.
+_FORA_SP_RE = re.compile(
+    r"\b("
+    r"bahia|baiano|baiana|ceara|pernambuco|pernambucano|maranhao|piaui|paraiba|"
+    r"sergipe|alagoas|rio grande do norte|rio grande do sul|gaucho|"
+    r"santa catarina|catarinense|parana|paranaense|minas gerais|mineiro|"
+    r"rio de janeiro|carioca|fluminense|espirito santo|mato grosso|"
+    r"mato grosso do sul|goias|goiano|tocantins|rondonia|roraima|amapa|"
+    r"amazonas|amazonia|paraense|pantanal|distrito federal|brasilia"
+    r")\b"
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -132,16 +158,16 @@ def _texto_contem(texto: str, tokens: frozenset[str]) -> bool:
 def _fora_escopo(texto_norm: str, entidades: Entidades) -> bool:
     if entidades.codigo_car or entidades.municipio or entidades.regiao_administrativa:
         return False
+    if _FORA_SP_RE.search(texto_norm):
+        return True
     return not _texto_contem(texto_norm, _ESCOPO_AMBIENTAL_TOKENS)
 
 
-def _inferir_intencao_por_vocabulario(texto_norm: str, entidades: Entidades) -> str:
+def _inferir_intencao_por_vocabulario(texto_norm: str) -> Optional[str]:
     for tokens, alvo in _FALLBACKS_POR_TOKEN:
         if _texto_contem(texto_norm, tokens):
             return alvo
-    if entidades.municipio:
-        return "buscar_queimadas"
-    return "buscar_documentos"
+    return None
 
 
 def _deve_promover_ranking(texto_norm: str) -> bool:
@@ -276,8 +302,10 @@ def _resolver_intencao_final(
         return "buscar_maiores_quantidades", confianca
 
     if confianca < CONFIDENCE_THRESHOLD:
-        inferida = _inferir_intencao_por_vocabulario(texto_norm, entidades)
-        logger.info("Confiança baixa (%.2f) — intent inferido por vocabulário: %s.", confianca, inferida)
+        inferida = _inferir_intencao_por_vocabulario(texto_norm)
+        if inferida is None:
+            inferida = intent_classificado if entidades.municipio else "buscar_documentos"
+        logger.info("Confiança baixa (%.2f) — intent resolvido: %s.", confianca, inferida)
         return inferida, confianca
 
     if _texto_contem(texto_norm, _TOKENS_IMOVEL):
@@ -289,14 +317,122 @@ def _resolver_intencao_final(
     return intent_classificado, confianca
 
 
-def _determinar_status(intent: str, features: list, contexto_documental: str) -> str:
-    if intent == "fora_escopo":
+def _ms(inicio: float) -> int:
+    return int((perf_counter() - inicio) * 1000)
+
+
+def _session_factory() -> Optional[Callable[[], AsyncSession]]:
+    try:
+        from models.database import Database
+        return lambda: Database().session
+    except Exception:
+        logger.warning("Fábrica de sessões indisponível; tarefas serão executadas sequencialmente.")
+        return None
+
+
+def _segmentar(texto_norm: str) -> list[str]:
+    partes = _CONECTORES_RE.split(texto_norm)
+    return [parte.strip() for parte in partes if parte and parte.strip()]
+
+
+def _herdar_escopo(segmento: Entidades, completo: Entidades) -> None:
+    if not segmento.municipio and not segmento.regiao_administrativa:
+        segmento.municipio = completo.municipio
+        segmento.regiao_administrativa = completo.regiao_administrativa
+    if not segmento.data_inicio and not segmento.data_fim and not segmento.ano:
+        segmento.data_inicio = completo.data_inicio
+        segmento.data_fim = completo.data_fim
+        segmento.ano = completo.ano
+
+
+def _montar_plano(
+    preprocessed: dict[str, Any],
+    texto_norm: str,
+    municipios_extras: list[str],
+    municipio_filtro: Optional[str],
+) -> tuple[list[tuple[str, Entidades]], Entidades, float]:
+    classifier = get_classifier()
+    entidades = extrair_entidades(preprocessed, municipios_extras)
+
+    if (
+        municipio_filtro
+        and not entidades.municipio
+        and not entidades.codigo_car
+        and not _fora_escopo(texto_norm, entidades)
+    ):
+        entidades.municipio = municipio_filtro
+
+    intent_geral, confianca = _resolver_intencao_final(
+        texto_norm, entidades, *classifier.predict(preprocessed)
+    )
+
+    holistico = (
+        intent_geral in _INTENTS_HOLISTICOS
+        or bool(entidades.codigo_car)
+        or _CONECTORES_RE.search(texto_norm) is None
+    )
+    if holistico:
+        return [(intent_geral, entidades)], entidades, confianca
+
+    tarefas: list[tuple[str, Entidades]] = []
+    vistos: set[tuple] = set()
+    for segmento in _segmentar(texto_norm):
+        entrada = {"text_for_entities_and_rag": segmento}
+        entidades_seg = extrair_entidades(entrada, municipios_extras)
+        _herdar_escopo(entidades_seg, entidades)
+        intent_seg, _ = _resolver_intencao_final(
+            segmento, entidades_seg, *classifier.predict(entrada)
+        )
+        if intent_seg == "fora_escopo":
+            continue
+        chave = (intent_seg, entidades_seg.municipio, entidades_seg.contexto_espacial)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        tarefas.append((intent_seg, entidades_seg))
+
+    if not tarefas:
+        return [(intent_geral, entidades)], entidades, confianca
+    return tarefas, entidades, confianca
+
+
+def _unir_features(blocos: list[dict]) -> list[dict]:
+    features: list[dict] = []
+    for bloco in blocos:
+        features.extend(bloco.get("features") or [])
+    return features
+
+
+def _unir_fontes(blocos: list[dict]) -> list[dict]:
+    visto: dict[str, dict] = {}
+    for bloco in blocos:
+        for fonte in bloco.get("sources", []):
+            nome = fonte.get("nome")
+            if nome and nome not in visto:
+                visto[nome] = fonte
+    return list(visto.values())
+
+
+def _unir_bbox(blocos: list[dict]) -> Optional[list[float]]:
+    caixas = [bloco["bbox"] for bloco in blocos if bloco.get("bbox")]
+    if not caixas:
+        return None
+    return [
+        min(caixa[0] for caixa in caixas),
+        min(caixa[1] for caixa in caixas),
+        max(caixa[2] for caixa in caixas),
+        max(caixa[3] for caixa in caixas),
+    ]
+
+
+def _status_do_plano(blocos: list[dict], document_context: str) -> str:
+    if not blocos or all(bloco["effective_tool"] == "fora_escopo" for bloco in blocos):
         return "fora_escopo"
-    if intent == "buscar_documentos" and contexto_documental:
+    if any(bloco.get("features") for bloco in blocos):
         return "sucesso"
-    if not features:
-        return "sem_resultado"
-    return "sucesso"
+    if document_context:
+        return "sucesso"
+    return "sem_resultado"
 
 
 def _build_resultado_erro(
@@ -334,8 +470,8 @@ async def run_agent(
     municipio: Optional[str] = None,
 ) -> dict[str, Any]:
     inicio = perf_counter()
+    marcos: dict[str, int] = {}
     classifier = get_classifier()
-    embedder = get_embedder()
 
     if not classifier.is_ready():
         logger.error("Modelo de intenções não carregado ou não treinado.")
@@ -345,11 +481,10 @@ async def run_agent(
             mensagem="Modelo de intenções não treinado ou arquivos corrompidos.",
         )
 
+    marco = perf_counter()
     preprocessed = _preprocessor.process(pergunta)
     texto_norm = preprocessed["text_for_entities_and_rag"].lower()
-
-    intent_bruto, confianca_bruta = classifier.predict(preprocessed)
-    logger.info("Intent classificado: %s (confiança: %.2f)", intent_bruto, confianca_bruta)
+    marcos["preprocess_ms"] = _ms(marco)
 
     municipios_extras: list[str] = []
     try:
@@ -357,75 +492,69 @@ async def run_agent(
     except Exception:
         logger.warning("Não foi possível carregar municípios do banco; usando gazetteer estático.")
 
-    entidades = extrair_entidades(preprocessed, municipios_extras)
+    marco = perf_counter()
+    tarefas, entidades, confianca = _montar_plano(preprocessed, texto_norm, municipios_extras, municipio)
+    marcos["plano_ms"] = _ms(marco)
 
-    if municipio and not entidades.municipio and not entidades.codigo_car and not _fora_escopo(texto_norm, entidades):
-        logger.info("Injetando município do filtro: %s", municipio)
-        entidades.municipio = municipio
+    intents = [intent for intent, _ in tarefas]
+    intencao = "+".join(intents)
+    logger.info("Plano de execução (%d tarefa(s)): %s", len(tarefas), intents)
 
     entidades_json = _serializar_entidades(entidades)
     filtros_json = _serializar_filtros(entidades_json)
 
-    intent_final, confianca_final = _resolver_intencao_final(texto_norm, entidades, intent_bruto, confianca_bruta)
-    logger.info("Intent final: %s | contexto_espacial: %s", intent_final, entidades.contexto_espacial)
-
+    needs_rag = "buscar_documentos" in intents
     query_embedding: list[float] = []
-    try:
-        query_embedding = embedder.embed(preprocessed)
-    except Exception:
-        logger.warning("Não foi possível gerar embedding — RAG desativado.")
+    if needs_rag:
+        marco = perf_counter()
+        try:
+            query_embedding = get_embedder().embed(preprocessed)
+        except Exception:
+            logger.warning("Não foi possível gerar embedding — RAG desativado.")
+        marcos["embedding_ms"] = _ms(marco)
 
-    logger.info("Executando consulta para intent=%s contexto=%s ...", intent_final, entidades.contexto_espacial)
+    marco = perf_counter()
     try:
-        resultado = await executar_consulta(
+        plano = await executar_plano(
             session=session,
-            intent=intent_final,
-            entities=entidades,
+            tarefas=tarefas,
             query_embedding=query_embedding,
+            needs_rag=needs_rag,
+            session_factory=_session_factory(),
         )
-        logger.info("Consulta executada com sucesso.")
     except Exception:
-        logger.exception("Erro ao executar consulta no banco de dados.")
+        logger.exception("Erro ao executar plano de consultas.")
         return _build_resultado_erro(
             inicio=inicio,
             texto="Ocorreu um erro ao consultar os dados. Tente novamente.",
             mensagem="Erro ao executar consulta no banco.",
-            intencao=intent_final,
-            confianca=confianca_final,
+            intencao=intencao,
+            confianca=confianca,
             entidades_json=entidades_json,
             filtros_json=filtros_json,
         )
+    marcos["consultas_ms"] = _ms(marco)
 
-    features = resultado["features"]
-    fontes = resultado["fontes"]
-    contexto_documental = resultado["contexto_documental"]
-    effective_tool = resultado.get("effective_tool", intent_final)
-    status = _determinar_status(intent_final, features, contexto_documental)
+    blocos = plano["blocos"]
+    document_context = plano["document_context"]
 
-    feedback_contexto = _extrair_feedback_contexto(historico, intencao_atual=intent_final)
+    feedback_contexto = _extrair_feedback_contexto(historico, intencao_atual=intencao)
+    texto = compor_resposta(blocos, feedback_context=feedback_contexto or None)
 
-    texto = format_pipeline_response(
-        effective_tool=effective_tool,
-        entities=entidades,
-        total_features=len(features),
-        sources=fontes,
-        document_context=contexto_documental,
-        query_description=resultado.get("descricao"),
-        feedback_context=feedback_contexto or None,
-        features=features,
-    )
+    marcos["total_ms"] = _ms(inicio)
+    logger.info("Tempos NLP (ms): %s", marcos)
 
     return {
         "texto_resposta": texto,
-        "features": features,
-        "bbox": resultado.get("bbox"),
-        "fontes": fontes,
-        "status": status,
-        "intencao": intent_final,
-        "intencao_score": confianca_final,
+        "features": _unir_features(blocos),
+        "bbox": _unir_bbox(blocos),
+        "fontes": _unir_fontes(blocos),
+        "status": _status_do_plano(blocos, document_context),
+        "intencao": intencao,
+        "intencao_score": confianca,
         "entidades_detectadas_json": entidades_json,
         "filtros_detectados_json": filtros_json,
-        "sql_executado": resultado.get("sql_executado"),
-        "mensagem_erro": resultado.get("mensagem_erro"),
-        "tempo_resposta_ms": int((perf_counter() - inicio) * 1000),
+        "sql_executado": plano.get("sql_executado"),
+        "mensagem_erro": None,
+        "tempo_resposta_ms": marcos["total_ms"],
     }

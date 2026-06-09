@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -163,44 +164,27 @@ async def executar_consulta(
     session: AsyncSession,
     intent: str,
     entities: Entidades,
-    query_embedding: Optional[List[float]],
 ) -> Dict[str, Any]:
-    """Executa a ferramenta de banco de dados correspondente ao intent e retorna o resultado.
-
-    Retorna 'effective_tool' no dict para que o formatter saiba qual template usar.
-    """
-    document_context = ""
-    sql_segments: List[str] = []
-    rag_sources: List[Dict[str, Any]] = []
-
-    if query_embedding:
-        try:
-            rag_result = await buscar_documentos_rag(session, query_embedding, limite=4)
-            document_context = rag_result.get("contexto_textual", "")
-            rag_sources = rag_result.get("fontes", [])
-            if rag_result.get("sql_executado"):
-                sql_segments.append(rag_result["sql_executado"])
-        except Exception:
-            logger.exception("Erro ao executar busca RAG de documentos")
-
+    """Executa a ferramenta correspondente a uma única intenção e retorna seu resultado."""
     if intent == "fora_escopo":
-        return _empty_result("fora_escopo", document_context, sql_segments, rag_sources)
+        return _empty_result("fora_escopo")
+
+    if intent == "buscar_documentos":
+        return _empty_result("buscar_documentos_rag")
 
     if intent == "buscar_passivos_imovel" and not entities.codigo_car:
         logger.info("Intenção 'buscar_passivos_imovel' ignorada: código CAR não detectado.")
-        return _empty_result(intent, document_context, sql_segments, rag_sources)
+        return _empty_result(intent)
 
-    contexto = entities.contexto_espacial
-    tool_name = _resolve_tool(intent, contexto)
-
+    tool_name = _resolve_tool(intent, entities.contexto_espacial)
     if not tool_name:
-        logger.warning("Sem ferramenta mapeada para: intent=%s contexto=%s", intent, contexto)
-        return _empty_result(intent, document_context, sql_segments, rag_sources)
+        logger.warning("Sem ferramenta mapeada para: intent=%s contexto=%s", intent, entities.contexto_espacial)
+        return _empty_result(intent)
 
     tool_fn = TOOL_FUNCTIONS.get(tool_name)
     if not tool_fn:
         logger.error("Ferramenta '%s' não encontrada em TOOL_FUNCTIONS", tool_name)
-        return _empty_result(intent, document_context, sql_segments, rag_sources)
+        return _empty_result(intent)
 
     tool_args = _build_tool_arguments(intent, tool_name, entities)
 
@@ -208,23 +192,80 @@ async def executar_consulta(
         result = await tool_fn(session, **tool_args)
     except Exception:
         logger.exception("Erro ao executar ferramenta: %s", tool_name)
-        return _empty_result(intent, document_context, sql_segments, rag_sources)
-
-    sources = _merge_sources(result.get("fontes", []), rag_sources)
-
-    if result.get("sql_executado"):
-        sql_segments.append(result["sql_executado"])
+        return _empty_result(intent)
 
     return {
         "effective_tool": tool_name,
         "features": result.get("features", []),
         "bbox": result.get("bbox"),
         "total": result.get("total", len(result.get("features", []))),
-        "fontes": sources,
+        "fontes": result.get("fontes", []),
         "descricao": result.get("descricao", ""),
-        "contexto_documental": document_context,
-        "sql_executado": "\n\n".join(sql_segments) if sql_segments else None,
+        "sql_executado": result.get("sql_executado"),
         "mensagem_erro": None,
+    }
+
+
+async def _executar_tarefas(
+    session: AsyncSession,
+    tarefas: List[Tuple[str, Entidades]],
+    session_factory: Optional[Callable[[], AsyncSession]],
+) -> List[Dict[str, Any]]:
+    if len(tarefas) <= 1 or session_factory is None:
+        return [await executar_consulta(session, intent, entidades) for intent, entidades in tarefas]
+
+    async def _isolada(intent: str, entidades: Entidades) -> Dict[str, Any]:
+        async with session_factory() as sessao:
+            return await executar_consulta(sessao, intent, entidades)
+
+    return await asyncio.gather(*[_isolada(intent, entidades) for intent, entidades in tarefas])
+
+
+async def executar_plano(
+    session: AsyncSession,
+    tarefas: List[Tuple[str, Entidades]],
+    query_embedding: Optional[List[float]],
+    needs_rag: bool = False,
+    session_factory: Optional[Callable[[], AsyncSession]] = None,
+) -> Dict[str, Any]:
+    """Executa todas as tarefas do plano e devolve um bloco de resposta por tarefa."""
+    document_context = ""
+    rag_sources: List[Dict[str, Any]] = []
+    sql_segments: List[str] = []
+
+    if needs_rag and query_embedding:
+        try:
+            rag = await buscar_documentos_rag(session, query_embedding, limite=4)
+            document_context = rag.get("contexto_textual", "")
+            rag_sources = rag.get("fontes", [])
+            if rag.get("sql_executado"):
+                sql_segments.append(rag["sql_executado"])
+        except Exception:
+            logger.exception("Erro ao executar busca RAG de documentos")
+
+    resultados = await _executar_tarefas(session, tarefas, session_factory)
+
+    blocos: List[Dict[str, Any]] = []
+    for (intent, entidades), resultado in zip(tarefas, resultados):
+        if resultado.get("sql_executado"):
+            sql_segments.append(resultado["sql_executado"])
+        eh_documento = resultado["effective_tool"] == "buscar_documentos_rag"
+        fontes = resultado.get("fontes", [])
+        blocos.append({
+            "effective_tool": resultado["effective_tool"],
+            "entities": entidades,
+            "total_features": len(resultado.get("features") or []),
+            "sources": _merge_sources(fontes, rag_sources) if eh_documento else fontes,
+            "document_context": document_context if eh_documento else "",
+            "query_description": resultado.get("descricao"),
+            "features": resultado.get("features") or [],
+            "bbox": resultado.get("bbox"),
+        })
+
+    return {
+        "blocos": blocos,
+        "document_context": document_context,
+        "sql_executado": "\n\n".join(sql_segments) if sql_segments else None,
     }
 
 
@@ -238,15 +279,14 @@ def _merge_sources(
     return list(merged.values())
 
 
-def _empty_result(intent: str, document_context: str, sql_segments: List[str], sources: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _empty_result(effective_tool: str) -> Dict[str, Any]:
     return {
-        "effective_tool": intent,
+        "effective_tool": effective_tool,
         "features": [],
         "bbox": None,
         "total": 0,
-        "fontes": sources,
+        "fontes": [],
         "descricao": "",
-        "contexto_documental": document_context,
-        "sql_executado": "\n\n".join(sql_segments) if sql_segments else None,
+        "sql_executado": None,
         "mensagem_erro": None,
     }
