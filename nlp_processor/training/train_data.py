@@ -102,6 +102,15 @@ TRAIN_DATA: list[tuple[str, list[str]]] = [
     ("Quais imóveis rurais foram atingidos por queimadas em 2024?", ["buscar_imoveis_queimada"]),
     ("Fazendas em Ribeirão Preto que registraram focos de incêndio", ["buscar_imoveis_queimada"]),
     ("Buscar CAR de propriedades com cicatrizes de fogo em SP", ["buscar_imoveis_queimada"]),
+    ("Imóveis rurais que tiveram focos de queimada dentro da propriedade em Campinas", ["buscar_imoveis_queimada"]),
+    ("Quais fazendas em Sorocaba tiveram fogo registrado dentro do CAR?", ["buscar_imoveis_queimada"]),
+    ("Propriedades rurais afetadas por queimadas em São José dos Campos", ["buscar_imoveis_queimada"]),
+    ("Listar CARs com histórico de incêndio dentro do perímetro em SP", ["buscar_imoveis_queimada"]),
+    ("Quais imóveis do SICAR registraram queimadas em seus limites?", ["buscar_imoveis_queimada"]),
+    ("Fazendas com focos de calor dentro da propriedade em Bauru", ["buscar_imoveis_queimada"]),
+    ("Imóveis rurais com queimadas registradas dentro do polígono do CAR em Marília", ["buscar_imoveis_queimada"]),
+    ("Quais propriedades em Presidente Prudente tiveram incêndio no interior?", ["buscar_imoveis_queimada"]),
+    ("CAR de imóveis rurais atingidos internamente por fogo no estado de SP", ["buscar_imoveis_queimada"]),
 
     # ---- buscar_imoveis_desmatamento ----
     ("Quais propriedades rurais possuem alertas de desmatamento?", ["buscar_imoveis_desmatamento"]),
@@ -115,6 +124,16 @@ TRAIN_DATA: list[tuple[str, list[str]]] = [
     # ---- buscar_imoveis_ti ----
     ("Existem imóveis rurais invadindo terras indígenas em SP?", ["buscar_imoveis_ti"]),
     ("Buscar cadastros do SICAR que intersectam a TI Tekoa Pyau", ["buscar_imoveis_ti"]),
+    ("Quais fazendas estão dentro de terras indígenas no estado de SP?", ["buscar_imoveis_ti"]),
+    ("CARs sobrepostos a demarcações indígenas em São Paulo", ["buscar_imoveis_ti"]),
+    ("Imóveis rurais com sobreposição em TIs paulistas", ["buscar_imoveis_ti"]),
+    ("Listar propriedades rurais dentro de reservas indígenas em SP", ["buscar_imoveis_ti"]),
+    ("Quais cadastros do CAR conflitam com terras indígenas homologadas?", ["buscar_imoveis_ti"]),
+    ("Fazendas com conflito fundiário em terras indígenas no Vale do Ribeira", ["buscar_imoveis_ti"]),
+    ("Imóvel rural dentro de terra indígena demarcada em SP", ["buscar_imoveis_ti"]),
+    ("Propriedades do SICAR que invadem TIs no litoral paulista", ["buscar_imoveis_ti"]),
+    ("Percentual de sobreposição de imóveis rurais com terras indígenas em SP", ["buscar_imoveis_ti"]),
+    ("Buscar CAR com intersecção em territórios indígenas guarani em São Paulo", ["buscar_imoveis_ti"]),
 
     # ---- buscar_camadas_estaduais ----
     ("Exibir mapa de zoneamento ambiental do estado de São Paulo", ["buscar_camadas_estaduais"]),
@@ -141,6 +160,21 @@ TRAIN_DATA: list[tuple[str, list[str]]] = [
     ("Quais são os critérios para homologação de territórios quilombolas?", ["buscar_documentos"]),
     ("Resolução SMA sobre unidades de conservação estaduais em SP", ["buscar_documentos"]),
     ("Manual de uso do DETER para monitoramento ambiental", ["buscar_documentos"]),
+    ("O que é o Código Florestal Brasileiro e como ele se aplica em SP?", ["buscar_documentos"]),
+    ("Qual a lei que protege as APPs em margens de rios no estado?", ["buscar_documentos"]),
+    ("Quais são as normas para regularização fundiária em terras indígenas?", ["buscar_documentos"]),
+    ("Como funciona o programa BDQueimadas do INPE?", ["buscar_documentos"]),
+    ("Quais resoluções regulamentam as unidades de conservação em SP?", ["buscar_documentos"]),
+    ("Explique como o SNUC classifica as unidades de conservação", ["buscar_documentos"]),
+    ("Quais são as penalidades para desmatamento ilegal na Mata Atlântica?", ["buscar_documentos"]),
+    ("Documentação sobre o cadastramento de imóveis no SICAR", ["buscar_documentos"]),
+    ("O que diz a lei da Mata Atlântica sobre supressão de vegetação?", ["buscar_documentos"]),
+    ("Como é feita a demarcação de territórios quilombolas pelo INCRA?", ["buscar_documentos"]),
+    ("Quais instrumentos legais protegem as terras indígenas no Brasil?", ["buscar_documentos"]),
+    ("Normativa sobre reserva legal em imóveis rurais no estado de SP", ["buscar_documentos"]),
+    ("Quais são as regras do zoneamento agroambiental paulista?", ["buscar_documentos"]),
+    ("Explique a metodologia do PRODES para detecção de desmatamento", ["buscar_documentos"]),
+    ("Qual legislação define as zonas de amortecimento de parques estaduais?", ["buscar_documentos"]),
 
     # ---- fora_escopo ----
     ("Qual a previsão do tempo para a capital amanhã?", ["fora_escopo"]),
@@ -166,6 +200,18 @@ TRAIN_DATA: list[tuple[str, list[str]]] = [
     ("temperatura media ribeirao preto", ["fora_escopo"]),
     ("dados demograficos sao paulo ibge", ["fora_escopo"]),
     ("queda energia eletrica campinas", ["fora_escopo"]),
+    ("territórios quilombolas no Pará", ["fora_escopo"]),
+    ("terras indígenas na Amazônia", ["fora_escopo"]),
+    ("quilombos no estado do Maranhão", ["fora_escopo"]),
+    ("queimadas no Pantanal do Mato Grosso do Sul", ["fora_escopo"]),
+    ("desmatamento na Amazônia Legal em 2024", ["fora_escopo"]),
+    ("unidades de conservação no Mato Grosso", ["fora_escopo"]),
+    ("focos de incêndio no Cerrado do Tocantins", ["fora_escopo"]),
+    ("terras indígenas guarani no Rio Grande do Sul", ["fora_escopo"]),
+    ("assentamentos do INCRA em Minas Gerais", ["fora_escopo"]),
+    ("imóveis rurais no CAR do estado do Paraná", ["fora_escopo"]),
+    ("alertas DETER na Amazônia Legal", ["fora_escopo"]),
+    ("quilombolas reconhecidos na Bahia pelo INCRA", ["fora_escopo"]),
 
     # =========================================================================
     # ---- INTENÇÕES QUE ESTAVAM AUSENTES / CORREÇÕES ----
@@ -180,6 +226,16 @@ TRAIN_DATA: list[tuple[str, list[str]]] = [
     ("Quantas queimadas atingiram o imóvel SP000123456 em 2024?", ["buscar_focos_queimada_imovel"]),
     ("focos de calor detectados no perimetro do imovel SP555444333", ["buscar_focos_queimada_imovel"]),
     ("sicar SP000123456 teve fogo recentemente?", ["buscar_focos_queimada_imovel"]),
+    ("Queimadas dentro da minha propriedade rural SP-3500709-ABCDEF1234567890?", ["buscar_focos_queimada_imovel"]),
+    ("Incêndios detectados dentro do imóvel rural SP-3550308-999888777666555444", ["buscar_focos_queimada_imovel"]),
+    ("Quais focos de fogo ocorreram dentro do CAR SP-3549904-AAABBBCCC em 2023?", ["buscar_focos_queimada_imovel"]),
+    ("Ver queimadas dentro da fazenda com código CAR SP-3548708-XYZ12345", ["buscar_focos_queimada_imovel"]),
+    ("Fogo registrado pelo satélite dentro da propriedade CAR SP-3503208-ABC", ["buscar_focos_queimada_imovel"]),
+    ("Meu imóvel rural SP000111222 teve algum foco de incêndio?", ["buscar_focos_queimada_imovel"]),
+    ("Focos de queimada nos últimos 12 meses dentro do CAR SP555666777", ["buscar_focos_queimada_imovel"]),
+    ("Histórico de fogo dentro da propriedade cadastrada como SP333444555", ["buscar_focos_queimada_imovel"]),
+    ("Quantos focos de calor foram detectados na fazenda SP-3500105-HASH2024?", ["buscar_focos_queimada_imovel"]),
+    ("Quero saber se houve queimada na minha propriedade SP888777666 este ano", ["buscar_focos_queimada_imovel"]),
 
     # ---- buscar_maiores_quantidades ----
     ("Quais são os municípios com maior número de focos de queimada em SP?", ["buscar_maiores_quantidades"]),
@@ -228,8 +284,8 @@ TRAIN_DATA: list[tuple[str, list[str]]] = [
     ("Incêndios florestais perto de territórios de quilombo e assentados", ["buscar_queimadas", "buscar_quilombolas", "buscar_assentamentos"]),
 
     # ---- Cruzamento: Imóveis Rurais + Múltiplas Camadas Ambientais ----
-    ("Quais imóveis do CAR estão em áreas protegidas ou territórios quilombolas?", ["buscar_imoveis_rurais", "buscar_unidades_conservacao", "buscar_quilombolas"]),
-    ("Sobreposição de propriedades rurais com TIs e UCs no estado", ["buscar_imoveis_em_camadas", "buscar_terras_indigenas", "buscar_unidades_conservacao"]),
+    ("Quais imóveis do CAR estão em áreas protegidas ou territórios quilombolas?", ["buscar_imoveis_em_camadas", "buscar_imoveis_quilombo"]),
+    ("Sobreposição de propriedades rurais com TIs e UCs no estado", ["buscar_imoveis_ti", "buscar_imoveis_em_camadas"]),
     ("Verificar fazendas que intersectam camadas estaduais e áreas de preservação", ["buscar_imoveis_em_camadas", "buscar_camadas_estaduais"]),
 
     ("Quais propriedades rurais têm passivo de desmatamento e focos de queimada?", ["buscar_imoveis_desmatamento", "buscar_imoveis_queimada"]),
@@ -459,15 +515,132 @@ TRAIN_DATA: list[tuple[str, list[str]]] = [
     # ---- PRODES + imóveis ----
     ("Alertas PRODES Mata Atlântica e propriedades rurais sobrepostas em SP", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
     ("DETER detectou corte raso: quais fazendas foram afetadas em Marília?", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
+    ("Quais imóveis rurais foram afetados por desmatamento PRODES Cerrado em SP?", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
+    ("Alertas DETER e propriedades rurais com sobreposição em Sorocaba", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
+    ("Corte raso detectado pelo PRODES: quais CARs estão sobrepostos em Bauru?", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
+    ("Quais fazendas em Presidente Prudente estão dentro de alertas de desmatamento?", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
+    ("Imóveis rurais com sobreposição a alertas PRODES Mata Atlântica no Vale do Paraíba", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
+    ("Desmatamento detectado pelo DETER e propriedades rurais afetadas em Ribeirão Preto", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
+    ("Listar fazendas que coincidem com alertas de supressão vegetal em SP", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
+    ("Alertas de perda florestal e CARs sobrepostos no Pontal do Paranapanema", ["buscar_desmatamentos", "buscar_imoveis_desmatamento"]),
 
     # ---- UCs estaduais + imóveis ----
     ("Parques estaduais e imóveis rurais dentro de seus limites", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
     ("Reservas biológicas estaduais e propriedades com sobreposição em SP", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
+    ("Quais imóveis rurais estão dentro de APAs no estado de São Paulo?", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
+    ("Propriedades rurais sobrepostas a parques nacionais e estaduais em SP", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
+    ("Fazendas com sobreposição em unidades de conservação em Campinas", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
+    ("Imóveis rurais dentro de estações ecológicas paulistas", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
+    ("CARs sobrepostos a RPPNs e reservas biológicas em São Paulo", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
+    ("Mapa de UCs estaduais e imóveis rurais que as intersectam em SP", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
+    ("Quais propriedades rurais invadem florestas nacionais ou parques estaduais?", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
+    ("Áreas de proteção ambiental e fazendas cadastradas no SICAR em Ubatuba", ["buscar_unidades_conservacao", "buscar_imoveis_em_camadas"]),
 
-    # ---- Queimadas Mata Atlântica + TI ----
+    # ---- Queimadas + TI ----
     ("Incêndios na Mata Atlântica paulista dentro de terras indígenas", ["buscar_queimadas", "buscar_terras_indigenas"]),
+    ("Focos de queimada em terras indígenas no estado de São Paulo", ["buscar_queimadas", "buscar_terras_indigenas"]),
+    ("Quais TIs tiveram focos de incêndio em SP?", ["buscar_queimadas", "buscar_terras_indigenas"]),
+    ("Queimadas registradas dentro de reservas indígenas paulistas", ["buscar_queimadas", "buscar_terras_indigenas"]),
+    ("Focos de calor em áreas indígenas demarcadas em SP", ["buscar_queimadas", "buscar_terras_indigenas"]),
+    ("Incêndios detectados por satélite em terras indígenas homologadas em São Paulo", ["buscar_queimadas", "buscar_terras_indigenas"]),
+    ("Mapa de focos de queimada sobrepostos a terras indígenas no litoral paulista", ["buscar_queimadas", "buscar_terras_indigenas"]),
+
+    # ---- Queimadas + Quilombolas ----
     ("Focos de calor no Cerrado de SP em áreas quilombolas", ["buscar_queimadas", "buscar_quilombolas"]),
+    ("Queimadas em territórios quilombolas no Vale do Ribeira", ["buscar_queimadas", "buscar_quilombolas"]),
+    ("Incêndios registrados dentro de comunidades quilombolas em SP", ["buscar_queimadas", "buscar_quilombolas"]),
+    ("Focos de queimada sobrepostos a territórios quilombolas em São Paulo", ["buscar_queimadas", "buscar_quilombolas"]),
+    ("Quais quilombos tiveram focos de incêndio em São Paulo?", ["buscar_queimadas", "buscar_quilombolas"]),
+    ("Calor e incêndios em comunidades tradicionais quilombolas paulistas", ["buscar_queimadas", "buscar_quilombolas"]),
+
+    # ---- Desmatamento + TI ----
+    ("Alertas de desmatamento dentro de terras indígenas em SP", ["buscar_desmatamentos", "buscar_terras_indigenas"]),
+    ("Supressão de vegetação em TIs paulistas detectada pelo PRODES", ["buscar_desmatamentos", "buscar_terras_indigenas"]),
+    ("Corte raso em terras indígenas homologadas no estado de São Paulo", ["buscar_desmatamentos", "buscar_terras_indigenas"]),
+    ("Quais terras indígenas tiveram alertas DETER em SP?", ["buscar_desmatamentos", "buscar_terras_indigenas"]),
+
+    # ---- Desmatamento + Quilombolas ----
+    ("Desmatamento em territórios quilombolas no estado de SP", ["buscar_desmatamentos", "buscar_quilombolas"]),
+    ("Alertas de perda de vegetação em comunidades quilombolas paulistas", ["buscar_desmatamentos", "buscar_quilombolas"]),
+    ("Supressão vegetal detectada em quilombos do Vale do Ribeira", ["buscar_desmatamentos", "buscar_quilombolas"]),
+
+    # ---- Queimadas + imóveis ----
+    ("Focos de queimada e propriedades rurais afetadas em Campinas", ["buscar_queimadas", "buscar_imoveis_queimada"]),
+    ("Quais fazendas tiveram focos de incêndio dentro da propriedade em SP?", ["buscar_queimadas", "buscar_imoveis_queimada"]),
+    ("Imóveis rurais com queimadas dentro do CAR em Sorocaba", ["buscar_queimadas", "buscar_imoveis_queimada"]),
+    ("Propriedades rurais afetadas por focos de calor em São José dos Campos", ["buscar_queimadas", "buscar_imoveis_queimada"]),
 
     # ---- Ranking + TI + UC ----
     ("Quais municípios concentram mais TIs e UCs sobrepostas em SP?", ["buscar_maiores_quantidades", "buscar_terras_indigenas", "buscar_unidades_conservacao"]),
+    ("Ranking de municípios com maior sobreposição entre terras indígenas e unidades de conservação em SP", ["buscar_maiores_quantidades", "buscar_terras_indigenas", "buscar_unidades_conservacao"]),
+    ("Quais cidades paulistas têm mais TIs e áreas protegidas combinadas?", ["buscar_maiores_quantidades", "buscar_terras_indigenas", "buscar_unidades_conservacao"]),
+    ("Top municípios em SP com maior concentração de TIs homologadas e UCs federais", ["buscar_maiores_quantidades", "buscar_terras_indigenas", "buscar_unidades_conservacao"]),
+
+    # ---- Ranking + queimadas ----
+    ("Ranking dos municípios com mais focos de queimada em São Paulo", ["buscar_maiores_quantidades", "buscar_queimadas"]),
+    ("Top 5 cidades paulistas com maior número de incêndios registrados", ["buscar_maiores_quantidades", "buscar_queimadas"]),
+    ("Quais os municípios que mais registraram focos de calor no estado?", ["buscar_maiores_quantidades", "buscar_queimadas"]),
+
+    # ---- Ranking + desmatamento ----
+    ("Ranking dos municípios com mais alertas de desmatamento em SP", ["buscar_maiores_quantidades", "buscar_desmatamentos"]),
+    ("Top cidades com maior área desmatada no estado de São Paulo", ["buscar_maiores_quantidades", "buscar_desmatamentos"]),
+    ("Quais municípios lideram o desmatamento em São Paulo?", ["buscar_maiores_quantidades", "buscar_desmatamentos"]),
+
+    # ---- buscar_maiores_quantidades: "qual município teve o maior X" — queimadas ----
+    ("qual o município que teve o maior foco de queimada?", ["buscar_maiores_quantidades"]),
+    ("qual o município do estado de sp que teve o maior foco de queimada?", ["buscar_maiores_quantidades"]),
+    ("qual município teve o maior número de focos de queimada?", ["buscar_maiores_quantidades"]),
+    ("qual cidade registrou mais focos de incêndio em SP?", ["buscar_maiores_quantidades"]),
+    ("qual é o município com mais queimadas no estado de São Paulo?", ["buscar_maiores_quantidades"]),
+    ("qual município de SP teve mais focos de queimada?", ["buscar_maiores_quantidades"]),
+    ("qual foi o município com maior incidência de queimadas?", ["buscar_maiores_quantidades"]),
+    ("qual o município paulista com mais focos de calor registrados?", ["buscar_maiores_quantidades"]),
+    ("quero saber qual município teve o maior índice de queimadas", ["buscar_maiores_quantidades"]),
+    ("qual cidade do estado de SP teve mais queimadas?", ["buscar_maiores_quantidades"]),
+    ("qual município concentrou o maior número de incêndios?", ["buscar_maiores_quantidades"]),
+    ("qual município do estado registrou mais queimadas recentemente?", ["buscar_maiores_quantidades"]),
+    ("qual cidade paulista teve o maior registro de focos de fogo?", ["buscar_maiores_quantidades"]),
+    ("me diga qual município de SP teve mais focos de calor", ["buscar_maiores_quantidades"]),
+
+    # ---- buscar_maiores_quantidades: "qual município teve o maior X" — desmatamento ----
+    ("qual o município com mais desmatamento no estado de SP?", ["buscar_maiores_quantidades"]),
+    ("qual cidade teve mais alertas de desmatamento em São Paulo?", ["buscar_maiores_quantidades"]),
+    ("qual município do estado de São Paulo registrou mais desmatamento?", ["buscar_maiores_quantidades"]),
+    ("qual é a cidade com maior área desmatada em SP?", ["buscar_maiores_quantidades"]),
+    ("qual município paulista teve o maior número de alertas PRODES?", ["buscar_maiores_quantidades"]),
+    ("qual município de SP teve mais supressão de vegetação?", ["buscar_maiores_quantidades"]),
+    ("qual cidade do estado concentrou mais alertas de corte raso?", ["buscar_maiores_quantidades"]),
+
+    # ---- buscar_maiores_quantidades: "qual município teve o maior X" — terras indígenas ----
+    ("qual o município do estado de sp com mais terras indígenas?", ["buscar_maiores_quantidades"]),
+    ("qual cidade de São Paulo concentra mais territórios indígenas?", ["buscar_maiores_quantidades"]),
+    ("qual município paulista tem o maior número de TIs homologadas?", ["buscar_maiores_quantidades"]),
+    ("qual é o município com mais áreas indígenas em SP?", ["buscar_maiores_quantidades"]),
+    ("qual cidade do estado de SP tem mais terras indígenas demarcadas?", ["buscar_maiores_quantidades"]),
+
+    # ---- buscar_maiores_quantidades: "qual município teve o maior X" — unidades de conservação ----
+    ("qual o município do estado de sp com mais unidades de conservação?", ["buscar_maiores_quantidades"]),
+    ("qual cidade paulista concentra mais áreas protegidas?", ["buscar_maiores_quantidades"]),
+    ("qual município de SP tem o maior número de UCs?", ["buscar_maiores_quantidades"]),
+    ("qual é o município com mais parques e reservas em São Paulo?", ["buscar_maiores_quantidades"]),
+    ("qual cidade do estado tem maior extensão de unidades de conservação?", ["buscar_maiores_quantidades"]),
+
+    # ---- buscar_maiores_quantidades: "qual município teve o maior X" — quilombolas ----
+    ("qual o município do estado de sp com mais territórios quilombolas?", ["buscar_maiores_quantidades"]),
+    ("qual cidade de São Paulo tem mais comunidades quilombolas?", ["buscar_maiores_quantidades"]),
+    ("qual município paulista concentra mais quilombos?", ["buscar_maiores_quantidades"]),
+    ("qual é o município com maior número de territórios quilombolas em SP?", ["buscar_maiores_quantidades"]),
+
+    # ---- buscar_maiores_quantidades: "qual município teve o maior X" — imóveis rurais ----
+    ("qual o município do estado de sp com mais imóveis rurais cadastrados?", ["buscar_maiores_quantidades"]),
+    ("qual cidade paulista tem mais propriedades rurais no CAR?", ["buscar_maiores_quantidades"]),
+    ("qual município de SP concentra mais imóveis com CAR ativo?", ["buscar_maiores_quantidades"]),
+
+    # ---- buscar_maiores_quantidades: variações genéricas com "estado de SP/São Paulo" ----
+    ("qual o município que mais registrou queimadas no estado de São Paulo?", ["buscar_maiores_quantidades"]),
+    ("qual município do estado de São Paulo tem mais ocorrências ambientais?", ["buscar_maiores_quantidades"]),
+    ("quero saber qual cidade de SP tem o maior número de focos de queimada", ["buscar_maiores_quantidades"]),
+    ("qual o pior município em termos de queimadas no estado paulista?", ["buscar_maiores_quantidades"]),
+    ("qual cidade lidera o ranking de queimadas em SP?", ["buscar_maiores_quantidades"]),
+    ("qual município lidera o ranking de desmatamento no estado de SP?", ["buscar_maiores_quantidades"]),
 ]

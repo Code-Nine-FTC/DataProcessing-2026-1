@@ -46,6 +46,26 @@ _ESCOPO_AMBIENTAL_TOKENS = frozenset({
     "regiao administrativa", "regioes administrativas", "ra de", "ranking",
 })
 
+_TOKENS_SUPERLATIVO_RANKING = frozenset({
+    "maior", "maiores", "mais", "maximo", "maximos", "maxima", "maximas",
+    "top", "ranking", "concentra", "concentram", "concentracao",
+    "principal", "principais", "primeiro", "primeiros",
+    "lidera", "lideram", "predomina", "predominam",
+    "qual municipio", "quais municipios",
+    "municipio que mais", "municipios que mais",
+    "municipio com mais", "municipios com mais",
+})
+
+_TOKENS_ESCOPO_MUNICIPAL = frozenset({
+    "municipio", "municipios", "cidade", "cidades",
+})
+
+_INTENTS_PROMOVEM_RANKING = frozenset({
+    "buscar_queimadas", "buscar_desmatamentos", "buscar_terras_indigenas",
+    "buscar_unidades_conservacao", "buscar_quilombolas", "buscar_assentamentos",
+    "buscar_queimadas_em_quilombolas",
+})
+
 _TOKENS_CAMADA_ESTADUAL_EXPLICITA = frozenset({
     "camada estadual", "camadas estaduais", "datageo", "camada ambiental estadual",
     "camadas ambientais estaduais", "camada de vegetacao", "vegetacao nativa",
@@ -273,7 +293,16 @@ def _resolver_intencao_final(
     if confianca < CONFIDENCE_THRESHOLD:
         inferida = _inferir_intencao_por_vocabulario(texto_norm, entidades)
         logger.info("Confiança baixa (%.2f) — inferindo intent: %s.", confianca, inferida)
-        return [(inferida, confianca)]
+        intencao_principal = inferida
+        intencoes_classificadas = [(inferida, confianca)]
+
+    if (
+        intencao_principal in _INTENTS_PROMOVEM_RANKING
+        and _texto_contem(texto_norm, _TOKENS_SUPERLATIVO_RANKING)
+        and _texto_contem(texto_norm, _TOKENS_ESCOPO_MUNICIPAL)
+    ):
+        logger.info("Promoção para buscar_maiores_quantidades por vocabulário de ranking municipal.")
+        return [("buscar_maiores_quantidades", confianca), (intencao_principal, confianca)]
 
     return intencoes_classificadas
 
