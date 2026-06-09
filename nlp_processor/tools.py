@@ -15,6 +15,7 @@ from sqlalchemy import Integer, Text, and_, cast, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import Float
+from api.services.score_ambiental_service import ScoreAmbientalService
 from nlp_processor.pipeline.preprocessor import normalizar
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,38 @@ def _join_sql(*parts: Optional[str]) -> Optional[str]:
     if not sql_parts:
         return None
     return "\n\n".join(sql_parts)
+
+
+async def _score_ambiental_properties(
+    session: AsyncSession,
+    imovel_id: Any,
+    cache: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    """Campos de score ASG para anexar ao GeoJSON do chat."""
+    if not imovel_id:
+        return {}
+
+    key = str(imovel_id)
+    if cache is not None and key in cache:
+        return cache[key]
+
+    try:
+        score = await ScoreAmbientalService(session).score_imovel_detalhe(key)
+    except Exception as exc:
+        logger.warning("Não foi possível calcular score ambiental do imóvel %s: %s", key, exc)
+        props: dict[str, Any] = {}
+    else:
+        props = {
+            "score_ambiental": score.score_ambiental,
+            "score_social": score.score_social,
+            "score_governanca": score.score_governanca,
+            "score_geral": score.score_geral,
+            "classificacao": score.classificacao,
+        }
+
+    if cache is not None:
+        cache[key] = props
+    return props
 from models.db_model import (
     AssentamentoRural,
     CamadaEstadualAmbiental,
@@ -143,6 +176,7 @@ async def buscar_passivos_em_imovel(
     # Inclui o polígono do próprio imóvel no mapa, para servir de contexto
     # visual aos passivos sobrepostos/contidos.
     if imovel_geom_json:
+        score_props = await _score_ambiental_properties(session, imovel_db.id)
         imovel_feature = {
             "type": "Feature",
             "geometry": json.loads(imovel_geom_json),
@@ -154,6 +188,7 @@ async def buscar_passivos_em_imovel(
                 "municipio": imovel_db.municipio_nome,
                 "situacao_cadastral": imovel_db.situacao_cadastral,
                 "imovel_id": str(imovel_db.id),
+                **score_props,
             },
         }
         features.append(imovel_feature)
@@ -462,6 +497,7 @@ async def buscar_focos_queimada_imovel(
     features: list[dict] = []
     imovel_feature: Optional[dict] = None
     if imovel.geom_json:
+        score_props = await _score_ambiental_properties(session, imovel.id)
         imovel_feature = {
             "type": "Feature",
             "geometry": json.loads(imovel.geom_json),
@@ -473,6 +509,7 @@ async def buscar_focos_queimada_imovel(
                 "situacao_cadastral": imovel.situacao_cadastral,
                 "municipio": imovel.municipio_nome,
                 "imovel_id": str(imovel.id),
+                **score_props,
             },
         }
         features.append(imovel_feature)
@@ -1549,9 +1586,11 @@ async def buscar_imoveis_rurais(
 
     features = []
     fontes: dict[str, dict] = {}
+    score_cache: dict[str, dict[str, Any]] = {}
     for row in rows:
         if not row.geom_json:
             continue
+        score_props = await _score_ambiental_properties(session, row.id, score_cache)
         features.append({
             "type": "Feature",
             "geometry": json.loads(row.geom_json),
@@ -1562,6 +1601,8 @@ async def buscar_imoveis_rurais(
                 "area_ha": _round_float(row.area_ha, 4),
                 "situacao_cadastral": row.situacao_cadastral,
                 "municipio": row.municipio_nome,
+                "imovel_id": str(row.id),
+                **score_props,
             },
         })
         if row.fonte_nome:
@@ -1750,9 +1791,11 @@ async def buscar_imoveis_por_queimada(
 
     features = []
     fontes: dict[str, dict] = {}
+    score_cache: dict[str, dict[str, Any]] = {}
     for row in rows:
         if not row.geom_json:
             continue
+        score_props = await _score_ambiental_properties(session, row.id, score_cache)
         features.append({
             "type": "Feature",
             "geometry": json.loads(row.geom_json),
@@ -1762,10 +1805,12 @@ async def buscar_imoveis_por_queimada(
                 "nome_imovel": row.nome_imovel,
                 "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
+                "imovel_id": str(row.id),
                 "num_queimadas": int(row.num_queimadas) if row.num_queimadas else 0,
                 "dist_media_m": _round_float(row.dist_media_m, 2),
                 "dist_min_m": _round_float(row.dist_min_m, 2),
                 "nivel_risco_ambiental": classificar_nivel_risco_ambiental(row.dist_min_m),
+                **score_props,
             },
         })
         if row.fonte_nome:
@@ -1942,9 +1987,11 @@ async def buscar_imoveis_por_desmatamento(
 
     features = []
     fontes: dict[str, dict] = {}
+    score_cache: dict[str, dict[str, Any]] = {}
     for row in rows:
         if not row.geom_json:
             continue
+        score_props = await _score_ambiental_properties(session, row.id, score_cache)
         features.append({
             "type": "Feature",
             "geometry": json.loads(row.geom_json),
@@ -1954,10 +2001,12 @@ async def buscar_imoveis_por_desmatamento(
                 "nome_imovel": row.nome_imovel,
                 "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
+                "imovel_id": str(row.id),
                 "num_alertas_desmatamento": int(row.num_alertas_desmatamento) if row.num_alertas_desmatamento else 0,
                 "area_total_intersecao_ha": _round_float(row.area_total_intersecao_ha, 4),
                 "percentual_medio_sobreposicao": _round_float(row.percentual_medio_sobreposicao, 2),
                 "percentual_max_sobreposicao": _round_float(row.percentual_max_sobreposicao, 2),
+                **score_props,
             },
         })
         if row.fonte_nome:
@@ -2104,9 +2153,11 @@ async def buscar_imoveis_por_terra_indigena(
 
     features = []
     fontes: dict[str, dict] = {}
+    score_cache: dict[str, dict[str, Any]] = {}
     for row in rows:
         if not row.geom_json:
             continue
+        score_props = await _score_ambiental_properties(session, row.id, score_cache)
         features.append({
             "type": "Feature",
             "geometry": json.loads(row.geom_json),
@@ -2116,9 +2167,11 @@ async def buscar_imoveis_por_terra_indigena(
                 "nome_imovel": row.nome_imovel,
                 "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
+                "imovel_id": str(row.id),
                 "terra_indigena": row.ti_nome,
                 "area_intersecao_ha": _round_float(row.area_intersecao_ha, 4) or 0,
                 "percentual_sobreposicao": _round_float(row.percentual_sobreposicao, 2) or 0,
+                **score_props,
             },
         })
         if row.fonte_nome:
@@ -2220,9 +2273,11 @@ async def buscar_imoveis_por_quilombo(
 
     features = []
     fontes: dict[str, dict] = {}
+    score_cache: dict[str, dict[str, Any]] = {}
     for row in rows:
         if not row.geom_json:
             continue
+        score_props = await _score_ambiental_properties(session, row.id, score_cache)
         features.append({
             "type": "Feature",
             "geometry": json.loads(row.geom_json),
@@ -2232,9 +2287,11 @@ async def buscar_imoveis_por_quilombo(
                 "nome_imovel": row.nome_imovel,
                 "area_ha": _round_float(row.area_ha, 4),
                 "municipio": row.municipio_nome,
+                "imovel_id": str(row.id),
                 "territorio_quilombola": row.quilombo_nome,
                 "area_intersecao_ha": _round_float(row.area_intersecao_ha, 4) or 0,
                 "percentual_sobreposicao": _round_float(row.percentual_sobreposicao, 2) or 0,
+                **score_props,
             },
         })
         if row.fonte_nome:
@@ -2499,9 +2556,11 @@ async def buscar_imoveis_com_camadas_estaduais(
 
     features = []
     fontes: dict[str, dict] = {}
+    score_cache: dict[str, dict[str, Any]] = {}
     for row in rows:
         if not row.geom_json:
             continue
+        score_props = await _score_ambiental_properties(session, row.id, score_cache)
         features.append({
             "type": "Feature",
             "geometry": json.loads(row.geom_json),
@@ -2512,10 +2571,12 @@ async def buscar_imoveis_com_camadas_estaduais(
                 "area_ha": _round_float(row.area_ha, 4),
                 "situacao_cadastral": row.situacao_cadastral,
                 "municipio": row.municipio_nome,
+                "imovel_id": str(row.id),
                 "camada_nome": row.camada_nome,
                 "camada_tema": row.tema,
                 "camada_subtipo": row.subtipo,
                 "area_intersecao_ha": _round_float(row[10], 4) or 0,
+                **score_props,
             },
         })
 
