@@ -554,6 +554,46 @@ class RelImovelBacia(Base):
     percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric)
     tipo_relacao: Mapped[Optional[str]] = mapped_column(String) # 'dentro', 'parcial', etc.
 
+
+class RelMunicipioTI(Base):
+    __tablename__ = "rel_municipio_ti"
+    id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    municipio_id: Mapped[int] = mapped_column(ForeignKey("municipio.id"), nullable=False)
+    terra_indigena_id: Mapped[UUID] = mapped_column(ForeignKey("terra_indigena.id"), nullable=False)
+    area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric)
+    percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric)
+    __table_args__ = (
+        Index("idx_rel_municipio_ti_municipio_id", "municipio_id"),
+        Index("idx_rel_municipio_ti_terra_indigena_id", "terra_indigena_id"),
+    )
+
+
+class RelMunicipioUC(Base):
+    __tablename__ = "rel_municipio_uc"
+    id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    municipio_id: Mapped[int] = mapped_column(ForeignKey("municipio.id"), nullable=False)
+    unidade_conservacao_id: Mapped[UUID] = mapped_column(ForeignKey("unidade_conservacao.id"), nullable=False)
+    area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric)
+    percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric)
+    __table_args__ = (
+        Index("idx_rel_municipio_uc_municipio_id", "municipio_id"),
+        Index("idx_rel_municipio_uc_unidade_conservacao_id", "unidade_conservacao_id"),
+    )
+
+
+class RelMunicipioQuilombo(Base):
+    __tablename__ = "rel_municipio_quilombo"
+    id: Mapped[UUID] = mapped_column(SQLAlchemyUUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    municipio_id: Mapped[int] = mapped_column(ForeignKey("municipio.id"), nullable=False)
+    territorio_quilombola_id: Mapped[UUID] = mapped_column(ForeignKey("territorio_quilombola.id"), nullable=False)
+    area_intersecao_ha: Mapped[Optional[float]] = mapped_column(Numeric)
+    percentual_sobreposicao: Mapped[Optional[float]] = mapped_column(Numeric)
+    __table_args__ = (
+        Index("idx_rel_municipio_quilombo_municipio_id", "municipio_id"),
+        Index("idx_rel_municipio_quilombo_territorio_quilombola_id", "territorio_quilombola_id"),
+    )
+
+
 # --- 7. MONITORAMENTO E LOGS ---
 
 class HistoricoEtl(Base):

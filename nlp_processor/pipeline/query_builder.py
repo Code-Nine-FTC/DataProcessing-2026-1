@@ -57,6 +57,13 @@ DISPATCH: Dict[tuple, str] = {
     ("buscar_documentos", None):                   "buscar_documentos_rag",
 }
 
+INTENCOES_INDISPONIVEIS: frozenset[str] = frozenset({
+    "buscar_documentos",
+    "buscar_assentamentos",
+    "buscar_camadas_estaduais",
+    "buscar_imoveis_em_camadas",
+})
+
 CAR_SCOPED_INTENTS: frozenset[str] = frozenset({
     "buscar_imoveis_rurais",
     "buscar_passivos_imovel",
@@ -169,8 +176,8 @@ async def executar_consulta(
     if intent == "fora_escopo":
         return _empty_result("fora_escopo")
 
-    if intent == "buscar_documentos":
-        return _empty_result("buscar_documentos_rag")
+    if intent in INTENCOES_INDISPONIVEIS:
+        return _empty_result(intent)
 
     if intent == "buscar_passivos_imovel" and not entities.codigo_car:
         logger.info("Intenção 'buscar_passivos_imovel' ignorada: código CAR não detectado.")

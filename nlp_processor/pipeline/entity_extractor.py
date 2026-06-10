@@ -90,18 +90,26 @@ _MONTH_MAP = {
 
 _YEAR_PATTERN = re.compile(r"\b(20\d{2})\b")
 
+# Mapeia o vocabulário do usuário para um trecho da categoria como está no banco
+# (valores genéricos: "Parque", "Área de Proteção Ambiental", etc.). A distinção
+# nacional/estadual/municipal NÃO fica na categoria, e sim na coluna `esfera` —
+# por isso "parque estadual" vira categoria "Parque" + esfera "Estadual".
+# texto_norm chega sem acentos e em minúsculas; os padrões cobrem singular e plural.
 _CATEGORIAS_UC = {
-    r"\bparque\s+nacional\b": "Parque Nacional",
-    r"\bparque\s+estadual\b": "Parque Estadual",
-    r"\bparque\s+municipal\b": "Parque Municipal",
-    r"\bparque\b": "Parque",
-    r"\bapa\b|area de protecao ambiental": "APA",
-    r"\bresex\b|reserva\s+extrativista": "RESEX",
-    r"\brebio\b|reserva\s+biologica": "REBIO",
-    r"\bestacao\s+ecologica\b": "Estação Ecológica",
-    r"\bflona\b|floresta\s+nacional": "FLONA",
-    r"\brppn\b": "RPPN",
-    r"\bapa\s+estadual\b": "APA Estadual",
+    r"\bparques?\s+naciona(?:l|is)\b": "Parque",
+    r"\bparques?\s+estadua(?:l|is)\b": "Parque",
+    r"\bparques?\s+municipa(?:l|is)\b": "Parque",
+    r"\bparques?\b": "Parque",
+    r"\bapas?\b|areas?\s+de\s+protecao\s+ambiental": "protecao ambiental",
+    r"\bresex\b|reservas?\s+extrativistas?": "extrativista",
+    r"\brebio\b|reservas?\s+biologicas?": "biologica",
+    r"\bestac(?:ao|oes)\s+ecologicas?\b": "estacao ecologica",
+    r"\bflonas?\b|florestas?\s+naciona(?:l|is)\b": "floresta",
+    r"\brppns?\b|reservas?\s+particular(?:es)?": "particular",
+    r"\baries?\b|areas?\s+de\s+relevante\s+interesse": "relevante interesse",
+    r"\bmonumentos?\s+naturais?\b": "monumento natural",
+    r"\brefugios?\s+de\s+vida\s+silvestre\b": "vida silvestre",
+    r"\breservas?\s+de\s+desenvolvimento\s+sustentavel\b": "desenvolvimento sustentavel",
 }
 
 _FASES_TI = {
@@ -121,10 +129,12 @@ _TIPOS_ALERTA = [
     (r"\bdeter\b", "DETER"),
 ]
 
+# Cobre singular e plural reais do português: federal/federais, estadual/estaduais,
+# municipal/municipais. "nacional/nacionais" implica esfera federal (parque/floresta nacional).
 _ESFERAS_UC = [
-    (r"\bfederal(?:is)?\b", "Federal"),
-    (r"\bestadual(?:is)?\b", "Estadual"),
-    (r"\bmunicipal(?:is)?\b", "Municipal"),
+    (r"\bfedera(?:l|is)\b|\bnaciona(?:l|is)\b", "Federal"),
+    (r"\bestadua(?:l|is)\b", "Estadual"),
+    (r"\bmunicipa(?:l|is)\b", "Municipal"),
 ]
 
 _BIOMAS_SP = [
@@ -180,7 +190,6 @@ _TEMAS_RANKING: list[tuple[list[str], str]] = [
     (["terra indigena", "terras indigenas", "ti", "tis", "indigena", "indigenas"], "terras_indigenas"),
     (["quilombola", "quilombolas", "quilombo", "quilombos"], "quilombolas"),
     (["imovel", "imoveis", "fazenda", "fazendas", "propriedade", "propriedades", "car", "sicar"], "imoveis_rurais"),
-    (["assentamento", "assentamentos", "reforma agraria"], "assentamentos"),
 ]
 
 # Camadas territoriais elegíveis para análise de sobreposição (geometria de polígono).
@@ -188,7 +197,6 @@ _TEMAS_SOBREPOSICAO: list[tuple[list[str], str]] = [
     (["unidade de conservacao", "unidades de conservacao", "parque", "apa", "resex", "rebio", "flona", "rppn", "area protegida"], "unidades_conservacao"),
     (["terra indigena", "terras indigenas", "indigena", "indigenas"], "terras_indigenas"),
     (["quilombola", "quilombolas", "quilombo", "quilombos"], "quilombolas"),
-    (["assentamento", "assentamentos", "reforma agraria"], "assentamentos"),
     (["imovel", "imoveis", "fazenda", "fazendas", "propriedade", "propriedades", "sicar"], "imoveis_rurais"),
 ]
 
@@ -216,7 +224,7 @@ class Entidades:
     contexto_espacial: Optional[str] = None
     # Tema do ranking para buscar_maiores_quantidades.
     # Valores: "queimadas" | "desmatamentos" | "unidades_conservacao" | "terras_indigenas" |
-    #          "quilombolas" | "imoveis_rurais" | "assentamentos" | None (todos)
+    #          "quilombolas" | "imoveis_rurais" | None (todos)
     tema_ranking: Optional[str] = None
     tema_sobreposicao_a: Optional[str] = None
     tema_sobreposicao_b: Optional[str] = None
@@ -411,7 +419,13 @@ def _extrair_bioma(texto_norm: str) -> Optional[str]:
 
 def _extrair_limite(texto_norm: str) -> Optional[int]:
     m = re.search(
-        r"\b(?:top|mais|maior|maiores|maxim[os|as]|máxim[os|as]|primeir[os|as])\s*[- ]*(\d+)\b",
+        r"\b(?:top|mais|maior|maiores|melhores|piores|maxim[oa]s?|máxim[oa]s?|primeir[oa]s?)\s*[- ]*(\d{1,3})\b",
+        texto_norm,
+    )
+    if m:
+        return int(m.group(1))
+    m = re.search(
+        r"\b(\d{1,3})\s+(?:municipios?|cidades?|ras?|regioes?\s+administrativas?|maiores?|melhores?|piores?)\b",
         texto_norm,
     )
     if m:

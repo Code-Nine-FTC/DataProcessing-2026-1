@@ -108,6 +108,9 @@ from models.db_model import (
     RelImovelUC,
     RelImovelTI,
     RelImovelQuilombo,
+    RelMunicipioTI,
+    RelMunicipioUC,
+    RelMunicipioQuilombo,
     classificar_nivel_risco_ambiental,
     TerraIndigena,
     TerritorioQuilombola,
@@ -587,10 +590,40 @@ def _geom_as_geojson(geom_col: Any, simplify_tolerance: Optional[float] = None) 
 
 def _geom_clipped_to_sp(geom_col: Any, simplify_tolerance: Optional[float] = None) -> Any:
     sp_geom_subq = select(Estado.geom).where(Estado.sigla == "SP").scalar_subquery()
-    clipped = func.ST_Transform(func.ST_Intersection(geom_col, sp_geom_subq), 4326)
+    # ST_CollectionExtract(..., 3) descarta linhas/pontos da interseção e mantém só
+    # polígonos (a borda pode gerar GeometryCollection, que quebra o GeoJSON do mapa).
+    inter = func.ST_CollectionExtract(func.ST_Intersection(geom_col, sp_geom_subq), 3)
+    clipped = func.ST_Transform(inter, 4326)
     if simplify_tolerance is not None:
         clipped = func.ST_SimplifyPreserveTopology(clipped, simplify_tolerance)
     return cast(func.ST_AsGeoJSON(clipped, 6), Text)
+
+
+def _geom_clipped_to_geom(geom_col: Any, clip_geom_subq: Any, simplify_tolerance: Optional[float] = None) -> Any:
+    """Clipa geometria a um polígono arbitrário (ex.: limite de município).
+
+    A interseção de dois polígonos pode resultar em GeometryCollection (polígono +
+    linha/ponto tocando a borda). ST_CollectionExtract(..., 3) mantém apenas a parte
+    poligonal, garantindo um GeoJSON Polygon/MultiPolygon válido para o frontend.
+    """
+    inter = func.ST_CollectionExtract(
+        func.ST_Intersection(func.ST_MakeValid(geom_col), clip_geom_subq), 3
+    )
+    clipped = func.ST_Transform(inter, 4326)
+    if simplify_tolerance is not None:
+        clipped = func.ST_SimplifyPreserveTopology(clipped, simplify_tolerance)
+    return cast(func.ST_AsGeoJSON(clipped, 6), Text)
+
+
+def _geom_intersection_as_geojson(geom_a: Any, geom_b: Any, simplify_tolerance: Optional[float] = None) -> Any:
+    # Mantém só a parte poligonal da sobreposição (evita GeometryCollection no mapa).
+    inter = func.ST_CollectionExtract(
+        func.ST_Intersection(func.ST_MakeValid(geom_a), func.ST_MakeValid(geom_b)), 3
+    )
+    inter = func.ST_Transform(inter, 4326)
+    if simplify_tolerance is not None:
+        inter = func.ST_SimplifyPreserveTopology(inter, simplify_tolerance)
+    return cast(func.ST_AsGeoJSON(inter, 6), Text)
 
 
 def _source_dict(fonte: FonteDado) -> dict:
@@ -1087,6 +1120,34 @@ async def buscar_unidades_conservacao(
 ) -> dict:
     """Busca unidades de conservação no estado de São Paulo."""
     sql_partes: list[str] = []
+
+    # Resolve o município antes de montar o select para poder clippar a geometria
+    # ao polígono exato do município (evita UCs aparecerem em cidades vizinhas).
+    mun_geom_subq = None
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontradas 0 unidades de conservação em {municipio}.",
+                "sql_executado": municipio_sql,
+            }
+        mun_geom_subq = (
+            select(Municipio.geom)
+            .where(Municipio.id == municipio_id)
+            .scalar_subquery()
+        )
+        sql_partes.append(municipio_sql)
+
+    geom_expr = (
+        _geom_clipped_to_geom(UnidadeConservacao.geom, mun_geom_subq, COMPLEX_POLYGON_TOLERANCE)
+        if mun_geom_subq is not None
+        else _geom_clipped_to_sp(UnidadeConservacao.geom, COMPLEX_POLYGON_TOLERANCE)
+    )
+
     stmt = (
         select(
             UnidadeConservacao.id,
@@ -1096,7 +1157,7 @@ async def buscar_unidades_conservacao(
             UnidadeConservacao.grupo_snuc,
             UnidadeConservacao.area_ha,
             Municipio.nome.label("municipio_nome"),
-            _geom_clipped_to_sp(UnidadeConservacao.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
+            geom_expr.label("geom_json"),
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
@@ -1112,24 +1173,8 @@ async def buscar_unidades_conservacao(
         )
     )
 
-    if municipio:
-        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
-        if municipio_id is None:
-            return {
-                "total": 0,
-                "features": [],
-                "bbox": None,
-                "fontes": [],
-                "descricao": f"Encontradas 0 unidades de conservação em {municipio}.",
-                "sql_executado": municipio_sql,
-            }
-        _mun_geom = (
-            select(Municipio.geom)
-            .where(Municipio.id == municipio_id)
-            .scalar_subquery()
-        )
-        stmt = stmt.where(func.ST_Intersects(UnidadeConservacao.geom, _mun_geom))
-        sql_partes.append(municipio_sql)
+    if mun_geom_subq is not None:
+        stmt = stmt.where(func.ST_Intersects(UnidadeConservacao.geom, mun_geom_subq))
     elif regiao_administrativa:
         ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
         if ra_id is None:
@@ -1144,9 +1189,21 @@ async def buscar_unidades_conservacao(
         stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
         sql_partes.append(ra_sql)
     if categoria:
-        stmt = stmt.where(func.lower(UnidadeConservacao.categoria).contains(categoria.lower()))
+        # Compara sem acento (a coluna no banco tem acentos: "Área de Proteção...").
+        stmt = stmt.where(
+            func.unaccent(func.lower(UnidadeConservacao.categoria)).contains(
+                _normalizar_parametro(categoria)
+            )
+        )
     if grupo_snuc:
-        stmt = stmt.where(func.lower(UnidadeConservacao.grupo_snuc) == grupo_snuc.lower())
+        # O banco armazena o grupo SNUC como código ("PI"/"US"), não por extenso.
+        codigo_snuc = {"protecao integral": "PI", "uso sustentavel": "US"}.get(
+            _normalizar_parametro(grupo_snuc)
+        )
+        if codigo_snuc:
+            stmt = stmt.where(func.upper(UnidadeConservacao.grupo_snuc) == codigo_snuc)
+        else:
+            stmt = stmt.where(func.lower(UnidadeConservacao.grupo_snuc) == grupo_snuc.lower())
     if esfera:
         stmt = stmt.where(func.lower(UnidadeConservacao.esfera) == esfera.lower())
 
@@ -1199,6 +1256,32 @@ async def buscar_terras_indigenas(
 ) -> dict:
     """Busca terras indígenas no estado de São Paulo."""
     sql_partes: list[str] = []
+
+    mun_geom_subq = None
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontradas 0 terras indígenas em {municipio}.",
+                "sql_executado": municipio_sql,
+            }
+        mun_geom_subq = (
+            select(Municipio.geom)
+            .where(Municipio.id == municipio_id)
+            .scalar_subquery()
+        )
+        sql_partes.append(municipio_sql)
+
+    geom_expr = (
+        _geom_clipped_to_geom(TerraIndigena.geom, mun_geom_subq, COMPLEX_POLYGON_TOLERANCE)
+        if mun_geom_subq is not None
+        else _geom_clipped_to_sp(TerraIndigena.geom, COMPLEX_POLYGON_TOLERANCE)
+    )
+
     stmt = (
         select(
             TerraIndigena.id,
@@ -1206,7 +1289,7 @@ async def buscar_terras_indigenas(
             TerraIndigena.fase,
             TerraIndigena.area_ha,
             Municipio.nome.label("municipio_nome"),
-            _geom_clipped_to_sp(TerraIndigena.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
+            geom_expr.label("geom_json"),
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
@@ -1222,24 +1305,8 @@ async def buscar_terras_indigenas(
         )
     )
 
-    if municipio:
-        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
-        if municipio_id is None:
-            return {
-                "total": 0,
-                "features": [],
-                "bbox": None,
-                "fontes": [],
-                "descricao": f"Encontradas 0 terras indígenas em {municipio}.",
-                "sql_executado": municipio_sql,
-            }
-        _mun_geom = (
-            select(Municipio.geom)
-            .where(Municipio.id == municipio_id)
-            .scalar_subquery()
-        )
-        stmt = stmt.where(func.ST_Intersects(TerraIndigena.geom, _mun_geom))
-        sql_partes.append(municipio_sql)
+    if mun_geom_subq is not None:
+        stmt = stmt.where(func.ST_Intersects(TerraIndigena.geom, mun_geom_subq))
     elif regiao_administrativa:
         ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
         if ra_id is None:
@@ -1408,13 +1475,39 @@ async def buscar_territorios_quilombolas(
 ) -> dict:
     """Busca territórios quilombolas no estado de São Paulo."""
     sql_partes: list[str] = []
+
+    mun_geom_subq = None
+    if municipio:
+        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
+        if municipio_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Encontrados 0 territórios quilombolas em {municipio}.",
+                "sql_executado": municipio_sql,
+            }
+        mun_geom_subq = (
+            select(Municipio.geom)
+            .where(Municipio.id == municipio_id)
+            .scalar_subquery()
+        )
+        sql_partes.append(municipio_sql)
+
+    geom_expr = (
+        _geom_clipped_to_geom(TerritorioQuilombola.geom, mun_geom_subq, COMPLEX_POLYGON_TOLERANCE)
+        if mun_geom_subq is not None
+        else _geom_clipped_to_sp(TerritorioQuilombola.geom, COMPLEX_POLYGON_TOLERANCE)
+    )
+
     stmt = (
         select(
             TerritorioQuilombola.id,
             TerritorioQuilombola.nome,
             TerritorioQuilombola.area_ha,
             Municipio.nome.label("municipio_nome"),
-            _geom_clipped_to_sp(TerritorioQuilombola.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
+            geom_expr.label("geom_json"),
             FonteDado.nome.label("fonte_nome"),
             FonteDado.orgao_responsavel,
             FonteDado.url_origem,
@@ -1430,24 +1523,8 @@ async def buscar_territorios_quilombolas(
         )
     )
 
-    if municipio:
-        municipio_id, municipio_sql = await _get_municipio_id(session, municipio)
-        if municipio_id is None:
-            return {
-                "total": 0,
-                "features": [],
-                "bbox": None,
-                "fontes": [],
-                "descricao": f"Encontrados 0 territórios quilombolas em {municipio}.",
-                "sql_executado": municipio_sql,
-            }
-        _mun_geom = (
-            select(Municipio.geom)
-            .where(Municipio.id == municipio_id)
-            .scalar_subquery()
-        )
-        stmt = stmt.where(func.ST_Intersects(TerritorioQuilombola.geom, _mun_geom))
-        sql_partes.append(municipio_sql)
+    if mun_geom_subq is not None:
+        stmt = stmt.where(func.ST_Intersects(TerritorioQuilombola.geom, mun_geom_subq))
     elif regiao_administrativa:
         ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
         if ra_id is None:
@@ -3243,77 +3320,143 @@ async def buscar_maiores_quantidades(
     is_ranking: bool = False,
     bioma: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Ranking municipal de dados ambientais.
-
-    Args:
-        tema: filtra para um tipo específico de dado. None agrega todos os temas.
-              Valores: "queimadas" | "desmatamentos" | "unidades_conservacao" |
-                       "terras_indigenas" | "quilombolas" | None
-    """
+    """Ranking municipal de dados ambientais."""
     features: list[dict[str, Any]] = []
     fontes: dict[str, dict[str, Any]] = {}
     sql_executado_partes: list[str] = []
     temas_detectados: list[str] = []
 
-    def _area_intersecao_ha(geom_a: Any, geom_b: Any) -> Any:
-        return func.sum(func.ST_Area(func.ST_Transform(func.ST_Intersection(geom_a, geom_b), 31983)))
-
-    # Mapeamento tema → (tabela, agregação, rótulo, unidade, usa_intersects, fonte, órgão)
-    MAPEAMENTO_TEMAS: dict[str, tuple] = {
-        "unidades_conservacao": (UnidadeConservacao, _area_intersecao_ha(Municipio.geom, UnidadeConservacao.geom), "extensão de Unidades de Conservação", "ha protegidos", True, "CNUC", "MMA"),
-        "terras_indigenas": (TerraIndigena, _area_intersecao_ha(Municipio.geom, TerraIndigena.geom), "extensão de Terras Indígenas", "ha protegidos", True, "Infraestrutura FUNAI", "FUNAI"),
-        "quilombolas": (TerritorioQuilombola, _area_intersecao_ha(Municipio.geom, TerritorioQuilombola.geom), "extensão de Territórios Quilombolas", "ha declarados", True, "Territórios Quilombolas", "INCRA"),
-        "desmatamentos": (DesmatamentoAlerta, func.sum(DesmatamentoAlerta.area_ha), "alertas de desmatamento", "ha desmatados", False, "Alertas de Desmatamento", "MapBiomas / INPE"),
-        "queimadas": (QueimadaEvento, func.count(QueimadaEvento.id), "focos de queimada", "focos detectados", False, "BDQueimadas", "INPE"),
+    TEMAS_AREA: dict[str, tuple] = {
+        "terras_indigenas": (RelMunicipioTI, RelMunicipioTI.terra_indigena_id, TerraIndigena, "terras indígenas", "Infraestrutura FUNAI", "FUNAI"),
+        "unidades_conservacao": (RelMunicipioUC, RelMunicipioUC.unidade_conservacao_id, UnidadeConservacao, "unidades de conservação", "CNUC", "MMA"),
+        "quilombolas": (RelMunicipioQuilombo, RelMunicipioQuilombo.territorio_quilombola_id, TerritorioQuilombola, "territórios quilombolas", "Territórios Quilombolas", "INCRA"),
+    }
+    TEMAS_OCORRENCIA: dict[str, tuple] = {
+        "desmatamentos": (DesmatamentoAlerta, func.sum(DesmatamentoAlerta.area_ha), "alertas de desmatamento", "ha desmatados", "Alertas de Desmatamento", "MapBiomas / INPE"),
+        "queimadas": (QueimadaEvento, func.count(QueimadaEvento.id), "focos de queimada", "focos de queimada", "BDQueimadas", "INPE"),
     }
 
-    temas_a_executar = {tema: MAPEAMENTO_TEMAS[tema]} if tema and tema in MAPEAMENTO_TEMAS else MAPEAMENTO_TEMAS
+    temas_validos = set(TEMAS_AREA) | set(TEMAS_OCORRENCIA)
+    temas_a_executar = [tema] if tema in temas_validos else list(temas_validos)
+    features_demarcacao: list[dict[str, Any]] = []
+    demarcacoes_por_municipio: dict[str, list[dict[str, Any]]] = {}
+
+    def _registrar_feature(nome: str, geojson: Optional[str], analise: str, tema_key: str, metrica: str) -> None:
+        features.append({
+            "type": "Feature",
+            "geometry": json.loads(geojson) if geojson else None,
+            "properties": {
+                "tipo": "ranking_criticidade" if is_ranking else "densidade_volumetrica",
+                "nome": nome,
+                "analise": analise,
+                "tema": tema_key,
+                "metrica": metrica,
+            },
+        })
+
+    async def _registrar_demarcacao(rel_model: Any, alvo_id: Any, target_model: Any, tema_key: str, municipio_ids: list[int]) -> None:
+        if not municipio_ids:
+            return
+        slices_stmt = (
+            select(
+                Municipio.nome.label("municipio_nome"),
+                target_model.nome.label("area_nome"),
+                rel_model.area_intersecao_ha,
+                rel_model.percentual_sobreposicao,
+                _geom_intersection_as_geojson(target_model.geom, Municipio.geom, COMPLEX_POLYGON_TOLERANCE).label("geojson"),
+            )
+            .join(rel_model, rel_model.municipio_id == Municipio.id)
+            .join(target_model, alvo_id == target_model.id)
+            .where(rel_model.municipio_id.in_(municipio_ids))
+            .order_by(rel_model.area_intersecao_ha.desc())
+        )
+        sql_executado_partes.append(_stmt_sql(slices_stmt))
+        for s in (await session.execute(slices_stmt)).all():
+            demarcacoes_por_municipio.setdefault(s.municipio_nome, []).append({
+                "area_nome": s.area_nome,
+                "area_ha": _round_float(s.area_intersecao_ha, 2),
+                "percentual_no_municipio": _round_float(s.percentual_sobreposicao, 1),
+            })
+            if not s.geojson:
+                continue
+            features_demarcacao.append({
+                "type": "Feature",
+                "geometry": json.loads(s.geojson),
+                "properties": {
+                    "tipo": "area_no_municipio",
+                    "tema": tema_key,
+                    "nome": s.area_nome,
+                    "municipio": s.municipio_nome,
+                    "area_ha": _round_float(s.area_intersecao_ha, 2),
+                    "percentual_no_municipio": _round_float(s.percentual_sobreposicao, 1),
+                },
+            })
 
     try:
-        for tema_key, config in temas_a_executar.items():
-            model_table, agg_formula, label, unidade, precisa_intersecao, fonte_nome, fonte_orgao = config
+        for tema_key in temas_a_executar:
+            if tema_key in TEMAS_AREA:
+                rel_model, alvo_id, target_model, label, fonte_nome, fonte_orgao = TEMAS_AREA[tema_key]
+                area_total = func.sum(rel_model.area_intersecao_ha)
+                qtd_areas = func.count(func.distinct(alvo_id))
+                stmt = (
+                    select(
+                        Municipio.id,
+                        Municipio.nome,
+                        area_total.label("valor_analitico"),
+                        qtd_areas.label("qtd_areas"),
+                        _geom_as_geojson(Municipio.geom, COMPLEX_POLYGON_TOLERANCE).label("geojson"),
+                    )
+                    .join(rel_model, rel_model.municipio_id == Municipio.id)
+                    .group_by(Municipio.id, Municipio.nome)
+                    .order_by(area_total.desc())
+                    .limit(limite)
+                )
+                if municipio:
+                    stmt = stmt.where(func.lower(Municipio.nome) == _normalizar_parametro(municipio))
 
-            stmt = select(
-                Municipio.id,
-                Municipio.nome,
-                agg_formula.label("valor_analitico"),
-                _geom_as_geojson(Municipio.geom).label("geojson"),
-            )
+                sql_executado_partes.append(_stmt_sql(stmt))
+                rows = (await session.execute(stmt)).all()
+                if not rows:
+                    continue
 
-            join_cond = func.ST_Intersects if precisa_intersecao else func.ST_Contains
-            stmt = stmt.join(model_table, join_cond(Municipio.geom, model_table.geom))
-            stmt = stmt.group_by(Municipio.id, Municipio.nome)
+                temas_detectados.append(label)
+                fontes[tema_key] = {"nome": fonte_nome, "orgao": fonte_orgao, "url": ""}
+                for index, row in enumerate(rows, start=1):
+                    ha = _fmt_int(round(float(row.valor_analitico or 0)))
+                    qtd = int(row.qtd_areas or 0)
+                    analise = f"#{index} — {ha} ha de {label} ({_fmt_int(qtd)} área(s) sobre o município)"
+                    _registrar_feature(row.nome, row.geojson, analise, tema_key, "area")
 
-            if tema_key == "queimadas" and bioma:
-                stmt = stmt.where(func.lower(QueimadaEvento.bioma).contains(_normalizar_parametro(bioma)))
+                await _registrar_demarcacao(rel_model, alvo_id, target_model, tema_key, [row.id for row in rows])
+            else:
+                model_table, agg_formula, label, unidade, fonte_nome, fonte_orgao = TEMAS_OCORRENCIA[tema_key]
+                stmt = (
+                    select(
+                        Municipio.nome,
+                        agg_formula.label("valor_analitico"),
+                        _geom_as_geojson(Municipio.geom).label("geojson"),
+                    )
+                    .join(model_table, func.ST_Contains(Municipio.geom, model_table.geom))
+                    .group_by(Municipio.id, Municipio.nome)
+                    .order_by(agg_formula.desc())
+                    .limit(limite)
+                )
+                if tema_key == "queimadas" and bioma:
+                    stmt = stmt.where(func.lower(QueimadaEvento.bioma).contains(_normalizar_parametro(bioma)))
+                if municipio:
+                    stmt = stmt.where(func.lower(Municipio.nome) == _normalizar_parametro(municipio))
 
-            if municipio:
-                stmt = stmt.where(func.lower(Municipio.nome) == _normalizar_parametro(municipio))
+                sql_executado_partes.append(_stmt_sql(stmt))
+                rows = (await session.execute(stmt)).all()
+                if not rows:
+                    continue
 
-            stmt = stmt.order_by(agg_formula.desc()).limit(limite)
-            sql_executado_partes.append(_stmt_sql(stmt))
-
-            rows = (await session.execute(stmt)).all()
-            if not rows:
-                continue
-
-            temas_detectados.append(label)
-            fontes[tema_key] = {"nome": fonte_nome, "orgao": fonte_orgao, "url": ""}
-
-            for index, row in enumerate(rows, start=1):
-                raw_val = row.valor_analitico or 0
-                final_val = _round_float(raw_val / 10000, 2) if unidade in ("ha protegidos", "ha declarados") else raw_val
-                texto_analise = f"#{index} em {label}: {final_val} {unidade}"
-
-                features.append({
-                    "type": "Feature",
-                    "geometry": json.loads(row.geojson) if row.geojson else None,
-                    "properties": {
-                        "tipo": "ranking_criticidade" if is_ranking else "densidade_volumetrica",
-                        "nome": row.nome,
-                        "analise": texto_analise,
-                    },
-                })
+                temas_detectados.append(label)
+                fontes[tema_key] = {"nome": fonte_nome, "orgao": fonte_orgao, "url": ""}
+                for index, row in enumerate(rows, start=1):
+                    valor = _fmt_int(round(float(row.valor_analitico or 0)))
+                    analise = f"#{index} — {valor} {unidade}"
+                    _registrar_feature(row.nome, row.geojson, analise, tema_key, "ocorrencia")
 
     except Exception:
         logger.exception("Erro ao executar buscar_maiores_quantidades")
@@ -3332,13 +3475,27 @@ async def buscar_maiores_quantidades(
         linhas = [f"**Municípios em destaque — {temas_str} (SP):**"]
         for nome, analise in mun_vistos:
             linhas.append(f"- **{nome}**: {analise}")
+            for area in demarcacoes_por_municipio.get(nome, []):
+                area_nome = area.get("area_nome") or "Área sem nome"
+                area_ha = area.get("area_ha")
+                pct = area.get("percentual_no_municipio")
+                ha_txt = f"{_fmt_int(round(area_ha))} ha" if area_ha is not None else "área não informada"
+                pct_txt = f" ({pct}% da extensão fica neste município)" if pct is not None else ""
+                linhas.append(f"  - {area_nome}: {ha_txt}{pct_txt}")
         descricao_final = "\n".join(linhas)
     else:
         descricao_final = "Nenhum dado encontrado para a análise quantitativa solicitada."
 
+    if features_demarcacao:
+        bbox = _build_bbox(features_demarcacao)
+    elif features:
+        bbox = _build_bbox(features)
+    else:
+        bbox = None
+
     return {
-        "features": features,
-        "bbox": _build_bbox(features) if features else None,
+        "features": features + features_demarcacao,
+        "bbox": bbox,
         "fontes": list(fontes.values()),
         "descricao": descricao_final,
         "sql_executado": "\n\n---\n\n".join(sql_executado_partes) if sql_executado_partes else None,
@@ -3349,7 +3506,6 @@ _OVERLAP_THEMES: dict[str, tuple] = {
     "unidades_conservacao": (UnidadeConservacao, "Unidades de Conservação", "CNUC", "MMA"),
     "terras_indigenas": (TerraIndigena, "Terras Indígenas", "Infraestrutura FUNAI", "FUNAI"),
     "quilombolas": (TerritorioQuilombola, "Territórios Quilombolas", "Territórios Quilombolas", "INCRA"),
-    "assentamentos": (AssentamentoRural, "Assentamentos Rurais", "Assentamentos INCRA", "INCRA"),
     "imoveis_rurais": (ImovelRural, "Imóveis Rurais (CAR)", "SICAR", "Serviço Florestal Brasileiro"),
 }
 

@@ -247,10 +247,10 @@ TRAIN_DATA: list[tuple[str, str]] = [
     # =========================================================================
     # buscar_passivos_imovel
     # =========================================================================
-    ("Buscar passivos ambientais do imóvel rural SP000123456", "buscar_passivos_imovel"),
-    ("O imóvel CAR SP999888777 possui algum passivo ou embargo?", "buscar_passivos_imovel"),
-    ("Quais as irregularidades e passivos ambientais na fazenda SP111222333?", "buscar_passivos_imovel"),
-    ("relatorio de passivos ambientais para o sicar SP000123456", "buscar_passivos_imovel"),
+    ("Buscar passivos ambientais do imóvel rural CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40", "buscar_passivos_imovel"),
+    ("O imóvel CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40 possui algum passivo ou embargo?", "buscar_passivos_imovel"),
+    ("Quais as irregularidades e passivos ambientais na fazenda CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40?", "buscar_passivos_imovel"),
+    ("relatorio de passivos ambientais para o sicar CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40", "buscar_passivos_imovel"),
     ("Quais passivos ambientais existem no imóvel rural com código CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40?", "buscar_passivos_imovel"),
     ("O imóvel CAR SP-3500105-ABCDEF1234567890ABCDEF1234567890 tem sobreposição com TI ou UC?", "buscar_passivos_imovel"),
     ("Verificar passivos e embargos do CAR SP-3550308-12AB34CD56EF78901234567890ABCDEF", "buscar_passivos_imovel"),
@@ -258,11 +258,11 @@ TRAIN_DATA: list[tuple[str, str]] = [
     # =========================================================================
     # buscar_focos_queimada_imovel
     # =========================================================================
-    ("Quais foram os focos de queimada detectados no imóvel SP000123456?", "buscar_focos_queimada_imovel"),
-    ("Histórico de incêndios dentro da propriedade CAR SP999888777", "buscar_focos_queimada_imovel"),
-    ("Houve algum foco de calor registrado na minha fazenda SP000123456?", "buscar_focos_queimada_imovel"),
-    ("Satélite detectou fogo dentro do imóvel rural SP111222333?", "buscar_focos_queimada_imovel"),
-    ("Quantas queimadas atingiram o imóvel SP000123456 em 2024?", "buscar_focos_queimada_imovel"),
+    ("Quais foram os focos de queimada detectados no imóvel CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40?", "buscar_focos_queimada_imovel"),
+    ("Histórico de incêndios dentro da propriedade CAR CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40", "buscar_focos_queimada_imovel"),
+    ("Houve algum foco de calor registrado na minha fazenda CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40?", "buscar_focos_queimada_imovel"),
+    ("Satélite detectou fogo dentro do imóvel rural CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40?", "buscar_focos_queimada_imovel"),
+    ("Quantas queimadas atingiram o imóvel CAR SP-3500709-F80A461130164CF9A0B0FEAB5611FA40 em 2024?", "buscar_focos_queimada_imovel"),
     ("Houve focos de queimada dentro do imóvel SP-3500709-F80A461130164CF9A0B0FEAB5611FA40?", "buscar_focos_queimada_imovel"),
     ("Incêndios detectados pelo satélite no CAR SP-3550308-12AB34CD56EF78901234567890ABCDEF", "buscar_focos_queimada_imovel"),
     ("Focos de queimada nos últimos 12 meses dentro do CAR SP555666777", "buscar_focos_queimada_imovel"),

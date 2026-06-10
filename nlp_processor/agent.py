@@ -304,7 +304,7 @@ def _resolver_intencao_final(
     if confianca < CONFIDENCE_THRESHOLD:
         inferida = _inferir_intencao_por_vocabulario(texto_norm)
         if inferida is None:
-            inferida = intent_classificado if entidades.municipio else "buscar_documentos"
+            inferida = intent_classificado if entidades.municipio else "fora_escopo"
         logger.info("Confiança baixa (%.2f) — intent resolvido: %s.", confianca, inferida)
         return inferida, confianca
 
@@ -503,7 +503,7 @@ async def run_agent(
     entidades_json = _serializar_entidades(entidades)
     filtros_json = _serializar_filtros(entidades_json)
 
-    needs_rag = "buscar_documentos" in intents
+    needs_rag = False
     query_embedding: list[float] = []
     if needs_rag:
         marco = perf_counter()

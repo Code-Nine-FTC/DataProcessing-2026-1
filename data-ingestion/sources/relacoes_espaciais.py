@@ -676,6 +676,73 @@ class SpatialRelationshipPostProcessor:
             logger.warning(f"Failed to calculate imovel_quilombo relationships: {str(e)}")
             return 0
 
+    def _calculate_municipio_area(
+        self,
+        relation_table: str,
+        target_table: str,
+        target_id_col: str,
+    ) -> int:
+        logger.info(f"Computing municipio ↔ {target_table} (area)...")
+
+        with self.engine.begin() as conn:
+            conn.execute(text(f"DELETE FROM {relation_table} WHERE TRUE"))
+            conn.execute(text("SET LOCAL statement_timeout = '5min'"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_municipio_geom_gist "
+                "ON municipio USING GIST (geom)"
+            ))
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS idx_{target_table}_geom_gist "
+                f"ON {target_table} USING GIST (geom)"
+            ))
+
+            intersecao = (
+                "ST_Area(ST_Transform("
+                "ST_Intersection(ST_MakeValid(m.geom), ST_MakeValid(t.geom)), 31983)) / 10000.0"
+            )
+            area_total_geom = "ST_Area(ST_Transform(ST_MakeValid(t.geom), 31983)) / 10000.0"
+            query = f"""
+                INSERT INTO {relation_table}
+                    (id, municipio_id, {target_id_col}, area_intersecao_ha, percentual_sobreposicao)
+                SELECT
+                    gen_random_uuid(),
+                    m.id,
+                    t.id,
+                    {intersecao} AS area_intersecao_ha,
+                    CASE
+                        WHEN {area_total_geom} > 0 THEN ({intersecao}) / ({area_total_geom}) * 100
+                        ELSE NULL
+                    END AS percentual_sobreposicao
+                FROM municipio m
+                JOIN {target_table} t
+                  ON m.geom && t.geom
+                 AND ST_Intersects(ST_MakeValid(m.geom), ST_MakeValid(t.geom))
+                WHERE ST_Intersects(ST_MakeValid(m.geom), ST_MakeValid(t.geom))
+                  AND NOT ST_IsEmpty(ST_Intersection(ST_MakeValid(m.geom), ST_MakeValid(t.geom)))
+            """
+            conn.execute(text(query))
+            count = conn.execute(text(f"SELECT COUNT(*) FROM {relation_table}")).scalar()
+
+            logger.info(f"  → {count} relationships created")
+            return count
+
+    def calculate_municipio_areas(self) -> dict:
+        mapeamento = (
+            ("rel_municipio_ti", "terra_indigena", "terra_indigena_id"),
+            ("rel_municipio_uc", "unidade_conservacao", "unidade_conservacao_id"),
+            ("rel_municipio_quilombo", "territorio_quilombola", "territorio_quilombola_id"),
+        )
+        resultados: dict = {}
+        for relation_table, target_table, target_id_col in mapeamento:
+            try:
+                resultados[relation_table] = self._calculate_municipio_area(
+                    relation_table, target_table, target_id_col
+                )
+            except Exception as e:
+                logger.warning(f"Failed to calculate {relation_table}: {str(e)}")
+                resultados[relation_table] = 0
+        return resultados
+
     def populate_documentos_from_datasets(self) -> int:
         """Sincroniza metadados dos Datasets para a tabela documento e documento_trecho."""
         logger.info("Computing fallback: dataset -> documento_trecho (embeddings)...")
@@ -894,6 +961,7 @@ class SpatialRelationshipPostProcessor:
             )
 
         camada_municipio_updates = self.link_camada_estadual_to_municipios()
+        municipio_area_updates = self.calculate_municipio_areas()
 
         with self.engine.connect() as conn:
             n_im = conn.execute(
@@ -925,6 +993,8 @@ class SpatialRelationshipPostProcessor:
             "camada->municipio",
             camada_municipio_updates,
         )
+        for name, count in municipio_area_updates.items():
+            logger.info(f"  {name:20} → {count:6} relationships")
         for name, count in results.items():
             logger.info(f"  {name:20} → {count:6} relationships")
         logger.info(f"  {'TOTAL':20} → {total:6} relationships")

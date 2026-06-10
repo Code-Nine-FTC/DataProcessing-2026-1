@@ -76,14 +76,43 @@ _TEMPLATES: Dict[str, str] = {
         "Esta pergunta está fora do escopo do sistema. "
         "O assistente é especializado em análises geográficas e ambientais "
         "do estado de São Paulo, abrangendo: queimadas, desmatamento, "
-        "unidades de conservação, terras indígenas, assentamentos rurais, "
+        "unidades de conservação, terras indígenas, "
         "territórios quilombolas e imóveis rurais (CAR)."
+    ),
+}
+
+_MENSAGENS_INDISPONIVEIS: Dict[str, str] = {
+    "buscar_documentos": (
+        "A consulta a documentos e legislação ambiental (como penalidades e normas) "
+        "está indisponível no momento: a base de conhecimento documental ainda não foi "
+        "carregada no sistema."
+    ),
+    "buscar_assentamentos": (
+        "A consulta de assentamentos rurais está indisponível no momento, "
+        "pois essa base de dados ainda não foi carregada no sistema."
+    ),
+    "buscar_camadas_estaduais": (
+        "A consulta a camadas ambientais estaduais (como bacias hidrográficas e zoneamentos "
+        "do DataGeo) está indisponível no momento, pois essa base ainda não foi carregada no sistema."
+    ),
+    "buscar_imoveis_em_camadas": (
+        "A análise de imóveis rurais sobre camadas ambientais estaduais está indisponível "
+        "no momento, pois essa base ainda não foi carregada no sistema."
     ),
 }
 
 _MENSAGEM_SEM_DOCUMENTO = (
     "Não encontrei conteúdo relevante na base de conhecimento documental do sistema "
     "para responder a essa pergunta."
+)
+
+_NOTA_AREAS_MULTIMUNICIPIO = (
+    "_Uma mesma área protegida pode se estender por mais de um município. Por isso o "
+    "ranking considera a extensão (em hectares) que efetivamente fica dentro de cada "
+    "município, e não o município onde a área está cadastrada. A Terra Indígena Tenondé "
+    "Porã, por exemplo, ocupa São Paulo, São Bernardo do Campo, São Vicente e Mongaguá. "
+    "No mapa, cada área aparece recortada por município — assim dá para ver como ela se "
+    "distribui entre eles e qual parcela cabe a cada um._"
 )
 
 _PROPERTY_TYPE_BY_TOOL: Dict[str, str] = {
@@ -180,17 +209,6 @@ def _should_append_description(effective_tool: str, total_features: int) -> bool
 # Estratégias especializadas para ferramentas específicas
 # ---------------------------------------------------------------------------
 
-def _handle_disabled_settlements(
-    entities: Entidades,
-    features: Optional[List[Dict[str, Any]]],
-    total: int,
-    sources: List[Dict[str, Any]],
-    scope: str,
-    document_context: str,
-) -> str:
-    return "A consulta de assentamentos rurais está desativada no momento, pois a fonte não está disponível."
-
-
 def _handle_wildfire_focus_property(
     entities: Entidades,
     features: Optional[List[Dict[str, Any]]],
@@ -242,10 +260,15 @@ def _handle_maiores_quantidades(
 
     mun_entries: list[tuple[str, str]] = []
     seen: set[str] = set()
+    tem_metrica_area = False
     for f in features:
         props = f.get("properties", {})
-        nome = str(props.get("nome") or "").strip()
         analise = str(props.get("analise") or "").strip()
+        if not analise:
+            continue
+        nome = str(props.get("nome") or "").strip()
+        if props.get("metrica") == "area":
+            tem_metrica_area = True
         if nome and nome not in seen:
             mun_entries.append((nome, analise))
             seen.add(nome)
@@ -257,6 +280,9 @@ def _handle_maiores_quantidades(
     linhas = [f"**Municípios em destaque**{scope} (via {main_source}):"]
     for nome, analise in mun_entries:
         linhas.append(f"- **{nome}**: {analise}")
+    if tem_metrica_area:
+        linhas.append("")
+        linhas.append(_NOTA_AREAS_MULTIMUNICIPIO)
     return "\n".join(linhas)
 
 
@@ -376,7 +402,6 @@ def _list_affected_properties(features: Optional[List[Dict[str, Any]]], tool_nam
 # Registro de estratégias especializadas: tool_name → função
 # ---------------------------------------------------------------------------
 _STRATEGY_MAP: Dict[str, Callable] = {
-    "buscar_assentamentos":           _handle_disabled_settlements,
     "buscar_focos_queimada_imovel":   _handle_wildfire_focus_property,
     "buscar_passivos_em_imovel":      _handle_property_liabilities,
     "buscar_maiores_quantidades":     _handle_maiores_quantidades,
@@ -404,6 +429,9 @@ def _render_bloco(bloco: Dict[str, Any]) -> str:
 
     if effective_tool == "fora_escopo":
         return _TEMPLATES["fora_escopo"]
+
+    if effective_tool in _MENSAGENS_INDISPONIVEIS:
+        return _MENSAGENS_INDISPONIVEIS[effective_tool]
 
     if effective_tool == "buscar_documentos_rag":
         if not document_context:
