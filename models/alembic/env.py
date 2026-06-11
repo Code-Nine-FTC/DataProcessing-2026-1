@@ -1,4 +1,15 @@
+import sys
 from logging.config import fileConfig
+
+# O console do Windows usa cp1252 e quebra (UnicodeEncodeError) ao imprimir os
+# emojis usados nos logs deste env.py e dos módulos importados abaixo (que fazem
+# print já no carregamento). Força UTF-8 na saída antes de qualquer import.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.ext.asyncio import AsyncConnection

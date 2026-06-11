@@ -9,7 +9,6 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db_model import Municipio, RegiaoAdministrativa
 from nlp_processor.domain.contracts import (
     FiltrosConsulta,
     LocalConsulta,
@@ -153,6 +152,8 @@ async def _resolver_local(
 
 
 async def _resolver_municipio(session: AsyncSession, chave: str) -> Optional[LocalConsulta]:
+    from models.db_model import Municipio  # import tardio: ORM só no acesso ao banco
+
     stmt = select(Municipio.id, Municipio.nome).where(
         Municipio.nome_normalizado == chave
     ).limit(1)
@@ -163,6 +164,8 @@ async def _resolver_municipio(session: AsyncSession, chave: str) -> Optional[Loc
 
 
 async def _resolver_regiao(session: AsyncSession, chave: str) -> Optional[LocalConsulta]:
+    from models.db_model import RegiaoAdministrativa  # import tardio: ORM só no acesso ao banco
+
     stmt = select(RegiaoAdministrativa.id, RegiaoAdministrativa.nome).where(
         RegiaoAdministrativa.nome_normalizado == chave
     ).limit(1)

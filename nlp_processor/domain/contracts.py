@@ -87,5 +87,7 @@ class RespostaNLP(BaseModel):
     fontes: list[Fonte]
     status: str
     confianca: float
+    confianca_faixa: str = "baixa"
+    intencao: str = ""
     sql_executado: Optional[str] = None
     tempo_ms: int = 0

@@ -9,9 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nlp_processor.domain.contracts import RespostaNLP
 from nlp_processor.engine import query_engine
-from nlp_processor.infrastructure import gazetteer
+from nlp_processor.infrastructure import gazetteer, llm_client
 from nlp_processor.pipeline import (
     entity_extractor,
+    llm_composer,
     llm_fallback,
     responder,
     semantic_router,
@@ -19,8 +20,6 @@ from nlp_processor.pipeline import (
 )
 
 logger = logging.getLogger(__name__)
-
-_CONFIDENCE_THRESHOLD = 0.42
 
 
 def _ms(inicio: float) -> int:
@@ -52,7 +51,7 @@ async def run(
         resultado = await llm_fallback.responder(pergunta, historico, motivo="fora_escopo")
         return resultado.model_copy(update={"tempo_ms": _ms(inicio)})
 
-    if plano.confianca < _CONFIDENCE_THRESHOLD or not plano.specs:
+    if plano.confianca < semantic_router.CONFIDENCE_THRESHOLD or not plano.specs:
         resultado = await llm_fallback.responder(pergunta, historico, motivo="baixa_confianca")
         return resultado.model_copy(update={"tempo_ms": _ms(inicio)})
 
@@ -60,6 +59,11 @@ async def run(
 
     resultados = await query_engine.executar(session, specs)
 
-    resposta = responder.compor(resultados)
+    resposta = responder.compor(resultados, plano.confianca)
+
+    if llm_client.disponivel() and llm_composer.deve_compor(resultados):
+        texto_llm = await llm_composer.compor(pergunta, resposta.texto)
+        if texto_llm:
+            resposta = resposta.model_copy(update={"texto": texto_llm})
 
     return resposta.model_copy(update={"tempo_ms": _ms(inicio)})

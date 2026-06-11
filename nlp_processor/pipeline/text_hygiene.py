@@ -37,7 +37,10 @@ _RE_ESPACOS = re.compile(r"\s+")
 _RE_CONTROLE = re.compile(r"[\x00-\x1f\x7f]")
 
 _SIGLAS = {
-    "sp": "são paulo",
+    # "sp" (sigla da UF) significa o estado inteiro, não a capital. Por isso NÃO
+    # é expandido para "são paulo" — deixá-lo como está faz a consulta abranger
+    # todo o estado (o gazetteer não casa "sp" com nenhum município). A capital
+    # só é selecionada quando o usuário escreve "são paulo" por extenso.
     "ti": "terra indígena",
     "tis": "terras indígenas",
     "uc": "unidade de conservação",

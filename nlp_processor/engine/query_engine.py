@@ -102,9 +102,8 @@ def _aplicar_contexto_espacial(stmt: Any, spec: QuerySpec, model: Any) -> Any:
     area_model = _CONTEXT_MODEL.get(ctx.dentro_de)
     if area_model is None:
         return stmt
-    return stmt.where(
-        func.ST_Intersects(model.geom, select(area_model.geom).scalar_subquery())
-    )
+    sub = select(area_model.id).where(func.ST_Intersects(model.geom, area_model.geom))
+    return stmt.where(sub.exists())
 
 
 def _aplicar_sobreposicao_imovel(stmt: Any, spec: QuerySpec) -> Any:

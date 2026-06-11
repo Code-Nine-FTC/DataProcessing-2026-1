@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import platform
 import sys
 import traceback
 from typing import Any, Dict, List, Optional
@@ -36,6 +37,13 @@ celery_app.conf.update(
     task_track_started=True,  # Permite saber se a tarefa já começou a rodar
     task_acks_late=True,      # Garante que a tarefa só saia da fila após terminar (evita perda se o worker cair)
 )
+
+# O pool padrão (prefork/billiard) usa fork() e semáforos compartilhados entre
+# processos, que não existem no Windows -> PermissionError [WinError 5].
+# Em produção (Linux) mantém-se o prefork; no Windows usa-se 'solo'.
+IS_WINDOWS = platform.system() == "Windows"
+if IS_WINDOWS:
+    celery_app.conf.worker_pool = "solo"
 
 
 @celery_app.task(bind=True, name="celery_app.run_etl_update_task", max_retries=3, default_retry_delay=60)
@@ -90,5 +98,11 @@ def run_etl_update_task(self, pipelines_to_run: Optional[List[str]] = None) -> D
 
 
 if __name__ == "__main__":
-    worker_args = ["worker", "--loglevel=info"] if len(sys.argv) == 1 else sys.argv
+    if len(sys.argv) == 1:
+        worker_args = ["worker", "--loglevel=info"]
+        # Garante o pool compatível com Windows ao rodar `python celery_app.py`
+        if IS_WINDOWS:
+            worker_args.append("--pool=solo")
+    else:
+        worker_args = sys.argv
     celery_app.worker_main(argv=worker_args)

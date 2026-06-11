@@ -11,7 +11,11 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 _MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-_TIMEOUT = 30.0
+_TIMEOUT = httpx.Timeout(30.0, connect=2.0)
+
+
+def disponivel() -> bool:
+    return os.getenv("LLM_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 
 
 async def completar(
@@ -19,6 +23,9 @@ async def completar(
     max_tokens: int = 512,
     temperatura: float = 0.3,
 ) -> Optional[str]:
+    if not disponivel():
+        return None
+
     payload = {
         "model": _MODEL,
         "messages": mensagens,

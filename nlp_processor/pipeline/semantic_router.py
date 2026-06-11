@@ -14,13 +14,15 @@ from nlp_processor.domain.contracts import (
     QuerySpec,
     TextoProcessado,
 )
+from nlp_processor.domain import confidence
 from nlp_processor.domain.enums import Dominio, Operacao
 from nlp_processor.domain.vocabulary import GRUPOS, Categoria, GrupoSemantico
 from nlp_processor.infrastructure.embedder import embed_batch, embed_texto
 
 logger = logging.getLogger(__name__)
 
-CONFIDENCE_THRESHOLD = 0.42
+CONFIDENCE_THRESHOLD = confidence.LIMIAR_FALLBACK
+_MARGEM_DOMINANTE = 0.08
 
 _RE_CONTEXTO_ESPACIAL = re.compile(
     r"\b(dentro\s+de|que\s+intersect[a-z]*|sobreposto[s]?\s+[aà]|"
@@ -163,6 +165,7 @@ def _boost_specs(
     tokens: list[str],
     vetor: np.ndarray,
     specs: list[QuerySpec],
+    scores_por_dominio: dict[Dominio, float],
     melhor_score_atual: float,
 ) -> float:
     dominios_presentes = {s.dominio for s in specs}
@@ -189,8 +192,33 @@ def _boost_specs(
         if spec_kw is not None:
             specs.append(spec_kw)
             dominios_presentes.add(dominio_kw)
+            scores_por_dominio[spec_kw.dominio] = score_kw
             melhor = max(melhor, score_kw)
     return melhor
+
+
+def _agregar_confianca(
+    specs: list[QuerySpec],
+    scores_por_dominio: dict[Dominio, float],
+    fallback: float,
+) -> float:
+    pontos = [scores_por_dominio[s.dominio] for s in specs if s.dominio in scores_por_dominio]
+    if not pontos:
+        return fallback
+    return sum(pontos) / len(pontos)
+
+
+def _aplicar_margem_dominante(
+    specs: list[QuerySpec],
+    scores_por_dominio: dict[Dominio, float],
+) -> list[QuerySpec]:
+    if not scores_por_dominio:
+        return specs
+    top = max(scores_por_dominio.values())
+    return [
+        s for s in specs
+        if scores_por_dominio.get(s.dominio, top) >= top - _MARGEM_DOMINANTE
+    ]
 
 
 _DOMINIOS_SOBREPONIVEIS = (
@@ -309,7 +337,8 @@ async def entender(
             specs.append(spec)
             scores_por_dominio[spec.dominio] = score
 
-    melhor_score_geral = _boost_specs(texto.tokens, vetor, specs, melhor_score_geral)
+    specs = _aplicar_margem_dominante(specs, scores_por_dominio)
+    melhor_score_geral = _boost_specs(texto.tokens, vetor, specs, scores_por_dominio, melhor_score_geral)
 
     tokens_set = set(texto.tokens)
     specs = _filtrar_rankings(specs, scores_por_dominio, tokens_set)
@@ -317,8 +346,7 @@ async def entender(
 
     if _RE_CAR.search(texto.normalizado):
         specs = _specs_para_car(texto.normalizado)
-        melhor_score_geral = max(melhor_score_geral, 1.0)
-        return PlanoConsulta(specs=specs, confianca=melhor_score_geral, fora_escopo=False)
+        return PlanoConsulta(specs=specs, confianca=1.0, fora_escopo=False)
 
     if contexto_espacial_ativado and contexto_espacial_ativado.dentro_de:
         dominio_filtro = contexto_espacial_ativado.dentro_de
@@ -328,4 +356,5 @@ async def entender(
     if not specs or melhor_score_geral < CONFIDENCE_THRESHOLD:
         return PlanoConsulta(specs=[], confianca=melhor_score_geral, fora_escopo=False)
 
-    return PlanoConsulta(specs=specs, confianca=melhor_score_geral, fora_escopo=False)
+    confianca = _agregar_confianca(specs, scores_por_dominio, melhor_score_geral)
+    return PlanoConsulta(specs=specs, confianca=confianca, fora_escopo=False)

@@ -191,10 +191,7 @@ class NLPProcessor:
 
         turno = await _next_turno(session, chat.id)
 
-        specs = getattr(nlp_result, "specs", None)
-        intencao_nome = "+".join(
-            f"{s.dominio.value}/{s.operacao.value}" for s in (specs or [])
-        ) or status
+        intencao_nome = nlp_result.intencao or status
         intencao_obj = await _get_or_create_intencao(session, intencao_nome)
 
         consulta = ConsultaUsuario(
@@ -243,4 +240,6 @@ class NLPProcessor:
             "mapa": mapa,
             "bbox": bbox,
             "status": status,
+            "confianca": nlp_result.confianca,
+            "confianca_faixa": nlp_result.confianca_faixa,
         }

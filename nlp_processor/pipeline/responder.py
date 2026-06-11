@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from nlp_processor.domain import confidence
 from nlp_processor.domain.contracts import Fonte, RespostaNLP, ToolResult
 from nlp_processor.domain.enums import Dominio, Operacao
 
@@ -154,9 +155,17 @@ def _coletar_sql(resultados: list[ToolResult]) -> str | None:
     return "\n\n---\n\n".join(sqls) if sqls else None
 
 
+def _intencao(resultados: list[ToolResult]) -> str:
+    return "+".join(f"{r.dominio.value}/{r.operacao.value}" for r in resultados)
+
+
 def compor(
     resultados: list[ToolResult],
+    confianca_bruta: float = 0.0,
 ) -> RespostaNLP:
+    confianca = confidence.calibrar(confianca_bruta)
+    faixa = confidence.faixa(confianca).value
+
     if not resultados:
         return RespostaNLP(
             texto="Não foram encontrados resultados para sua consulta.",
@@ -164,7 +173,8 @@ def compor(
             bbox=None,
             fontes=[],
             status="sem_resultado",
-            confianca=0.0,
+            confianca=confianca,
+            confianca_faixa=faixa,
         )
 
     linhas = [_renderizar(r) for r in resultados]
@@ -172,7 +182,6 @@ def compor(
 
     total_geral = sum(r.total for r in resultados)
     status = "sucesso" if total_geral > 0 else "sem_resultado"
-    confianca = max((r.spec.filtros.limite / 100.0 for r in resultados), default=0.5)
 
     return RespostaNLP(
         texto=texto,
@@ -180,6 +189,8 @@ def compor(
         bbox=_coletar_bbox(resultados),
         fontes=_coletar_fontes(resultados),
         status=status,
-        confianca=min(confianca, 1.0),
+        confianca=confianca,
+        confianca_faixa=faixa,
+        intencao=_intencao(resultados),
         sql_executado=_coletar_sql(resultados),
     )

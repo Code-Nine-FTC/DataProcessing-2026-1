@@ -3,6 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from nlp_processor.domain.confidence import (
+    LIMIAR_AUXILIAR,
+    LIMIAR_DOMINIO_AREA,
+    LIMIAR_DOMINIO_CONCRETO,
+    LIMIAR_ESPECIALIZADO,
+)
+
 
 @dataclass(frozen=True)
 class Categoria:
@@ -18,7 +25,7 @@ class GrupoSemantico:
     limiar: float
 
 
-QUEIMADA = GrupoSemantico("queimada", limiar=0.70, categorias=(
+QUEIMADA = GrupoSemantico("queimada", limiar=LIMIAR_DOMINIO_CONCRETO, categorias=(
     Categoria("listar", {"dominio": "queimada", "operacao": "listar"}, (
         "focos de queimada",
         "incêndio florestal",
@@ -34,7 +41,7 @@ QUEIMADA = GrupoSemantico("queimada", limiar=0.70, categorias=(
     )),
 ))
 
-DESMATAMENTO = GrupoSemantico("desmatamento", limiar=0.70, categorias=(
+DESMATAMENTO = GrupoSemantico("desmatamento", limiar=LIMIAR_DOMINIO_CONCRETO, categorias=(
     Categoria("listar", {"dominio": "desmatamento", "operacao": "listar"}, (
         "alertas de desmatamento detectados",
         "corte raso de floresta por desmatamento",
@@ -49,7 +56,7 @@ DESMATAMENTO = GrupoSemantico("desmatamento", limiar=0.70, categorias=(
     )),
 ))
 
-TERRA_INDIGENA = GrupoSemantico("terra_indigena", limiar=0.78, categorias=(
+TERRA_INDIGENA = GrupoSemantico("terra_indigena", limiar=LIMIAR_DOMINIO_AREA, categorias=(
     Categoria("listar", {"dominio": "terra_indigena", "operacao": "listar"}, (
         "terras indígenas",
         "área de demarcação indígena",
@@ -63,7 +70,7 @@ TERRA_INDIGENA = GrupoSemantico("terra_indigena", limiar=0.78, categorias=(
     )),
 ))
 
-UNIDADE_CONSERVACAO = GrupoSemantico("unidade_conservacao", limiar=0.78, categorias=(
+UNIDADE_CONSERVACAO = GrupoSemantico("unidade_conservacao", limiar=LIMIAR_DOMINIO_AREA, categorias=(
     Categoria("listar", {"dominio": "unidade_conservacao", "operacao": "listar"}, (
         "unidades de conservação",
         "parque nacional estadual",
@@ -77,7 +84,7 @@ UNIDADE_CONSERVACAO = GrupoSemantico("unidade_conservacao", limiar=0.78, categor
     )),
 ))
 
-QUILOMBOLA = GrupoSemantico("quilombola", limiar=0.78, categorias=(
+QUILOMBOLA = GrupoSemantico("quilombola", limiar=LIMIAR_DOMINIO_AREA, categorias=(
     Categoria("listar", {"dominio": "quilombola", "operacao": "listar"}, (
         "territórios quilombolas",
         "comunidades quilombolas",
@@ -90,7 +97,7 @@ QUILOMBOLA = GrupoSemantico("quilombola", limiar=0.78, categorias=(
     )),
 ))
 
-ASSENTAMENTO = GrupoSemantico("assentamento", limiar=0.84, categorias=(
+ASSENTAMENTO = GrupoSemantico("assentamento", limiar=LIMIAR_ESPECIALIZADO, categorias=(
     Categoria("listar", {"dominio": "assentamento", "operacao": "listar"}, (
         "assentamentos rurais",
         "projetos de assentamento do INCRA",
@@ -99,7 +106,7 @@ ASSENTAMENTO = GrupoSemantico("assentamento", limiar=0.84, categorias=(
     )),
 ))
 
-IMOVEL_RURAL = GrupoSemantico("imovel_rural", limiar=0.80, categorias=(
+IMOVEL_RURAL = GrupoSemantico("imovel_rural", limiar=LIMIAR_DOMINIO_AREA, categorias=(
     Categoria("listar", {"dominio": "imovel_rural", "operacao": "listar"}, (
         "imóveis rurais",
         "fazenda cadastrada no CAR",
@@ -115,7 +122,7 @@ IMOVEL_RURAL = GrupoSemantico("imovel_rural", limiar=0.80, categorias=(
     )),
 ))
 
-DOCUMENTO = GrupoSemantico("documento", limiar=0.85, categorias=(
+DOCUMENTO = GrupoSemantico("documento", limiar=LIMIAR_ESPECIALIZADO, categorias=(
     Categoria("buscar", {"dominio": "documento", "operacao": "listar"}, (
         "legislação ambiental",
         "como funciona o licenciamento",
@@ -125,7 +132,7 @@ DOCUMENTO = GrupoSemantico("documento", limiar=0.85, categorias=(
     )),
 ))
 
-CONTEXTO_ESPACIAL = GrupoSemantico("contexto_espacial", limiar=0.70, categorias=(
+CONTEXTO_ESPACIAL = GrupoSemantico("contexto_espacial", limiar=LIMIAR_AUXILIAR, categorias=(
     Categoria("terra_indigena", {"contexto_espacial": {"dentro_de": "terra_indigena"}}, (
         "dentro de terras indígenas",
         "que intersectam territórios indígenas",
@@ -148,7 +155,7 @@ CONTEXTO_ESPACIAL = GrupoSemantico("contexto_espacial", limiar=0.70, categorias=
     )),
 ))
 
-OPERACAO_ESPECIAL = GrupoSemantico("operacao_especial", limiar=0.82, categorias=(
+OPERACAO_ESPECIAL = GrupoSemantico("operacao_especial", limiar=LIMIAR_AUXILIAR, categorias=(
     Categoria("sobrepor", {"operacao": "sobrepor"}, (
         "sobreposição entre áreas",
         "intersecção de camadas territoriais",
