@@ -1,0 +1,75 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "data_ocorrencia": "2026-01-15",
+        "fonte_sensor": "MODIS",
+        "intensidade": 0.85,
+        "risco_fogo": 0.90,
+        "municipio_nome": "São José dos Campos"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-45.92, -23.20]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "data_ocorrencia": "2026-01-20",
+        "fonte_sensor": "MODIS",
+        "intensidade": 0.75,
+        "risco_fogo": 0.80,
+        "municipio_nome": "São José dos Campos"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-45.93, -23.19]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "data_ocorrencia": "2026-02-10",
+        "fonte_sensor": "VIIRS",
+        "intensidade": 0.60,
+        "risco_fogo": 0.65,
+        "municipio_nome": "Jacareí"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-46.03, -23.32]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "data_ocorrencia": "2026-02-15",
+        "fonte_sensor": "VIIRS",
+        "intensidade": 0.55,
+        "risco_fogo": 0.60,
+        "municipio_nome": "Jacareí"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-46.02, -23.33]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "data_ocorrencia": "2026-03-05",
+        "fonte_sensor": "MODIS",
+        "intensidade": 0.90,
+        "risco_fogo": 0.95,
+        "municipio_nome": "Caçapava"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-45.73, -23.12]
+      }
+    }
+  ]
+}

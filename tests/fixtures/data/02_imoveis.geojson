@@ -1,0 +1,62 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "codigo_car": "SP-350000-000000000001",
+        "nome_imovel": "Fazenda Teste Alpha",
+        "area_ha": 120.5,
+        "municipio_nome": "São José dos Campos"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [[[
+          [-45.95, -23.22],
+          [-45.90, -23.22],
+          [-45.90, -23.18],
+          [-45.95, -23.18],
+          [-45.95, -23.22]
+        ]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "codigo_car": "SP-350000-000000000002",
+        "nome_imovel": "Sitio Teste Beta",
+        "area_ha": 45.0,
+        "municipio_nome": "Jacareí"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [[[
+          [-46.05, -23.35],
+          [-46.00, -23.35],
+          [-46.00, -23.30],
+          [-46.05, -23.30],
+          [-46.05, -23.35]
+        ]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "codigo_car": "SP-350000-000000000003",
+        "nome_imovel": "Fazenda Teste Gamma",
+        "area_ha": 200.0,
+        "municipio_nome": "Caçapava"
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [[[
+          [-45.75, -23.15],
+          [-45.70, -23.15],
+          [-45.70, -23.10],
+          [-45.75, -23.10],
+          [-45.75, -23.15]
+        ]]]
+      }
+    }
+  ]
+}
