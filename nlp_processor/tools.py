@@ -2426,6 +2426,161 @@ async def buscar_imoveis_com_camadas_estaduais(
 
 
 # ---------------------------------------------------------------------------
+# Ferramenta: ranking de municípios por tema (mais/menos)
+# ---------------------------------------------------------------------------
+
+# tema -> (Model, rótulo no plural, coluna de data ou None)
+_RANKING_TEMAS: dict[str, tuple[Any, str, Any]] = {
+    "queimadas": (QueimadaEvento, "focos de queimada", QueimadaEvento.data_ocorrencia),
+    "desmatamentos": (DesmatamentoAlerta, "alertas de desmatamento", DesmatamentoAlerta.data_ocorrencia),
+    "unidades_conservacao": (UnidadeConservacao, "unidades de conservação", None),
+    "terras_indigenas": (TerraIndigena, "terras indígenas", None),
+    "quilombolas": (TerritorioQuilombola, "territórios quilombolas", None),
+    "imoveis_rurais": (ImovelRural, "imóveis rurais", None),
+    "assentamentos": (AssentamentoRural, "assentamentos rurais", None),
+    "camadas_estaduais": (CamadaEstadualAmbiental, "camadas ambientais estaduais", None),
+}
+
+
+async def ranking_municipios(
+    session: AsyncSession,
+    tema: str = "queimadas",
+    ordem: str = "desc",
+    limite: int = 10,
+    regiao_administrativa: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+) -> dict:
+    """Agrega registros de um tema por município e devolve o ranking (mais/menos).
+
+    Responde perguntas como "qual cidade teve mais/menos queimadas?" ou
+    "top 5 municípios com mais desmatamento", para todos os temas suportados.
+    """
+    info = _RANKING_TEMAS.get(tema)
+    if info is None:
+        tema = "queimadas"
+        info = _RANKING_TEMAS[tema]
+    model, rotulo, data_col = info
+
+    limite = max(1, min(int(limite), 50))
+    ordem = "asc" if ordem == "asc" else "desc"
+
+    total_col = func.count(model.id).label("total")
+    stmt = (
+        select(
+            Municipio.id,
+            Municipio.nome.label("municipio_nome"),
+            total_col,
+            _geom_as_geojson(Municipio.geom, COMPLEX_POLYGON_TOLERANCE).label("geom_json"),
+        )
+        .join(Municipio, model.municipio_id == Municipio.id)
+        .join(Estado, Municipio.estado_id == Estado.id)
+        .where(Estado.sigla == "SP")
+        .group_by(Municipio.id, Municipio.nome, Municipio.geom)
+    )
+
+    sql_partes: list[str] = []
+    if regiao_administrativa:
+        ra_id, ra_sql = await _get_regiao_administrativa_id(session, regiao_administrativa)
+        sql_partes.append(ra_sql)
+        if ra_id is None:
+            return {
+                "total": 0,
+                "features": [],
+                "bbox": None,
+                "fontes": [],
+                "descricao": f"Não foram encontrados dados de {rotulo} para o ranking"
+                + _escopo_textual(None, regiao_administrativa)
+                + ".",
+                "sql_executado": _join_sql(*sql_partes),
+            }
+        stmt = stmt.where(Municipio.regiao_administrativa_id == ra_id)
+
+    if data_col is not None and data_inicio:
+        stmt = stmt.where(data_col >= data_inicio)
+    if data_col is not None and data_fim:
+        stmt = stmt.where(data_col <= data_fim)
+
+    ordenacao = total_col.asc() if ordem == "asc" else total_col.desc()
+    stmt = stmt.order_by(ordenacao, Municipio.nome.asc()).limit(limite)
+    sql_partes.append(_stmt_sql(stmt))
+
+    rows = (await session.execute(stmt)).all()
+
+    # Fonte do tema (apenas para citação; uma é suficiente).
+    fontes: dict[str, dict] = {}
+    try:
+        fonte_stmt = (
+            select(FonteDado.nome, FonteDado.orgao_responsavel, FonteDado.url_origem)
+            .join(Dataset, Dataset.fonte_dado_id == FonteDado.id)
+            .join(model, model.dataset_id == Dataset.id)
+            .limit(1)
+        )
+        fonte_row = (await session.execute(fonte_stmt)).first()
+        if fonte_row and fonte_row.nome:
+            fontes[fonte_row.nome] = {
+                "nome": fonte_row.nome,
+                "orgao": fonte_row.orgao_responsavel,
+                "url": fonte_row.url_origem,
+            }
+    except Exception:
+        logger.warning("Não foi possível recuperar a fonte do tema '%s' no ranking.", tema)
+
+    features: list[dict] = []
+    linhas_ranking: list[str] = []
+    for posicao, row in enumerate(rows, start=1):
+        nome = row.municipio_nome or "(sem nome)"
+        linhas_ranking.append(f"{posicao}. **{nome}** — {_fmt_int(row.total)}")
+        if row.geom_json:
+            features.append({
+                "type": "Feature",
+                "geometry": json.loads(row.geom_json),
+                "properties": {
+                    "tipo": "ranking_municipio",
+                    "tema": tema,
+                    "municipio": nome,
+                    "posicao": posicao,
+                    "total": int(row.total),
+                },
+            })
+
+    escopo = _escopo_textual(None, regiao_administrativa)
+    periodo = ""
+    if data_inicio and data_fim:
+        periodo = f" (entre {data_inicio} e {data_fim})"
+    elif data_inicio:
+        periodo = f" (a partir de {data_inicio})"
+
+    sentido = "menos" if ordem == "asc" else "mais"
+    if not rows:
+        descricao = f"Não foram encontrados dados de {rotulo} para gerar o ranking{escopo}{periodo}."
+    elif len(rows) == 1:
+        # Pergunta singular ("qual cidade...") -> uma única resposta, sem lista.
+        topo = rows[0]
+        descricao = (
+            f"O município com **{sentido}** {rotulo}{escopo}{periodo} é "
+            f"**{topo.municipio_nome}**, com {_fmt_int(topo.total)}."
+        )
+    else:
+        topo = rows[0]
+        descricao = (
+            f"Município com **{sentido}** {rotulo}{escopo}{periodo}: "
+            f"**{topo.municipio_nome}** ({_fmt_int(topo.total)}).\n\n"
+            f"**Ranking de municípios com {sentido} {rotulo}:**\n"
+            + "\n".join(linhas_ranking)
+        )
+
+    return {
+        "total": len(features),
+        "features": features,
+        "bbox": _build_bbox(features),
+        "fontes": list(fontes.values()),
+        "descricao": descricao,
+        "sql_executado": _join_sql(*sql_partes),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registro: nome da ferramenta → função Python
 # ---------------------------------------------------------------------------
 
@@ -2445,4 +2600,5 @@ TOOL_FUNCTIONS = {
     "buscar_imoveis_com_camadas_estaduais": buscar_imoveis_com_camadas_estaduais,
     "buscar_passivos_em_imovel": buscar_passivos_em_imovel,
     "buscar_focos_queimada_imovel": buscar_focos_queimada_imovel,
+    "ranking_municipios": ranking_municipios,
 }

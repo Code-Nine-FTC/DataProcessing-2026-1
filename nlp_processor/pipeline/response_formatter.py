@@ -364,6 +364,16 @@ def formatar_resposta(
             texto = f"{texto}\n\n{fontes_str}"
         return _aplicar_feedback_contexto(texto, feedback_contexto)
 
+    # Ranking de municípios: a tool já monta o texto com o líder do ranking e
+    # a lista ordenada. Aqui só anexamos as fontes consultadas.
+    if intencao == "ranking_municipios":
+        texto = descricao_consulta or (
+            f"Não foram encontrados dados suficientes para gerar o ranking{escopo}."
+        )
+        if fontes_str:
+            texto = f"{texto}\n\n{fontes_str}"
+        return _aplicar_feedback_contexto(texto, feedback_contexto)
+
     # Sem dados
     if intencao != "fora_escopo" and intencao != "buscar_documentos" and total_features == 0:
         if descricao_consulta:

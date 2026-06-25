@@ -118,6 +118,11 @@ class Entidades:
     grupo_snuc: Optional[str] = None       # 'PI' ou 'US'
     palavras_chave: list[str] = field(default_factory=list)
     codigo_car: Optional[str] = None
+    # --- Ranking / superlativo (ex.: "qual cidade teve mais queimadas?") ---
+    ranking: bool = False                  # pergunta pede ranking de municípios
+    ranking_ordem: str = "desc"            # 'desc' = mais/maior, 'asc' = menos/menor
+    ranking_limite: int = 10               # quantos municípios listar
+    tema_ranking: Optional[str] = None     # preenchido pelo agente (tema do ranking)
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +154,15 @@ def _extrair_datas(texto_norm: str) -> tuple[Optional[str], Optional[str]]:
             iso = f"{ano}-{str(num_mes).zfill(2)}-01"
             if iso not in encontradas:
                 encontradas.append(iso)
+
+    # Intervalo entre dois anos "soltos" (ex.: "entre 2019 e 2021",
+    # "de 2020 a 2023", "2018 ate 2022"). Só vale quando ainda não há
+    # datas completas e há pelo menos dois anos distintos no texto.
+    if not encontradas:
+        anos = sorted({int(a) for a in _YEAR_PATTERN.findall(texto_norm)})
+        if len(anos) >= 2:
+            encontradas.append(f"{anos[0]}-01-01")
+            encontradas.append(f"{anos[-1]}-12-31")
 
     encontradas = sorted(set(encontradas))
     inicio = encontradas[0] if encontradas else None
@@ -313,6 +327,90 @@ def _extrair_grupo_snuc(texto_norm: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Ranking / superlativo de municípios
+# ---------------------------------------------------------------------------
+# Detecta perguntas do tipo:
+#   "qual cidade teve mais/menos queimadas?"
+#   "qual o município com maior/menor número de focos?"
+#   "top 5 cidades com mais desmatamento"
+#   "ranking de municípios com queimadas"
+_MUNI_PALAVRAS = ("cidade", "cidades", "municipio", "municipios")
+_TERMOS_MENOS = ("menos", "menor", "menores", "minimo", "minima", "poucas", "poucos")
+_TERMOS_MAIS = ("mais", "maior", "maiores", "maximo", "maxima", "top", "ranking", "rank")
+
+_RANKING_LIMITE_MAX = 50
+
+# Números por extenso comuns em pedidos de ranking ("as dez cidades...").
+_NUMEROS_EXTENSO = {
+    "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4,
+    "cinco": 5, "seis": 6, "sete": 7, "oito": 8, "nove": 9, "dez": 10,
+    "onze": 11, "doze": 12, "quinze": 15, "vinte": 20, "trinta": 30,
+    "quarenta": 40, "cinquenta": 50,
+}
+
+
+def _extrair_limite_ranking(texto_norm: str) -> Optional[int]:
+    """Extrai o N de pedidos como 'top 15', 'as 5 cidades', '20 municipios',
+    'os 10 primeiros' ou por extenso ('as dez cidades'). Anos (4 dígitos) são
+    naturalmente ignorados por usarmos \\d{1,3}.
+    """
+    padroes = (
+        r"\btop\s+(\d{1,3})\b",
+        r"\b(?:as|os|primeir[oa]s|melhores|maiores|menores)\s+(\d{1,3})\b",
+        r"\b(\d{1,3})\s+(?:primeir|maior|menor|melhor|cidade|municipio)",
+    )
+    for padrao in padroes:
+        match = re.search(padrao, texto_norm)
+        if match:
+            return int(match.group(1))
+
+    for frase, valor in sorted(_NUMEROS_EXTENSO.items(), key=lambda x: -len(x[0])):
+        if re.search(rf"\b(?:top|as|os|primeir[oa]s)\s+{frase}\b", texto_norm) or re.search(
+            rf"\b{frase}\s+(?:cidade|municipio|primeir|maior|menor|melhor)", texto_norm
+        ):
+            return valor
+    return None
+
+
+def _detectar_ranking(texto_norm: str) -> tuple[bool, str, int]:
+    """Retorna (is_ranking, ordem, limite).
+
+    ordem: 'asc' (menos/menor) ou 'desc' (mais/maior).
+    limite: quantos municípios listar (1-50).
+    """
+    tem_muni = any(re.search(rf"\b{p}\b", texto_norm) for p in _MUNI_PALAVRAS)
+    tem_top = bool(re.search(r"\b(top|ranking|rank)\b", texto_norm))
+    tem_qual_muni = tem_muni and bool(re.search(r"\b(qual|quais|que)\b", texto_norm))
+    tem_compar_muni = tem_muni and bool(
+        re.search(r"\b(mais|menos|maior|menor|maiores|menores)\b", texto_norm)
+    )
+
+    is_ranking = tem_top or tem_qual_muni or tem_compar_muni
+    if not is_ranking:
+        return False, "desc", 10
+
+    ordem = "asc" if any(t in texto_norm for t in _TERMOS_MENOS) else "desc"
+
+    # Limite: número explícito ("top 15", "as 5 cidades", "20 municipios") vence;
+    # pergunta singular ("qual/que cidade...") devolve apenas 1 (uma resposta);
+    # caso contrário, lista padrão de 10.
+    limite_explicito = _extrair_limite_ranking(texto_norm)
+    singular = (
+        bool(re.search(r"\b(qual|que)\b", texto_norm))
+        and not re.search(r"\bquais\b", texto_norm)
+        and not tem_top
+    )
+    if limite_explicito is not None:
+        limite = max(1, min(limite_explicito, _RANKING_LIMITE_MAX))
+    elif singular:
+        limite = 1
+    else:
+        limite = 10
+
+    return True, ordem, limite
+
+
+# ---------------------------------------------------------------------------
 # Extrator principal
 # ---------------------------------------------------------------------------
 
@@ -345,6 +443,8 @@ def extrair_entidades(
 
     regiao_administrativa, texto_sem_ra = _extrair_regiao_administrativa(texto_norm)
 
+    ranking, ranking_ordem, ranking_limite = _detectar_ranking(texto_norm)
+
     return Entidades(
         municipio=_extrair_municipio(texto_sem_ra, municipios_extras),
         regiao_administrativa=regiao_administrativa,
@@ -357,6 +457,9 @@ def extrair_entidades(
         grupo_snuc=_extrair_grupo_snuc(texto_norm),
         palavras_chave=[w for w in texto_norm.split() if len(w) > 4],
         codigo_car=_extrair_codigo_car(texto_norm),
+        ranking=ranking,
+        ranking_ordem=ranking_ordem,
+        ranking_limite=ranking_limite,
     )
 
 

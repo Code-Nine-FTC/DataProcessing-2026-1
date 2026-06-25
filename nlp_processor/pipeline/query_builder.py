@@ -34,11 +34,28 @@ _INTENT_MAP: dict[str, str] = {
     "buscar_imoveis_em_camadas": "buscar_imoveis_com_camadas_estaduais",
     "buscar_passivos_imovel": "buscar_passivos_em_imovel",
     "buscar_focos_queimada_imovel": "buscar_focos_queimada_imovel",
+    "ranking_municipios": "ranking_municipios",
 }
 
 
 def _build_args(intencao: str, ent: Entidades) -> dict[str, Any]:
     """Constrói os kwargs para a função de consulta a partir das entidades."""
+    # Ranking é multi-município: não herda filtro de município específico,
+    # mas pode ser escopado por Região Administrativa e por período.
+    if intencao == "ranking_municipios":
+        args: dict[str, Any] = {
+            "tema": ent.tema_ranking or "queimadas",
+            "ordem": ent.ranking_ordem,
+            "limite": ent.ranking_limite,
+        }
+        if ent.regiao_administrativa and not ent.municipio:
+            args["regiao_administrativa"] = ent.regiao_administrativa
+        if ent.data_inicio:
+            args["data_inicio"] = ent.data_inicio
+        if ent.data_fim:
+            args["data_fim"] = ent.data_fim
+        return args
+
     base: dict[str, Any] = {}
     car_scoped_intents = {
         "buscar_imoveis_rurais",

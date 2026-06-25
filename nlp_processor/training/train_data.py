@@ -462,6 +462,40 @@ TRAIN_DATA: list[tuple[str, str]] = [
     ("imoveis em camadas ambientais na ra de marilia", "buscar_imoveis_em_camadas"),
     ("propriedades rurais em zonas ambientais na regiao de presidente prudente", "buscar_imoveis_em_camadas"),
 
+    # ---- ranking / superlativo de municípios (o tema continua sendo o rótulo;
+    #      o agente detecta o "ranking" e troca para ranking_municipios) ----
+    ("Qual cidade teve mais queimadas?", "buscar_queimadas"),
+    ("Qual cidade teve o maior número de focos de queimada?", "buscar_queimadas"),
+    ("Qual município teve menos queimadas em 2024?", "buscar_queimadas"),
+    ("Top 5 cidades com mais focos de incêndio", "buscar_queimadas"),
+    ("Top cidades com menos queimadas", "buscar_queimadas"),
+    ("Ranking de municípios com mais queimadas", "buscar_queimadas"),
+    ("Quais cidades tiveram mais focos de calor em 2023?", "buscar_queimadas"),
+    ("Cidade com maior número de incêndios florestais", "buscar_queimadas"),
+    ("ranking municipios focos de queimada", "buscar_queimadas"),
+    ("qual o municipio com menos focos de incendio", "buscar_queimadas"),
+
+    ("Qual cidade teve mais desmatamento?", "buscar_desmatamentos"),
+    ("Top 10 municípios com mais alertas de desmatamento", "buscar_desmatamentos"),
+    ("Quais cidades tiveram menos desmatamento em 2024?", "buscar_desmatamentos"),
+    ("Ranking de municípios com mais áreas desmatadas", "buscar_desmatamentos"),
+    ("Cidade com maior número de alertas do DETER", "buscar_desmatamentos"),
+    ("qual municipio com menos supressao de vegetacao", "buscar_desmatamentos"),
+
+    ("Qual cidade tem mais unidades de conservação?", "buscar_unidades_conservacao"),
+    ("Top 5 municípios com mais parques e APAs", "buscar_unidades_conservacao"),
+    ("Ranking de cidades com mais áreas protegidas", "buscar_unidades_conservacao"),
+
+    ("Qual cidade tem mais terras indígenas?", "buscar_terras_indigenas"),
+    ("Top municípios com mais terras indígenas", "buscar_terras_indigenas"),
+
+    ("Qual cidade tem mais territórios quilombolas?", "buscar_quilombolas"),
+    ("Ranking de municípios com mais quilombos", "buscar_quilombolas"),
+
+    ("Qual cidade tem mais imóveis rurais cadastrados?", "buscar_imoveis_rurais"),
+    ("Top 10 municípios com mais propriedades rurais no CAR", "buscar_imoveis_rurais"),
+    ("Ranking de cidades com mais fazendas cadastradas", "buscar_imoveis_rurais"),
+
     # ---- fora_escopo ----
     ("Qual a previsão do tempo para amanhã?", "fora_escopo"),
     ("Me diga o PIB do estado de São Paulo", "fora_escopo"),

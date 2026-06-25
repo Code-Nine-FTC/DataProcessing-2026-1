@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nlp_processor.pipeline.intent_classifier import get_classifier
 from nlp_processor.pipeline.entity_extractor import extrair_entidades
 from nlp_processor.pipeline.embedder import get_embedder
-from nlp_processor.pipeline.preprocessor import normalizar
+from nlp_processor.pipeline.preprocessor import corrigir_ortografia, normalizar
 from nlp_processor.pipeline.query_builder import executar_consulta
 from nlp_processor.pipeline.response_formatter import formatar_resposta
 from models.db_model import Municipio
@@ -40,6 +40,20 @@ CONFIDENCE_THRESHOLD = 0.20
 # o usuário pode ter voltado ao chat dias depois pra perguntar outra coisa,
 # e o feedback antigo não reflete a expectativa atual.
 FEEDBACK_VALIDADE_MINUTOS = 30
+
+# Intenções de tema que suportam ranking de municípios (mais/menos).
+# Mapeia a intenção temática detectada pelo classificador para o `tema`
+# entendido pela ferramenta ranking_municipios.
+_RANKING_TEMA_POR_INTENCAO: dict[str, str] = {
+    "buscar_queimadas": "queimadas",
+    "buscar_desmatamentos": "desmatamentos",
+    "buscar_unidades_conservacao": "unidades_conservacao",
+    "buscar_terras_indigenas": "terras_indigenas",
+    "buscar_quilombolas": "quilombolas",
+    "buscar_imoveis_rurais": "imoveis_rurais",
+    "buscar_assentamentos": "assentamentos",
+    "buscar_camadas_estaduais": "camadas_estaduais",
+}
 
 _ESCOPO_AMBIENTAL_TOKENS = (
     "ambiental", "ambientais", "meio ambiente",
@@ -112,6 +126,17 @@ def _extrair_feedback_contexto(
 
     logger.info("Feedback do turno anterior aplicado: avaliacao=%s.", feedback)
     return {"avaliacao": int(feedback)}
+
+
+def _tokens_protegidos(municipios_norm: list[str]) -> set[str]:
+    """Tokens (4+ letras) dos nomes de municípios, para blindar nomes próprios
+    contra a correção ortográfica (ex.: 'ubatuba', 'piracicaba')."""
+    tokens: set[str] = set()
+    for nome in municipios_norm:
+        for token in nome.split():
+            if len(token) >= 4:
+                tokens.add(token)
+    return tokens
 
 
 async def _carregar_municipios_normalizados(session: AsyncSession) -> list[str]:
@@ -208,22 +233,38 @@ async def run_agent(
             mensagem_erro="Modelo de intenções não treinado.",
         )
 
-    intencao, confianca = classifier.predict(pergunta)
-    logger.info("Intenção detectada: %s (%.2f)", intencao, confianca)
-
+    # Carrega os municípios antes de tudo: além de alimentar o extrator de
+    # entidades, seus nomes protegem nomes próprios da correção ortográfica.
     municipios_extras: list[str] = []
     try:
         municipios_extras = await _carregar_municipios_normalizados(session)
     except Exception:
         logger.warning("Não foi possível carregar municípios do banco; usando gazetteer estático.")
 
-    entidades = extrair_entidades(pergunta, municipios_extras)
-    texto_norm = normalizar(pergunta)
+    # Correção ortográfica da pergunta (typos comuns) antes de classificar e
+    # extrair entidades. Municípios e jargão de domínio são preservados.
+    pergunta_corrigida = corrigir_ortografia(pergunta, _tokens_protegidos(municipios_extras))
+    if pergunta_corrigida != pergunta:
+        logger.info("Pergunta corrigida: %r -> %r", pergunta, pergunta_corrigida)
+
+    intencao, confianca = classifier.predict(pergunta_corrigida)
+    logger.info("Intenção detectada: %s (%.2f)", intencao, confianca)
+
+    entidades = extrair_entidades(pergunta_corrigida, municipios_extras)
+    texto_norm = normalizar(pergunta_corrigida)
     fora_escopo_sem_sinal = _fora_escopo_sem_sinal_geografico(texto_norm, entidades)
 
     # Injeta município do filtro apenas em perguntas abertas. Consultas por CAR
     # devem ser resolvidas pelo identificador do imóvel, sem herdar o filtro visual.
-    if municipio and not entidades.municipio and not entidades.codigo_car and not fora_escopo_sem_sinal:
+    # Rankings são multi-município ("qual cidade teve mais...") e não devem ser
+    # presos a um único município vindo do filtro do mapa.
+    if (
+        municipio
+        and not entidades.municipio
+        and not entidades.codigo_car
+        and not fora_escopo_sem_sinal
+        and not entidades.ranking
+    ):
         logger.info("Injetando município do filtro: %s", municipio)
         entidades.municipio = municipio
 
@@ -415,14 +456,42 @@ async def run_agent(
                 confianca,
                 entidades.municipio,
             )
+        elif entidades.ano or entidades.data_inicio or entidades.data_fim:
+            # Perguntas centradas em ano/data sem tema claro (ex.: "o que houve
+            # em 2024?", "dados de 2019 a 2021") caíam em buscar_documentos e
+            # não retornavam nada útil. Queimadas é a série temporal mais densa,
+            # então é o fallback temporal mais informativo.
+            intencao = "buscar_queimadas"
+            logger.info(
+                "Confiança baixa (%.2f) com sinal temporal (ano=%s, "
+                "inicio=%s, fim=%s) — usando buscar_queimadas.",
+                confianca,
+                entidades.ano,
+                entidades.data_inicio,
+                entidades.data_fim,
+            )
         else:
             intencao = "buscar_documentos"
             logger.info("Confiança baixa — usando buscar_documentos como fallback.")
 
+    # 2.b Ranking de municípios ("qual cidade teve mais/menos <tema>?",
+    # "top 5 cidades com mais desmatamento"). O classificador já resolveu o
+    # tema (queimadas, desmatamentos, etc.); aqui só trocamos a intenção para a
+    # ferramenta de agregação, preservando o tema detectado.
+    if entidades.ranking:
+        tema = _RANKING_TEMA_POR_INTENCAO.get(intencao)
+        if tema:
+            entidades.tema_ranking = tema
+            intencao = "ranking_municipios"
+            logger.info(
+                "Ranking de municípios detectado (tema=%s, ordem=%s, limite=%d).",
+                tema, entidades.ranking_ordem, entidades.ranking_limite,
+            )
+
     # 3. Embedding para RAG
     query_embedding: list[float] = []
     try:
-        query_embedding = embedder.embed(pergunta)
+        query_embedding = embedder.embed(pergunta_corrigida)
     except Exception:
         logger.warning("Não foi possível gerar embedding — RAG desativado.")
 
